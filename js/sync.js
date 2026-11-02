@@ -120,7 +120,7 @@ export async function connect(raw) {
         ? `That key can read ${REPO} but can't write to it (${put.status}). On GitHub's page, set Contents to Read and write.`
         : `GitHub said no to a test write (${put.status}). ${(await refusal(put)).text}` };
     }
-    await store.set('gh-key', key);
+    await store.setSecret('gh-key', key);
     state.connected = true;
     state.problem = null;
     state.noSignal = false;
@@ -166,6 +166,8 @@ export async function disconnect() {
 let eidCount = 0;
 export const newId = () => `${Date.now().toString(36)}-${(eidCount++).toString(36)}-${rand()}`;
 
+// The write into the backup list happens before this returns its promise, so a word queued a moment
+// before the app dies is still kept.
 export async function enqueue(event) {
   await store.queueAdd({ v: 1, eid: newId(), at: new Date().toISOString(), ...event });
   state.waiting = await store.queueCount();
@@ -176,7 +178,8 @@ let lastAttempt = 0;
 // Sends one batch. The answer says how it went, for the Send now button.
 export async function flush({ hide = false } = {}) {
   if (state.sending && Date.now() - state.sendingSince < STUCK_AFTER) return { ok: false, message: 'Already sending.' };
-  const key = await getKey();
+  let key;
+  try { key = await getKey(); } catch { return { ok: false, message: "Couldn't read your key on this phone just now. It tries again by itself." }; }
   if (!key) return { ok: false, message: 'Not connected yet.' };
   const items = await store.queueAll();
   state.waiting = items.length;
@@ -237,7 +240,8 @@ async function deviceId() {
 
 // Brings down whatever changed under packs/, pictures included, so the whole library works offline.
 export async function pull() {
-  const key = await getKey();
+  let key;
+  try { key = await getKey(); } catch { return false; }
   if (!key) return false;
   const fail = text => { state.pullProblem = text; emit(); return false; };
   let r;
@@ -271,15 +275,12 @@ export async function pull() {
   return changed;
 }
 
-// Starts the regular sending, and sends straight away when the app is hidden or signal returns.
+// Starts the regular sending. The app sends when it's hidden through the hide handler in app.js,
+// which saves everything first.
 export async function start(onLibraryChange) {
-  // Older versions queued Feel test answers. They mean nothing, so they never go anywhere.
-  const stale = (await store.queueAll()).filter(i => i.event.demo).map(i => i.key);
-  if (stale.length) await store.queueRemove(stale);
-
-  const saved = await store.get('send-status');
+  const saved = await store.get('send-status').catch(() => null);
   if (saved) Object.assign(state, { sentAt: saved.sentAt || 0, sentCount: saved.sentCount || 0, problem: saved.problem || null, lastTry: saved.lastTry || '' });
-  state.connected = !!(await getKey());
+  state.connected = !!(await getKey().catch(() => null));
   state.waiting = await store.queueCount();
   emit();
   const tryPull = () => pull().then(changed => { if (changed) onLibraryChange(); }).catch(() => {});
@@ -288,11 +289,10 @@ export async function start(onLibraryChange) {
     if (state.waiting && Date.now() - lastAttempt >= SEND_EVERY) flush();
   }, 3000);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') { flush({ hide: true }); return; }
+    if (document.visibilityState === 'hidden') return;
     if (state.waiting && Date.now() - lastAttempt >= SEND_EVERY) flush();
     if (Date.now() - state.pulledAt > PULL_EVERY) tryPull();
   });
-  addEventListener('pagehide', () => flush({ hide: true }));
   addEventListener('online', () => { flush(); tryPull(); });
   if (state.connected) { flush(); tryPull(); }
   return tryPull;

@@ -1,11 +1,11 @@
 // The screens around the deck: the packs, a pack's topics, style, settings and connecting.
 import { DEMO_PACK } from './demo.js';
-import { DeckView, cardHTML, deckKey, deckSummary, toolsHTML } from './deck.js';
+import { DeckView, cardHTML, deckKey, deckSummary, queueUnsentWords, sendWords, toolsHTML, wordsIn } from './deck.js';
 import { confetti, esc, icon, paintNotices, safeIcon, setNotice, tick } from './ui.js';
 import * as store from './store.js';
 import * as sync from './sync.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -159,9 +159,16 @@ function markUpdate() {
   refreshStatusLine();
 }
 
+function troubleWords(t) {
+  if (t.kind === 'memory') return "Not saving on this phone. This looks like a private window, or storage is blocked, so nothing here survives closing. Copy anything you've written before you leave.";
+  const kept = t.backupBroken ? "and the backup is failing too, so copy anything you've written" : 'so your words are in a backup, and they move back as soon as it can';
+  return `Not saving on this phone. It refused the last save (${t.detail}), ${kept}. Closing and reopening Riffle usually fixes it.`;
+}
+
 function refreshNotice() {
   const st = sync.status();
-  if (st.problem) setNotice({ text: 'Not sending · tap', act: showSettings });
+  if (store.troubleNow()) setNotice({ text: 'Not saving on this phone', act: showSettings });
+  else if (st.problem) setNotice({ text: 'Not sending · tap', act: showSettings });
   else if (updateReady) setNotice({ text: 'Update ready · tap', act: () => location.reload() });
   else setNotice(null);
 }
@@ -191,7 +198,7 @@ async function library() {
 
 async function summaries(pack) {
   const out = new Map();
-  for (const d of pack.decks) out.set(d.id, deckSummary(d, await store.get(deckKey(pack, d))));
+  for (const d of pack.decks) out.set(d.id, deckSummary(d, await store.get(deckKey(pack, d)).catch(() => null)));
   return out;
 }
 
@@ -224,6 +231,8 @@ const imagesFor = async pack => {
 // ---------- the first screen
 
 function statusLine(st, left) {
+  const t = store.troubleNow();
+  if (t) return troubleWords(t);
   if (st.problem) return st.problem;
   if (updateReady) return 'New version ready. Tap here to load it.';
   if (!st.connected) return st.waiting ? `${st.waiting} answer${st.waiting === 1 ? '' : 's'} kept on this phone. Connect to send them.` : 'Not connected yet. The Feel test works without it.';
@@ -240,8 +249,9 @@ async function refreshStatusLine() {
   if (!again) return;
   const st = sync.status();
   again.textContent = statusLine(st, left);
-  again.classList.toggle('is-problem', !!st.problem);
-  again.onclick = st.problem ? showSettings : updateReady ? () => location.reload() : null;
+  const bad = st.problem || store.troubleNow();
+  again.classList.toggle('is-problem', !!bad);
+  again.onclick = bad ? showSettings : updateReady ? () => location.reload() : null;
 }
 
 async function showHome() {
@@ -292,7 +302,7 @@ function packTile(p, left, count) {
 
 // ---------- a pack's page
 
-async function showPack(id) {
+async function showPack(id, message = '') {
   current = null;
   const pack = (await library()).find(p => p.id === id);
   if (!pack) { showHome(); return; }
@@ -325,18 +335,102 @@ async function showPack(id) {
         <div class="t">${esc(pack.title)}</div>
         <div class="n" data-slot="notice" data-plain="${packLeft(sums)} left"></div>
       </div>
+      ${message ? `<div class="set-text problem">${esc(message)}</div>` : ''}
       ${topics.map(topicBlock).join('')}
       ${misc.length ? `<section class="topic misc" style="--pc:${esc(pack.color || '#7b8294')}"><div class="deckrows">${misc.map(d => deckRow(d, false)).join('')}</div></section>` : ''}
-      ${pack.demo ? `<div class="demo-note">The Feel test's answers stay on this phone and are never sent.</div><button class="ghostbtn resetbtn" data-go="reset">${icon('rotate-ccw')}Start the Feel test again</button>` : ''}
+      ${pack.demo ? '<div id="feelwords"></div>' : ''}
     </div>`;
   paintNotices();
   app.querySelector('[data-go=home]').onclick = showHome;
-  const reset = app.querySelector('[data-go=reset]');
-  if (reset) reset.onclick = async () => {
-    for (const d of pack.decks) await store.del(deckKey(pack, d));
-    showPack(id);
-  };
+  if (pack.demo) await drawFeelWords(pack);
   app.querySelectorAll('[data-deck]').forEach(b => { b.onclick = () => openDeck(pack, b.dataset.deck); });
+}
+
+// ---------- what's written in the Feel test
+
+// Every word written there, saved or cleared, so none can only be on a page you can't get back to.
+async function feelWords(pack) {
+  const live = [];
+  const states = new Map();
+  for (const d of pack.decks) {
+    const s = await store.get(deckKey(pack, d)).catch(() => null);
+    if (!s) continue;
+    states.set(d.id, s);
+    live.push(...wordsIn(d, s).map(w => ({ ...w, deck: d })));
+  }
+  const old = (await store.get('feel-archive').catch(() => null)) || [];
+  return { live, old, states };
+}
+
+const wordsAsText = ({ live, old }) => [...live, ...old].map(w => `${w.where}\n${w.text}`).join('\n\n');
+
+function sendUnsent(pack, { live, states }) {
+  for (const d of pack.decks) {
+    const s = states.get(d.id);
+    if (!s) continue;
+    sendWords(pack, d, s, live.filter(w => w.deck === d && !w.sent));
+    store.set(deckKey(pack, d), s);
+  }
+}
+
+async function copyText(text, out) {
+  try {
+    await navigator.clipboard.writeText(text);
+    out.textContent = 'Copied.';
+  } catch {
+    // Some views refuse the clipboard, so show the words selected instead.
+    out.innerHTML = '<textarea class="copybox" rows="6" readonly></textarea><span>Copy this by hand.</span>';
+    const box = out.querySelector('textarea');
+    box.value = text;
+    box.focus();
+    box.select();
+  }
+}
+
+async function drawFeelWords(pack, confirming = false) {
+  const host = document.getElementById('feelwords');
+  if (!host) return;
+  const words = await feelWords(pack);
+  const unsent = words.live.filter(w => !w.sent);
+  const swipes = [...words.states.values()].reduce((n, s) => n + Object.keys(s.answers || {}).length, 0);
+  const row = w => `<div class="word"><small>${esc(w.where)}</small><span>${esc(w.text)}</span><em class="${w.sent ? 'sent' : ''}">${w.sent ? 'Sent' : 'Not sent yet'}</em></div>`;
+  const count = words.live.length;
+  host.innerHTML = `
+    <div class="demo-note">Anything you type here gets sent, tagged as a test. Swipes with no words stay on this phone.</div>
+    ${count + words.old.length ? `
+      <div class="set-title">What you wrote here</div>
+      <div class="words">${words.live.map(row).join('')}${words.old.map(w => row({ ...w, sent: true })).join('')}</div>
+      <div class="set-row">
+        <button class="secondary" data-go="send-words" ${unsent.length ? '' : 'disabled'}>${icon('cloud-upload')}Send these</button>
+        <button class="secondary" data-go="copy-words">${icon('notebook-pen')}Copy</button>
+      </div>
+      <div class="set-text small" id="wordsresult"></div>` : ''}
+    ${confirming ? `
+      <div class="confirm" id="resetconfirm">
+        <div class="set-text">This clears ${swipes} swipe${swipes === 1 ? '' : 's'}${count ? ` and ${count} thing${count === 1 ? '' : 's'} you wrote` : ''} from the Feel test.${unsent.length ? ` First it sends the ${unsent.length} not sent yet.` : ''}${count ? ' Your words stay listed here.' : ''}</div>
+        <div class="set-row">
+          <button class="primary" data-go="reset-yes">Clear it</button>
+          <button class="ghostbtn" data-go="reset-no">Keep it</button>
+        </div>
+      </div>` : `<button class="ghostbtn resetbtn" data-go="reset">${icon('rotate-ccw')}Start the Feel test again</button>`}`;
+  const on = (name, fn) => { const b = host.querySelector(`[data-go=${name}]`); if (b) b.onclick = fn; };
+  on('send-words', async () => {
+    sendUnsent(pack, words);
+    await drawFeelWords(pack);
+    const out = document.getElementById('wordsresult');
+    if (out) out.textContent = sync.status().connected ? 'On their way.' : "They'll go once you connect, from the gear.";
+  });
+  on('copy-words', () => copyText(wordsAsText(words), document.getElementById('wordsresult')));
+  on('reset', () => drawFeelWords(pack, true));
+  on('reset-no', () => drawFeelWords(pack));
+  on('reset-yes', async () => {
+    // Words first: queued, then kept in the list, and only then is anything cleared.
+    sendUnsent(pack, words);
+    const keep = words.live.map(w => ({ where: w.where, text: w.text }));
+    if (keep.length) store.set('feel-archive', [...keep, ...words.old]);
+    for (const d of pack.decks) store.del(deckKey(pack, d));
+    showPack(pack.id);
+  });
 }
 
 async function openDeck(pack, deckId) {
@@ -348,7 +442,13 @@ async function openDeck(pack, deckId) {
     onVerdict: which => afterVerdict(pack, deck, which),
   });
   render = () => {};
-  await current.open();
+  try {
+    await current.open();
+  } catch {
+    current = null;
+    setNotice({ text: 'Not saving on this phone', act: showSettings });
+    showPack(pack.id, "Couldn't read this deck's saved progress just now. Close Riffle and open it again.");
+  }
 }
 
 // What comes after a deck: the next one in its stack, or the reward for what was just cleared.
@@ -417,6 +517,7 @@ async function showSettings() {
       <button class="setrow" data-go="style">${icon('palette')}<span><strong>Style</strong><small>${esc(nameOf(LAYOUTS, root.dataset.layout))} · ${esc(nameOf(LOOKS, root.dataset.look))}</small></span></button>
       <div class="set-title">Sending answers</div>
       <div class="set-text" id="sendtext">${esc(sendingText(st))}</div>
+      ${store.troubleNow() ? `<div class="set-text problem" id="saveproblem">${esc(troubleWords(store.troubleNow()))}</div>` : ''}
       ${st.problem ? `<div class="set-text problem" id="sendproblem">${esc(st.problem)}</div>` : ''}
       ${!st.problem && st.lastTry ? `<div class="set-text small" id="lasttry">${esc(st.lastTry)}</div>` : ''}
       ${st.pullProblem ? `<div class="set-text problem">${esc(st.pullProblem)}</div>` : ''}
@@ -428,10 +529,19 @@ async function showSettings() {
            <div class="set-text small" id="sendresult"></div>
            <button class="ghostbtn" data-go="disconnect">Disconnect</button>`
         : `<button class="primary" data-go="connect">${icon('link')}Connect</button>`}
+      <div class="set-title">On this phone</div>
+      <div class="set-text small" id="storageline"></div>
       <div class="set-title">Credits</div>
       <div class="set-text small">Pack and deck icons from game-icons.net by Lorc, Quoting and Faithtoken, CC BY 3.0. Button icons from Lucide, ISC licence. Pixelify Sans by its project authors, SIL Open Font Licence.</div>
       <div class="set-text small">Riffle ${VERSION}</div>
     </div>`;
+  store.persisted().then(yes => {
+    const line = document.getElementById('storageline');
+    if (!line) return;
+    line.textContent = yes === null ? "This browser doesn't say whether it will keep Riffle's data."
+      : yes ? 'This browser has promised to keep what Riffle saves here.'
+      : "This browser hasn't promised to keep what Riffle saves here. It can clear it if space runs low. Adding Riffle to the Home Screen helps.";
+  });
   app.querySelector('[data-go=home]').onclick = showHome;
   app.querySelector('[data-go=style]').onclick = showStyle;
   const on = (name, fn) => { const b = app.querySelector(`[data-go=${name}]`); if (b) b.onclick = fn; };
@@ -495,25 +605,39 @@ function showConnect() {
 
 // ---------- start
 
+// The one thing that runs when the app is hidden or closing: save and queue everything, then send.
+function onHide() {
+  const saved = current ? current.secure() : Promise.resolve();
+  Promise.resolve(saved).catch(() => {}).finally(() => sync.flush({ hide: true }));
+}
+
 async function start() {
   trackViewport();
-  await setStyle({
-    layout: (await store.get('style-layout')) || document.documentElement.dataset.layout || DEFAULT_LAYOUT,
-    look: (await store.get('style-look')) || document.documentElement.dataset.look || DEFAULT_LOOK,
+  store.onTrouble(() => { refreshNotice(); refreshStatusLine(); });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') onHide(); });
+  addEventListener('pagehide', onHide);
+  await store.recover();
+  setStyle({
+    layout: (await store.get('style-layout').catch(() => null)) || document.documentElement.dataset.layout || DEFAULT_LAYOUT,
+    look: (await store.get('style-look').catch(() => null)) || document.documentElement.dataset.look || DEFAULT_LOOK,
+  });
+  const lib = await library();
+  await queueUnsentWords((packId, deckId) => {
+    const p = lib.find(x => x.id === packId);
+    const d = p && p.decks.find(x => x.id === deckId);
+    return (d && d.topic) || null;
   });
   navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(() => {});
   sync.onChange(() => { refreshNotice(); refreshStatusLine(); });
   await showHome();
   pullNow = await sync.start(() => render());
+  refreshNotice();
   registerWorker();
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden' && current) current.saveNow();
-  });
 }
 
 start();
 
 // For the tests in tests/, on a local test server only.
 if (isLocalHost) {
-  window.__riffle = { get current() { return current; }, showHome, showPack, showConnect, showSettings, showStyle, setStyle, setNotice, sync, store };
+  window.__riffle = { get current() { return current; }, showHome, showPack, showConnect, showSettings, showStyle, setStyle, setNotice, onHide, sync, store };
 }

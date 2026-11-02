@@ -76,13 +76,14 @@ Written by the phone, one new file per batch. A file named `connect-check-…` i
 }
 ```
 
-Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. The built-in Feel test's answers are never sent.
+Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typed in the built-in Feel test are sent with `demo: true`: they're test answers, but they're someone's words, so read them.
 
 | type | Extra fields | Meaning |
 |---|---|---|
 | `answer` | `card`, `cardVersion`, `title`, `kind`, `swipe` (`right`, `left`, `down`, `up`), `stamp`, `comment` | A card was thrown. `up` is a comment on its own |
 | `undo` | `card`, `of` (the `eid` it takes back) | That answer no longer stands |
 | `notes` | `text` | The deck's scratchpad, whole. The latest one wins |
+| `draft` | `card`, `text`, `title` | Unfinished words on a card not thrown yet. The latest wins, and an answer on that card replaces it. The card may no longer be in the deck |
 | `deck` | `verdict` (`done`, `replan`), `tally`, `answered`, `total` | The deck as a whole |
 
-**Reading them:** go through events by `at`. Drop any repeated `eid`: if the app closes mid-send, a batch can go out twice. Drop answers named by an `undo`. For each card, the latest answer left stands.
+**Reading them:** go through events by `at`. Drop any repeated `eid`: if the app closes mid-send, a batch can go out twice. Drop answers named by an `undo`. For each card, the latest answer left stands, and a draft counts only if no answer came after it.

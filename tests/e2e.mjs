@@ -45,12 +45,11 @@ for (let i = 0; i < 40 && !target; i++) {
 }
 if (!target) { console.log('Edge did not start'); process.exit(1); }
 
-const ws = new WebSocket(target.webSocketDebuggerUrl);
-await new Promise(r => { ws.onopen = r; });
+let ws = null;
 let nextId = 1;
 const waiting = new Map();
 const errors = [];
-ws.onmessage = m => {
+const onMessage = m => {
   const d = JSON.parse(m.data);
   if (d.id && waiting.has(d.id)) {
     const { res, rej } = waiting.get(d.id);
@@ -60,6 +59,12 @@ ws.onmessage = m => {
   if (d.method === 'Runtime.exceptionThrown') errors.push(d.params.exceptionDetails.exception?.description || d.params.exceptionDetails.text);
   if (d.method === 'Runtime.consoleAPICalled' && d.params.type === 'error') errors.push(d.params.args.map(a => a.value || a.description).join(' '));
 };
+async function attach(t) {
+  ws = new WebSocket(t.webSocketDebuggerUrl);
+  await new Promise(r => { ws.onopen = r; });
+  ws.onmessage = onMessage;
+}
+await attach(target);
 const send = (method, params = {}) => new Promise((res, rej) => {
   const id = nextId++;
   waiting.set(id, { res, rej });
@@ -81,6 +86,7 @@ const rect = sel => ev(`(()=>{const e=document.querySelector(${JSON.stringify(se
 const touch = (type, pts) => send('Input.dispatchTouchEvent', { type, touchPoints: pts.map(([x, y], id) => ({ x, y, id })) });
 const tapAt = async (x, y) => { await touch('touchStart', [[x, y]]); await sleep(40); await touch('touchEnd', []); await sleep(120); };
 const tap = async sel => {
+  await ev(`document.querySelector(${JSON.stringify(sel)})?.scrollIntoView({block:"nearest"})`);
   const r = await rect(sel);
   if (!r || !r.w) throw new Error(`nothing to tap: ${sel}`);
   await tapAt(r.x, r.y);
@@ -123,15 +129,20 @@ const resetFeel = async () => {
   await ev(`__riffle.showPack('feel-test')`);
   await sleep(200);
   await tap('[data-go=reset]');
+  await sleep(120);
+  await tap('[data-go=reset-yes]');
   await sleep(250);
 };
 const openFeel = async title => { await resetFeel(); await openDeckRow(title); };
 const seenBox = sel => ev(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});if(!e)return false;const s=getComputedStyle(e);const r=e.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&r.width>0&&r.height>0})()`);
 
-await send('Page.enable');
-await send('Runtime.enable');
-await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: true });
-await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+const setUp = async () => {
+  await send('Page.enable');
+  await send('Runtime.enable');
+  await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: true });
+  await send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+};
+await setUp();
 
 await api('/__reset');
 
@@ -281,7 +292,7 @@ await touch('touchEnd', []);
 await sleep(150);
 d = await deck();
 ok(d.answers.stamps?.swipe === 'down', 'down is IDK');
-ok((await queue()).length === 0, "the Feel test's answers are never queued");
+ok((await queue()).length === 0, "the Feel test's plain swipes stay on the phone");
 
 console.log('Comment box');
 ok((await deck()).top === 'comment', 'the comment card is up');
@@ -534,14 +545,170 @@ await tap('[data-go=pack]');
 await sleep(300);
 ok((await text()).includes('Cleared'), 'the first screen shows the pack as cleared');
 
-console.log('Old Feel test answers');
-await ev(`__riffle.store.queueAdd({v:1,eid:'old-1',demo:true,type:'answer',card:'x'})`);
-ok((await queue()).length === 1, 'an older version left one queued');
+console.log('Nothing typed gets lost');
+// Kills the page's process outright, the way a phone can, and carries on in a new tab.
+const crash = async () => {
+  send('Page.crash').catch(() => {});
+  await sleep(500);
+  const old = target;
+  target = await (await fetch(`http://127.0.0.1:${PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+  await fetch(`http://127.0.0.1:${PORT}/json/close/${old.id}`).catch(() => {});
+  await attach(target);
+  await setUp();
+};
+const backupLeft = () => ev(`Object.keys(localStorage).filter(k=>k.startsWith('riffle-wal:')).length`);
+const stateOf = key => ev(`__riffle.store.get(${JSON.stringify(key)})`);
+const gaps = [];
+for (let i = 0; i < 3; i++) {
+  await go(APP);
+  await openFeel('Swipes');
+  await throwCard('up');
+  const words = `Typed just before the crash ${i}`;
+  const t0 = performance.now();
+  await typeText(words);
+  gaps.push(performance.now() - t0);
+  await crash();
+  await go(APP);
+  await sleep(200);
+  const s0 = await stateOf('deck:feel-test/swipes');
+  ok(s0 && s0.drafts.distance === words, `killed straight after typing, the text is back on reload (try ${i + 1})`, JSON.stringify(s0 && s0.drafts));
+  ok((await backupLeft()) === 0, 'and it moved from the backup into the database');
+  ok((await queue()).some(e => e.type === 'draft' && e.text === words && e.demo), 'and the start-up scan queued it as a draft');
+}
+console.log(`  (measured: the kill was asked for as soon as the typing was acknowledged, ${Math.max(...gaps).toFixed(1)} ms at most after the text was sent)`);
+
+await openFeel('Swipes');
+await tap('#notesbtn');
+await sleep(100);
+await typeText('Notes killed inside the wait');
+await sleep(150);
+await crash();
 await go(APP);
 await sleep(300);
-ok((await queue()).length === 0, 'it gets cleared on start and can never send');
+ok((await queue()).some(e => e.type === 'notes' && e.text === 'Notes killed inside the wait' && e.demo), 'a note killed inside the 1.5 s gets queued at restart, without opening the deck');
+
+await ev(`__riffle.store.set('deck:feel-test/swipes',{order:['distance'],answers:{},log:[],notes:'',drafts:{'gone-card':'Words on a card no longer in the deck'},draftsSent:{},wordsSent:{}})`);
+await go(APP);
+await sleep(300);
+ok((await queue()).some(e => e.type === 'draft' && e.card === 'gone-card'), 'a draft on a card no longer in the deck is not stranded');
+const qSize = (await queue()).length;
+await go(APP);
+await sleep(300);
+ok((await queue()).length === qSize, 'and restarting again sends nothing twice');
+
+await openFeel('Swipes');
+await throwCard('up');
+await typeText('A draft that waits');
+await sleep(5400);
+const drafted = (await queue()).filter(e => e.type === 'draft' && e.text === 'A draft that waits').length;
+ok(drafted === 1, 'a draft goes about 5 s after typing stops', String(drafted));
+await ev('__riffle.current.sendDrafts()');
+await sleep(100);
+ok((await queue()).filter(e => e.type === 'draft' && e.text === 'A draft that waits').length === 1, 'only if it changed');
+await ev('__riffle.current.closeComposer();__riffle.current.close()');
+
+console.log('A lost connection');
+await openFeel('Swipes');
+await ev('__riffle.store.testCloseConnection()');
+await throwCard('up');
+await typeText('After the connection closed');
+await sleep(200);
+ok(!(await ev('__riffle.store.troubleNow()')), 'closing the database connection under the app raises no trouble');
+await drag(190, 3);
+await sleep(300);
+ok((await backupLeft()) === 0, 'the next writes land in the database');
+await go(APP);
+await sleep(200);
+const s1 = await stateOf('deck:feel-test/swipes');
+ok(s1.answers.distance?.comment === 'After the connection closed', 'and they are there after a reload', JSON.stringify(s1.answers));
+
+console.log('When the phone refuses to save');
+await openFeel('Swipes');
+await ev(`IDBDatabase.prototype.transaction=function(){throw new DOMException('Connection to Indexed Database server lost','UnknownError')}`);
+await throwCard('up');
+await typeText('Written while saving is broken');
+await sleep(100);
+await drag(190, 3);
+await sleep(300);
+const trouble = await ev('__riffle.store.troubleNow()');
+ok(trouble && trouble.kind === 'failing', 'a failing database is noticed', JSON.stringify(trouble));
+ok((await ev(`document.querySelector('[data-slot=notice]').textContent`)) === 'Not saving on this phone', 'the title line says Not saving on this phone');
+await shot('31-not-saving');
+const rescue = await ev(`Object.keys(localStorage).filter(k=>k.startsWith('riffle-wal:')).map(k=>localStorage.getItem(k)).join(' ')`);
+ok(rescue.includes('Written while saving is broken'), 'the words are in the backup list');
+ok((await deck()).answers.distance?.comment === 'Written while saving is broken', 'and the app carries on with them');
+await go(APP);
+await sleep(300);
+ok(!(await ev('__riffle.store.troubleNow()')) && (await backupLeft()) === 0, 'on the next start it recovers, and the notice goes');
+const s2 = await stateOf('deck:feel-test/swipes');
+ok(s2.answers.distance?.comment === 'Written while saving is broken', 'with the words moved back into the deck');
+ok((await queue()).some(e => e.comment === 'Written while saving is broken' && e.demo), 'and back into the queue');
+
+console.log('No database at all');
+const noDb = await send('Page.addScriptToEvaluateOnNewDocument', { source: `IDBFactory.prototype.open=function(){throw new Error('blocked')}` });
+await go(APP);
+await sleep(300);
+ok((await text()).includes('Not saving on this phone'), 'a private window says nothing here survives', await text());
+await ev(`__riffle.showPack('feel-test')`);
+await sleep(200);
+await ev(`[...document.querySelectorAll('.deckrow')].find(x=>x.innerText.includes('Swipes')).click()`);
+await sleep(400);
+ok((await ev(`document.querySelector('[data-slot=notice]').textContent`)) === 'Not saving on this phone', 'the title line says so in a deck too');
+await ev('__riffle.current.close()');
+await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: noDb.identifier });
+await go(APP);
+await sleep(300);
+ok(!(await ev('__riffle.store.troubleNow()')), 'and it goes once storage works');
+
+console.log('The Feel test page');
+await ev('__riffle.store.queueAll().then(q=>__riffle.store.queueRemove(q.map(i=>i.key)))');
+await ev(`__riffle.store.del('feel-archive')`);
+await ev(`__riffle.store.set('deck:feel-test/swipes',{order:['stamps'],answers:{distance:{swipe:'right',comment:'Old comment words',version:1}},log:[],notes:'Old notes',notesSent:'Old notes',drafts:{},draftsSent:{}})`);
+await ev(`__riffle.showPack('feel-test')`);
+await sleep(300);
+let page = await text();
+ok(page.includes('Old comment words') && page.includes('Old notes') && page.includes('Not sent yet'), 'it lists words an older version kept only on the phone', page);
+await shot('32-feel-words');
+await tap('[data-go=copy-words]');
+await sleep(150);
+ok((await ev(`document.getElementById('wordsresult').textContent+(document.querySelector('.copybox')?document.querySelector('.copybox').value:'')`)).length > 0, 'Copy works, or shows the words to copy by hand');
+await tap('[data-go=send-words]');
+await sleep(300);
+let q0 = await queue();
+ok(q0.some(e => e.comment === 'Old comment words' && e.demo && e.swipe === 'right') && q0.some(e => e.type === 'notes' && e.text === 'Old notes' && e.demo), 'Send these queues them, tagged', JSON.stringify(q0));
+page = await text();
+ok(!page.includes('Not sent yet') && page.includes('Sent'), 'and marks them as sent');
+ok(await ev(`document.querySelector('[data-go=send-words]').disabled`), 'so nothing can go twice');
+const q0n = q0.length;
+await ev(`(async()=>{const s=await __riffle.store.get('deck:feel-test/swipes');s.drafts={stamps:'A draft to keep'};await __riffle.store.set('deck:feel-test/swipes',s)})()`);
+await ev(`__riffle.showPack('feel-test')`);
+await sleep(300);
+await tap('[data-go=reset]');
+await sleep(150);
+page = await text();
+ok(page.includes('First it sends the 1 not sent yet') && page.includes('Clear it') && !!(await stateOf('deck:feel-test/swipes')), 'Start again asks first, says what it clears, and has cleared nothing yet', page);
+await shot('33-start-again');
+await tap('[data-go=reset-no]');
+await sleep(150);
+ok(!!(await stateOf('deck:feel-test/swipes')) && !(await ev(`!!document.querySelector('#resetconfirm')`)), 'Keep it keeps it');
+await tap('[data-go=reset]');
+await sleep(120);
+await tap('[data-go=reset-yes]');
+await sleep(300);
+q0 = await queue();
+ok(q0.length === q0n + 1 && q0.some(e => e.type === 'draft' && e.text === 'A draft to keep' && e.demo), 'clearing queues the unsent words first', JSON.stringify(q0));
+ok(!(await stateOf('deck:feel-test/swipes')), 'then clears the deck');
+page = await text();
+ok(page.includes('Old comment words') && page.includes('A draft to keep') && page.includes('Old notes'), 'and the words stay listed', page);
+await tap('[data-go=reset]');
+await sleep(120);
+await tap('[data-go=reset-yes]');
+await sleep(300);
+ok((await queue()).length === q0n + 1, 'clearing again sends nothing twice');
 
 console.log('Connecting');
+await ev('__riffle.showHome()');
+await sleep(200);
 await tap('[data-go=settings]');
 await sleep(200);
 await tap('[data-go=connect]');
@@ -572,7 +739,11 @@ ok(listed.includes('Connected'), "a list that says too much doesn't turn away a 
 await sleep(1900);
 const names0 = await api('/__files');
 ok(names0.some(n => n.includes('connect-check')), 'connecting writes a test file');
-ok(!names0.some(n => n.startsWith('answers/') && !n.includes('connect-check')), 'and no Feel test answers go with it');
+const demoBatches = names0.filter(n => n.startsWith('answers/') && !n.includes('connect-check'));
+const demoEvents = (await Promise.all(demoBatches.map(async n => JSON.parse(await (await fetch(`${API}/__file?path=${encodeURIComponent(n)}`)).text())))).flatMap(b => b.events);
+ok(demoEvents.length > 0 && demoEvents.every(e => e.demo), "the Feel test's words go with it, tagged", JSON.stringify(demoEvents.slice(0, 3)));
+ok(demoEvents.some(e => e.comment === 'Old comment words') && demoEvents.filter(e => e.type === 'answer').every(e => e.comment), 'and no plain swipes go', JSON.stringify(demoEvents.filter(e => e.type === 'answer' && !e.comment)));
+const filesBefore = new Set(names0);
 ok((await text()).includes('Test pack'), 'decks pulled from the repo show on the first screen');
 
 console.log('A real send');
@@ -596,10 +767,38 @@ ok((await queue()).length >= 3, 'answers wait in the queue', JSON.stringify(awai
 await sleep(18500);
 ok((await queue()).length === 0, 'they send by themselves within about 15 seconds');
 const names1 = await api('/__files');
-const batches = names1.filter(n => n.startsWith('answers/') && !n.includes('connect-check'));
+const batches = names1.filter(n => n.startsWith('answers/') && !n.includes('connect-check') && !filesBefore.has(n));
 ok(batches.length === 1, 'as one batch file', JSON.stringify(batches));
 const batch = JSON.parse(await (await fetch(`${API}/__file?path=${encodeURIComponent(batches[0])}`)).text());
 ok(batch.events.some(e => e.comment === 'A real comment' && e.swipe === 'right') && batch.events.some(e => e.type === 'notes' && e.text === 'Real notes') && batch.events.every(e => !e.demo), 'holding the answers, comment and notes', JSON.stringify(batch.events));
+
+console.log('Hiding the app');
+await tap('#notesbtn');
+await sleep(100);
+await typeText(' and more typed just before hiding');
+await sleep(60);
+const namesH = new Set(await api('/__files'));
+await ev(`Object.defineProperty(document,'visibilityState',{value:'hidden',configurable:true});document.dispatchEvent(new Event('visibilitychange'))`);
+await sleep(500);
+await ev(`delete document.visibilityState`);
+const hideBatch = (await api('/__files')).filter(n => !namesH.has(n));
+const hideEvents = hideBatch.length ? JSON.parse(await (await fetch(`${API}/__file?path=${encodeURIComponent(hideBatch[0])}`)).text()).events : [];
+ok(hideEvents.some(e => e.type === 'notes' && e.text.endsWith('just before hiding')), 'hiding saves, queues notes typed a moment ago, then sends them', JSON.stringify(hideEvents));
+ok((await stateOf('deck:test-pack/d1')).notes.endsWith('just before hiding'), 'and the state is saved');
+await tap('.sheet-head');
+await sleep(150);
+await throwCard('up');
+await typeText('A draft when the page goes away');
+await sleep(60);
+const namesP = new Set(await api('/__files'));
+await ev(`dispatchEvent(new Event('pagehide'))`);
+await sleep(500);
+const pageBatch = (await api('/__files')).filter(n => !namesP.has(n));
+const pageEvents = pageBatch.length ? JSON.parse(await (await fetch(`${API}/__file?path=${encodeURIComponent(pageBatch[0])}`)).text()).events : [];
+ok(pageEvents.some(e => e.type === 'draft' && e.text === 'A draft when the page goes away'), 'pagehide does the same', JSON.stringify(pageEvents));
+await ev('__riffle.current.closeComposer()');
+await sleep(100);
+await ev(`__riffle.current.s.drafts={}`);
 
 console.log('When sending fails, it says why');
 const failThen = async (code, message, expect) => {
@@ -631,6 +830,7 @@ await tap('[data-go=send]');
 await sleep(500);
 const after = await text();
 ok(!(await ev('__riffle.sync.status()')).problem && /Sent \d+ answer/.test(after), 'Send now works and clears it', after);
+ok(/promised|say whether/.test(after), 'settings says whether the browser promised to keep the data', after);
 ok(/\d+ sent so far/.test(after) && (after.match(/Sent \d+ answer/g) || []).length === 1, 'and settings shows what has been sent, once');
 await shot('29-settings-good');
 

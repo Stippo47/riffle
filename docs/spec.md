@@ -117,7 +117,16 @@ Nothing floats over the screen, so nothing can cover the buttons or a card's wor
 - **Offline:** a service worker keeps the app on the phone. A pack's decks and pictures come down when there's signal. Answers wait in a queue with a count on the dashboard.
 - **Sending:** at most one batch every 15 seconds, plus when the app is hidden, comes back or signal returns. Each batch is a new file, so nothing can collide with whoever is writing decks.
 - **When sending fails, it says why.** A refusal from GitHub gives the status code and what to do, on the first screen, in the title line ("Not sending") and in settings. One miss counts as no signal; three in a row while the phone says it's online counts as a problem and says so. Settings shows how many have been sent and when, and has Send now, which reports what happened. Every call gives up after 25 seconds, so a call frozen with the page can't hold up the ones after it.
-- **The built-in Feel test** needs no key. Its answers mean nothing: they stay on the phone and are never queued. Any an older version queued are cleared on start.
+- **The built-in Feel test** needs no key. Anything typed in it (comments, notes, drafts) is sent, tagged `demo: true`. Plain swipes with no words stay on the phone. Its page lists everything written there, with Send these and Copy, and each word is marked once sent, so nothing goes twice. "Start the Feel test again" takes two steps, says what it clears, queues any unsent words first and keeps them listed.
+
+## Nothing typed gets lost
+
+- **Every write goes into a backup list first.** It's in `localStorage`, which is synchronous, and a write leaves the list only once the database has it. Typing writes straight away, not after a pause, so a killed app keeps what was on screen. On the next start, whatever is left moves back into the database. Reads see the backup first.
+- **A lost database connection** gets reopened, and the write retried once. iPhones can drop the connection while the app is in the background.
+- **If saving still fails,** or there's no database at all (a private window), the title line says "Not saving on this phone", and the first screen and settings say why. The words stay in the backup, and go back as soon as it works. A deck whose saved progress can't be read won't open, rather than start fresh over it.
+- **Hiding or closing the app** runs one handler: it saves the deck, queues notes and drafts, then sends.
+- **Notes** go about 1.5 seconds after typing stops, and **drafts** (comments on a card not thrown yet) about 5 seconds after, each only if changed. At every start, the app goes through every deck's saved state and queues any notes or drafts that haven't gone, including drafts on cards no longer in the deck.
+- **What can still go:** the phone dying in the moment between a keystroke and the backup write, or the browser clearing its own data. Settings says whether the browser has promised to keep it.
 
 On iPhone, the app has to be added to the Home Screen: Safari and the Home Screen app keep separate data, and Safari can clear a site's data when it isn't used for a while. iPhones only send while the app is open. Web pages can't vibrate there, so the tick uses a switch-control trick that works on recent versions, and does nothing otherwise.
 

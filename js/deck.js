@@ -1,12 +1,14 @@
 // One deck on the table: the card stack, the swipes, the comment box, notes, the overview and the end.
 import { TUNE, decide, dominant, progress, track } from './gesture.js';
-import { clamp, dragToClose, esc, icon, kindOf, padBlur, padFocus, padHTML, padReady, padSet, padText, paintNotices, paras, plainSlot, RARITY, stampWord, tick } from './ui.js';
+import { clamp, dragToClose, esc, icon, kindOf, padBlur, padFocus, padHTML, padReady, padSet, paintNotices, paras, plainSlot, RARITY, stampWord, tick } from './ui.js';
 import * as store from './store.js';
 import { enqueue, newId } from './sync.js';
 
 const DIRS = ['right', 'left', 'down', 'up'];
 
 export const deckKey = (pack, deck) => `deck:${pack.id}/${deck.id}`;
+const DEMO_ID = 'feel-test';
+const DRAFT_SEND_AFTER = 5000;
 
 // Steps the type down if a card doesn't fit its face, so nothing gets cut off on a small phone.
 function fit(node) {
@@ -31,7 +33,76 @@ export function deckSummary(deck, s) {
 }
 
 function fresh(deck) {
-  return { order: deck.cards.map(c => c.id), answers: {}, log: [], notes: '', drafts: {}, reviewing: null, verdict: null, startedAt: Date.now() };
+  return { order: deck.cards.map(c => c.id), answers: {}, log: [], notes: '', drafts: {}, draftsSent: {}, wordsSent: {}, reviewing: null, verdict: null, startedAt: Date.now() };
+}
+
+// Queues any words a deck's saved state holds that haven't gone yet: notes typed just before the app
+// died, and drafts, including ones on cards no longer in the deck. Runs at every start.
+export async function queueUnsentWords(topicOf = () => null) {
+  for (const key of await store.keys()) {
+    if (!key.startsWith('deck:')) continue;
+    const s = await store.get(key).catch(() => null);
+    if (!s) continue;
+    const [pack, deck] = key.slice(5).split('/');
+    const base = { pack, topic: topicOf(pack, deck), deck, ...(pack === DEMO_ID ? { demo: true } : {}) };
+    s.draftsSent = s.draftsSent || {};
+    s.wordsSent = s.wordsSent || {};
+    let changed = false;
+    if ((s.notes || '') !== (s.notesSent || '')) {
+      enqueue({ ...base, type: 'notes', text: s.notes || '' });
+      s.notesSent = s.notes || '';
+      s.wordsSent.n = s.notesSent;
+      changed = true;
+    }
+    for (const [card, text] of Object.entries(s.drafts || {})) {
+      if ((text || '') === (s.draftsSent[card] || '')) continue;
+      enqueue({ ...base, type: 'draft', card, text: text || '' });
+      s.draftsSent[card] = text || '';
+      s.wordsSent[`d:${card}`] = text || '';
+      changed = true;
+    }
+    if (changed) store.set(key, s);
+  }
+}
+
+// Everything written in a deck, for the Feel test's page. A word is sent if wordsSent holds it.
+export function wordsIn(deck, s) {
+  if (!s) return [];
+  const sent = s.wordsSent || {};
+  const titleOf = id => {
+    const c = deck.cards.find(x => x.id === id);
+    return c ? c.title || c.text : id;
+  };
+  const out = [];
+  for (const [card, a] of Object.entries(s.answers || {})) {
+    if (a.comment) out.push({ kind: 'comment', key: `c:${card}`, card, where: `${deck.title}: ${titleOf(card)}`, text: a.comment, sent: sent[`c:${card}`] === a.comment, answer: a });
+  }
+  for (const [card, text] of Object.entries(s.drafts || {})) {
+    if (text) out.push({ kind: 'draft', key: `d:${card}`, card, where: `${deck.title}: ${titleOf(card)} (not thrown yet)`, text, sent: sent[`d:${card}`] === text });
+  }
+  if (s.notes) out.push({ kind: 'notes', key: 'n', where: `${deck.title}: notes`, text: s.notes, sent: sent.n === s.notes });
+  return out;
+}
+
+// Queues the given words from a deck's state, and marks them as sent, so nothing goes twice.
+export function sendWords(pack, deck, s, words) {
+  const base = { pack: pack.id, topic: deck.topic || null, deck: deck.id, ...(pack.demo ? { demo: true } : {}) };
+  s.wordsSent = s.wordsSent || {};
+  for (const w of words) {
+    if (w.sent) continue;
+    if (w.kind === 'notes') {
+      enqueue({ ...base, type: 'notes', text: w.text });
+      s.notesSent = w.text;
+    } else if (w.kind === 'draft') {
+      enqueue({ ...base, type: 'draft', card: w.card, text: w.text });
+      s.draftsSent = s.draftsSent || {};
+      s.draftsSent[w.card] = w.text;
+    } else {
+      const c = deck.cards.find(x => x.id === w.card) || { id: w.card };
+      enqueue({ ...base, type: 'answer', card: w.card, cardVersion: c.version || 1, title: c.title || '', kind: c.kind || 'question', swipe: w.answer.swipe, stamp: stampWord(c, w.answer.swipe), comment: w.text });
+    }
+    s.wordsSent[w.key] = w.text;
+  }
 }
 
 // A deck can change while it's saved: new cards join the end, gone cards leave, and a new version
@@ -111,6 +182,8 @@ export class DeckView {
     this.key = deckKey(this.pack, this.deck);
     this.s = (await store.get(this.key)) || fresh(this.deck);
     reconcile(this.s, this.deck);
+    this.s.draftsSent = this.s.draftsSent || {};
+    this.s.wordsSent = this.s.wordsSent || {};
     this.render();
     this.deal();
     this.save();
@@ -118,8 +191,15 @@ export class DeckView {
 
   close() {
     this.untrack && this.untrack();
+    this.secure();
+  }
+
+  // Everything goes safe: notes and drafts into the queue, the deck's state saved. Runs when the
+  // app is hidden, and on leaving a deck.
+  secure() {
     this.sendNotes();
-    this.saveNow();
+    this.sendDrafts();
+    return this.saveNow();
   }
 
   save() {
@@ -131,10 +211,26 @@ export class DeckView {
     return store.set(this.key, JSON.parse(JSON.stringify(this.s)));
   }
 
-  // The Feel test's answers mean nothing, so they stay on the phone and are never queued.
-  send(event) {
-    if (this.pack.demo) return;
-    enqueue({ pack: this.pack.id, topic: this.deck.topic || null, deck: this.deck.id, ...event });
+  // In the Feel test, plain swipes stay on the phone. Anything typed gets sent, tagged as a test.
+  send(event, typed = false) {
+    if (this.pack.demo && !typed) return;
+    enqueue({ pack: this.pack.id, topic: this.deck.topic || null, deck: this.deck.id, ...(this.pack.demo ? { demo: true } : {}), ...event });
+  }
+
+  // A comment still being written goes out a few seconds after typing stops, so a lost phone or a
+  // deleted icon doesn't lose it. Only what has changed since the last one.
+  sendDrafts() {
+    clearTimeout(this.draftTimer);
+    let changed = false;
+    for (const [card, text] of Object.entries(this.s.drafts)) {
+      if ((text || '') === (this.s.draftsSent[card] || '')) continue;
+      const c = this.cards.get(card);
+      this.send({ type: 'draft', card, title: c ? c.title || '' : '', text: text || '' }, true);
+      this.s.draftsSent[card] = text || '';
+      this.s.wordsSent[`d:${card}`] = text || '';
+      changed = true;
+    }
+    if (changed) this.saveNow();
   }
 
   // ---------- layout
@@ -187,7 +283,12 @@ export class DeckView {
     });
     padReady(this.comment, text => {
       const id = this.topId();
-      if (id) { this.s.drafts[id] = text; this.save(); this.syncAttached(); }
+      if (!id) return;
+      this.s.drafts[id] = text;
+      this.saveNow(); // at once: the backup write is synchronous, so a killed app keeps it
+      this.syncAttached();
+      clearTimeout(this.draftTimer);
+      this.draftTimer = setTimeout(() => this.sendDrafts(), DRAFT_SEND_AFTER);
     });
     padReady(this.notesText, text => this.notesChanged(text));
 
@@ -510,7 +611,9 @@ export class DeckView {
     this.s.order.shift();
     this.s.reviewing = null;
     delete this.s.drafts[id];
-    this.send({ type: 'answer', eid, card: id, cardVersion: version, title: card.title || '', kind: card.kind || 'question', swipe: dir, stamp: stampWord(card, dir), comment });
+    delete this.s.draftsSent[id];
+    if (comment) this.s.wordsSent[`c:${id}`] = comment;
+    this.send({ type: 'answer', eid, card: id, cardVersion: version, title: card.title || '', kind: card.kind || 'question', swipe: dir, stamp: stampWord(card, dir), comment }, !!comment);
     if (this.composing) this.closeComposer(true);
     if (punched) this.punch(id, card.rarity);
     else this.fly(id, dir, d);
@@ -578,7 +681,7 @@ export class DeckView {
       if (e.prev) { this.s.answers[e.id] = e.prev; this.s.reviewing = e.id; }
       else delete this.s.answers[e.id];
       if (e.comment) this.s.drafts[e.id] = e.comment;
-      this.send({ type: 'undo', card: e.id, of: e.eid });
+      this.send({ type: 'undo', card: e.id, of: e.eid }, !!e.comment);
     }
     this.s.order.unshift(e.id);
     this.deal();
@@ -631,7 +734,7 @@ export class DeckView {
 
   notesChanged(text) {
     this.s.notes = text;
-    this.save();
+    this.saveNow(); // at once: the backup write is synchronous, so a killed app keeps it
     clearTimeout(this.notesTimer);
     this.notesTimer = setTimeout(() => this.sendNotes(), 1500);
   }
@@ -639,8 +742,9 @@ export class DeckView {
     clearTimeout(this.notesTimer);
     if ((this.s.notes || '') === (this.s.notesSent || '')) return;
     this.s.notesSent = this.s.notes;
-    this.send({ type: 'notes', text: this.s.notes });
-    this.save();
+    this.s.wordsSent.n = this.s.notes;
+    this.send({ type: 'notes', text: this.s.notes }, true);
+    this.saveNow();
   }
 
   toggleNotes(force) {
