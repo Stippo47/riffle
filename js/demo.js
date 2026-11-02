@@ -1,5 +1,6 @@
 // The test pack built into the app. It needs no key, so the swipes can be felt straight away.
-// Its answers mean nothing: they stay on the phone and are never sent.
+// Anything typed in it gets sent, tagged as a test. Plain swipes stay on the phone.
+// Words in braces become the way the finger goes for that meaning: see fillDirs in ui.js.
 
 export const DEMO_PACK = {
   id: 'feel-test',
@@ -22,8 +23,8 @@ export const DEMO_PACK = {
         {
           id: 'start', kind: 'report', rarity: 'common', title: 'Start here',
           text: 'This is a report card. It says what happened.',
-          why: 'Right means good. Left means there is a problem. Down means you don\'t quite follow. Up adds a comment. Throw this one right.',
-          details: 'Report cards don\'t ask for anything. They tell you where things stand, and your swipe tells me how that lands.\n\nA question card works the same way, but right means go with my pick and left means workshop it.\n\nTap the words at the bottom of this side to flip back.',
+          why: 'Swipe {go} for good, {workshop} if there is a problem, {idk} if you don\'t quite follow. Swipe {comment} to add a comment. Swipe this one {go}.',
+          details: 'Report cards don\'t ask for anything. They tell you where things stand, and your swipe tells me how that lands.\n\nA question card works the same way, but {go} means go with my pick and {workshop} means work on it.\n\nThe directions can be changed: gear, then Swipe directions.\n\nTap the words at the bottom of this side to flip back.',
         },
         {
           id: 'stacked', kind: 'report', rarity: 'common', title: 'Stacked decks',
@@ -41,21 +42,21 @@ export const DEMO_PACK = {
       cards: [
         {
           id: 'distance', kind: 'question', rarity: 'common', title: 'Swipe distance',
-          text: 'Is the distance to throw a card about right?',
+          text: 'Is the distance to swipe a card away about right?',
           why: 'Too short and a bump on the bus sends a card by accident. Too long and every card feels like work.',
           pick: 'About a quarter of the screen sideways, or a quick flick from anywhere.',
           details: 'Sideways takes 27% of the screen\'s width. Up and down take 15% of its height. A flick counts from 34 pixels if it\'s fast enough.\n\nPull the card back before letting go and it stays.',
         },
         {
-          id: 'stamps', kind: 'question', rarity: 'common', title: 'Stamps',
-          text: 'Do the stamps read quickly while the card moves?',
-          why: 'The stamp is how you know what a throw will mean before you let go.',
-          pick: 'Keep them: they fade in with distance and snap on where the throw counts.',
+          id: 'stamps', kind: 'question', rarity: 'common', title: 'Swipe marks',
+          text: 'Can you tell what a swipe will do before you let go?',
+          why: 'A word shows at the edge the card is heading for, and it snaps on where the swipe counts. Gear, then Style, has other choices under While swiping.',
+          pick: 'Keep the plain word at the edge.',
         },
         {
-          id: 'comment', kind: 'report', rarity: 'common', title: 'Comment box',
-          text: 'Swipe this one up.',
-          why: 'The comment box opens under a small copy of the card. Type something, then throw the small card right or left to send both, or up to send the comment alone. Drag down on the card or the box to close it and keep your text.',
+          id: 'comment', kind: 'report', rarity: 'common', title: 'Adding a comment',
+          text: 'Add a comment to this card.',
+          why: 'Swipe {comment} and a box opens under the card. Type something. Then swipe the card {go} or {workshop} to send your words with that answer, or {comment} again to send just the words. To close the box and keep what you typed, drag it down.',
         },
         {
           id: 'skip', kind: 'question', rarity: 'common', title: 'Skip',
@@ -83,8 +84,38 @@ export const DEMO_PACK = {
         {
           id: 'speed', kind: 'question', rarity: 'common', title: 'Speed',
           text: 'Does the next card come up fast enough?',
-          why: 'You can throw the next card while the last one is still flying. Nothing should ever make you wait.',
+          why: 'You can swipe the next card while the last one is still moving. Nothing should ever make you wait.',
           pick: 'Yes. If it ever feels slow, tell me on which screen.',
+        },
+      ],
+    },
+    {
+      id: 'more-kinds',
+      topic: 'basics',
+      order: 3,
+      title: 'Other kinds of card',
+      cards: [
+        {
+          id: 'options', kind: 'options', rarity: 'common', title: 'Options',
+          text: 'Which of these would you keep? Tap any, then swipe.',
+          why: 'Swipe {go} for only the ones you tapped. Swipe {workshop} if even those weren\'t good, and I redo in their direction.',
+          pick: 'b',
+          options: [
+            { id: 'a', label: 'The plain one', text: 'Quick to read, nothing extra.' },
+            { id: 'b', label: 'The middle one', text: 'A little more on each card.' },
+            { id: 'c', label: 'The loud one', text: 'Colour and motion everywhere.' },
+          ],
+        },
+        {
+          id: 'handled', kind: 'question', rarity: 'common', title: 'Handled',
+          text: 'What should a card look like once I\'ve answered it myself?',
+          handled: { how: 'A green band and a tick, with my conclusion as the main text, so you can tell at a glance. It stays in the deck and isn\'t owed.', at: '2026-11-02T00:00:00.000Z' },
+        },
+        {
+          id: 'design', kind: 'design', rarity: 'common', title: 'Designs',
+          text: 'A design card shows you something to approve, deny or add to.',
+          why: 'Swipe {go} to approve it, {workshop} to have it rethought, {comment} to add your own.',
+          pick: 'One card for each thing being designed.',
         },
       ],
     },
@@ -97,7 +128,7 @@ export const DEMO_PACK = {
         {
           id: 'uncommon', kind: 'question', rarity: 'uncommon', title: 'Uncommon',
           text: 'Yellow means uncommon: worth a thought.',
-          why: 'It swipes like any other card. The colour just tells you to read this one before you throw it.',
+          why: 'It swipes like any other card. The colour just tells you to read this one before you swipe it.',
           pick: 'Use it for choices the player would notice.',
         },
         {
@@ -108,10 +139,10 @@ export const DEMO_PACK = {
         },
         {
           id: 'epic', kind: 'question', rarity: 'epic', title: 'Epic',
-          text: 'Light purple is epic. Hold right on this card.',
-          why: 'A right swipe has to break through: keep your thumb there for about a second. The edge glows, the stamp grows and the bar fills, then the card punches off. Let go early and nothing is sent. Left, down and up stay free.',
+          text: 'Light purple is epic. Hold {go} on this card.',
+          why: 'Going with my pick has to break through: keep your thumb there for about a second. The edge glows and the bar fills, then the card punches off. Let go early and nothing is sent. The other directions stay free.',
           pick: 'About one second of holding on anything that can\'t be undone.',
-          details: 'Epic cards are the ones that can\'t be undone, or are close to it.\n\nThe hold means a fast run of right swipes can never go over one. Your thumb has to mean it.\n\nThe bar in this box fills while you hold, so you can see how long is left.',
+          details: 'Epic cards are the ones that can\'t be undone, or are close to it.\n\nThe hold means a fast run of swipes can never go over one. Your thumb has to mean it.\n\nThe bar in this box fills while you hold, so you can see how long is left.',
         },
         {
           id: 'legendary', kind: 'question', rarity: 'legendary', title: 'Legendary',
@@ -130,8 +161,8 @@ export const DEMO_PACK = {
         {
           id: 'look', kind: 'question', rarity: 'common', title: 'Style',
           text: 'Which layout and look do you want to keep?',
-          why: 'On the first screen, the gear opens Style. Layout and look are separate choices, so mix them, and the preview changes as you tap.',
-          pick: 'Two rows with Plain dark. Swipe up to say what you settled on.',
+          why: 'On the first screen, the gear opens Style. Layout, look and what shows while swiping are separate choices, so mix them, and the preview changes as you tap.',
+          pick: 'Two rows with Plain dark. Add a comment to say what you settled on.',
         },
       ],
     },

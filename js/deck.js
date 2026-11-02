@@ -1,12 +1,16 @@
 // One deck on the table: the card stack, the swipes, the comment box, notes, the overview and the end.
+// A card's answer is recorded by what it means. `swipe` is logical: right is go, left is workshop,
+// down is idk, up is comment. Which way the finger goes for each is the map in ui.js.
 import { TUNE, decide, dominant, progress, track } from './gesture.js';
-import { clamp, dragToClose, esc, icon, kindOf, padBlur, padFocus, padHTML, padReady, padSet, paintNotices, paras, plainSlot, RARITY, stampWord, tick } from './ui.js';
+import { clamp, dragToClose, esc, fillDirs, icon, kindOf, logicalOf, MARK_ICON, padBlur, padFocus, padHTML, padReady, padSet, paintNotices, paras, physicalOf, plainSlot, RARITY, stampWord, tick } from './ui.js';
 import * as store from './store.js';
 import { enqueue, newId } from './sync.js';
 
 const DIRS = ['right', 'left', 'down', 'up'];
+const UNIT = { right: [1, 0], left: [-1, 0], up: [0, -1], down: [0, 1] };
 
 export const deckKey = (pack, deck) => `deck:${pack.id}/${deck.id}`;
+export const thoughtsKey = pack => `thoughts:${pack.id}`;
 const DEMO_ID = 'feel-test';
 const DRAFT_SEND_AFTER = 5000;
 
@@ -20,26 +24,77 @@ function fit(node) {
 }
 
 // Which cards at which versions a verdict was given on. If that changes, the verdict no longer holds.
-const deckSig = deck => deck.cards.map(c => `${c.id}:${c.version || 1}`).join(',');
+// Handled cards aren't owed, so they don't count.
+const deckSig = deck => deck.cards.filter(c => !c.handled).map(c => `${c.id}:${c.version || 1}`).join(',');
+
+const owed = (c, a) => !c.handled && (!a || (c.version || 1) > (a.version || 1));
+
+// Whether a card still gets dealt. A handled card is dealt until it has an answer newer than its
+// conclusion, or was skipped once with nothing else left. A new conclusion deals it again.
+function wanted(c, s) {
+  const a = s.answers[c.id];
+  if (!c.handled) return owed(c, a);
+  if (s.handledSkipped && s.handledSkipped[c.id] === c.handled.at) return false;
+  return !a || a.at < (Date.parse(c.handled.at) || 0);
+}
 
 // How far along a deck is, for the pack's page and the rewards.
 export function deckSummary(deck, s) {
-  const left = deck.cards.filter(c => {
-    const a = s && s.answers[c.id];
-    return !a || (c.version || 1) > (a.version || 1);
-  }).length;
-  const finished = !!(s && s.verdict && s.verdictSig === deckSig(deck));
-  return { total: deck.cards.length, left, finished, verdict: finished ? s.verdict : null };
+  const answers = (s && s.answers) || {};
+  const due = deck.cards.filter(c => owed(c, answers[c.id]));
+  const handled = deck.cards.filter(c => c.handled).length;
+  const nothingOwed = handled === deck.cards.length && handled > 0;
+  const finished = nothingOwed || !!(s && s.verdict && s.verdictSig === deckSig(deck));
+  return {
+    total: deck.cards.length - handled, left: due.length, handled, finished,
+    big: due.filter(c => c.rarity === 'epic' || c.rarity === 'legendary').length,
+    verdict: finished && s ? s.verdict : null,
+  };
 }
 
 function fresh(deck) {
-  return { order: deck.cards.map(c => c.id), answers: {}, log: [], notes: '', drafts: {}, draftsSent: {}, wordsSent: {}, reviewing: null, verdict: null, startedAt: Date.now() };
+  return { order: deck.cards.map(c => c.id), answers: {}, log: [], notes: '', drafts: {}, draftsSent: {}, wordsSent: {}, selections: {}, handledSkipped: {}, reviewing: null, verdict: null, startedAt: Date.now() };
 }
 
-// Queues any words a deck's saved state holds that haven't gone yet: notes typed just before the app
-// died, and drafts, including ones on cards no longer in the deck. Runs at every start.
+// Owed cards first, handled ones after, each keeping its order. A card being looked at stays on top.
+function arrange(s, cards) {
+  const top = s.reviewing && s.order[0] === s.reviewing ? [s.order[0]] : [];
+  const rest = s.order.slice(top.length);
+  s.order = [...top, ...rest.filter(id => !(cards.get(id) && cards.get(id).handled)), ...rest.filter(id => cards.get(id) && cards.get(id).handled)];
+}
+
+// A deck can change while it's saved: new cards join the end, gone cards leave, a new version of a
+// card (a second try) counts as unanswered again, and a new conclusion on a handled card deals it again.
+function reconcile(s, deck) {
+  const cards = new Map(deck.cards.map(c => [c.id, c]));
+  s.selections = s.selections || {};
+  s.handledSkipped = s.handledSkipped || {};
+  for (const id of Object.keys(s.answers)) {
+    const c = cards.get(id);
+    if (!c) delete s.answers[id];
+    else if (!c.handled && (c.version || 1) > (s.answers[id].version || 1)) delete s.answers[id];
+  }
+  if (s.reviewing && (!cards.has(s.reviewing) || !s.answers[s.reviewing])) s.reviewing = null;
+  s.order = s.order.filter(id => cards.has(id) && (id === s.reviewing || wanted(cards.get(id), s)));
+  for (const c of deck.cards) if (wanted(c, s) && !s.order.includes(c.id)) s.order.push(c.id);
+  arrange(s, cards);
+  if (s.verdict && s.verdictSig !== deckSig(deck)) s.verdict = null;
+  s.log = s.log.filter(e => cards.has(e.id));
+}
+
+// Queues any words saved states hold that haven't gone yet: notes typed just before the app died,
+// and drafts, including ones on cards no longer in the deck. Runs at every start.
 export async function queueUnsentWords(topicOf = () => null) {
   for (const key of await store.keys()) {
+    if (key.startsWith('thoughts:')) {
+      const t = await store.get(key).catch(() => null);
+      if (!t || (t.draft || '') === (t.draftSent || '')) continue;
+      const pack = key.slice(9);
+      enqueue({ pack, topic: null, deck: null, card: null, thought: true, ...(pack === DEMO_ID ? { demo: true } : {}), type: 'draft', text: t.draft || '' });
+      t.draftSent = t.draft || '';
+      store.set(key, t);
+      continue;
+    }
     if (!key.startsWith('deck:')) continue;
     const s = await store.get(key).catch(() => null);
     if (!s) continue;
@@ -78,7 +133,7 @@ export function wordsIn(deck, s) {
     if (a.comment) out.push({ kind: 'comment', key: `c:${card}`, card, where: `${deck.title}: ${titleOf(card)}`, text: a.comment, sent: sent[`c:${card}`] === a.comment, answer: a });
   }
   for (const [card, text] of Object.entries(s.drafts || {})) {
-    if (text) out.push({ kind: 'draft', key: `d:${card}`, card, where: `${deck.title}: ${titleOf(card)} (not thrown yet)`, text, sent: sent[`d:${card}`] === text });
+    if (text) out.push({ kind: 'draft', key: `d:${card}`, card, where: `${deck.title}: ${titleOf(card)} (not swiped yet)`, text, sent: sent[`d:${card}`] === text });
   }
   if (s.notes) out.push({ kind: 'notes', key: 'n', where: `${deck.title}: notes`, text: s.notes, sent: sent.n === s.notes });
   return out;
@@ -105,19 +160,11 @@ export function sendWords(pack, deck, s, words) {
   }
 }
 
-// A deck can change while it's saved: new cards join the end, gone cards leave, and a new version
-// of a card (a second try) counts as unanswered again.
-function reconcile(s, deck) {
-  const cards = new Map(deck.cards.map(c => [c.id, c]));
-  for (const id of Object.keys(s.answers)) {
-    const c = cards.get(id);
-    if (!c || (c.version || 1) > (s.answers[id].version || 1)) delete s.answers[id];
-  }
-  s.order = s.order.filter(id => cards.has(id));
-  for (const c of deck.cards) if (!s.answers[c.id] && !s.order.includes(c.id)) s.order.push(c.id);
-  if (s.reviewing && (!cards.has(s.reviewing) || !s.answers[s.reviewing])) s.reviewing = null;
-  if (s.verdict && s.verdictSig !== deckSig(deck)) s.verdict = null;
-  s.log = s.log.filter(e => cards.has(e.id));
+// Keeps words listed on the Feel test's page after their deck is cleared.
+export async function archiveWords(words) {
+  if (!words.length) return;
+  const old = (await store.get('feel-archive').catch(() => null)) || [];
+  await store.set('feel-archive', [...words.map(w => ({ where: w.where, text: w.text })), ...old]);
 }
 
 // The parts of the screen that every layout rearranges. The Style screen's preview uses them too.
@@ -131,7 +178,10 @@ export const toolsHTML = (ids = true) => {
   </div>`;
 };
 
-export function cardHTML(card, images = () => null) {
+// What shows at the edge the card is heading for. Which parts show is the While swiping choice.
+export const markHTML = (id = 'mark') => `<div class="edgemark"${id ? ` id="${id}"` : ''}><span class="mark-word"></span><span class="mark-icon"></span></div>`;
+
+export function cardHTML(card, images = () => null, fill = t => t) {
   const kind = kindOf(card);
   const rarity = card.rarity || 'common';
   const breaks = RARITY[rarity] && RARITY[rarity].breaks;
@@ -139,26 +189,40 @@ export function cardHTML(card, images = () => null) {
   const pics = (card.images || []).map(p => images(p)).filter(Boolean);
   const hasMore = card.details || pics.length;
   const moreText = [card.details ? 'details' : '', pics.length ? `${pics.length} picture${pics.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(' and ');
-  const long = (card.text || '').length > 70;
+  const text = fill(card.text || ''), why = fill(card.why || ''), pick = fill(card.pick || '');
+  const long = text.length > 70;
+  const options = card.kind === 'options' ? (card.options || []) : null;
+  const body = card.handled
+    ? `<h2 class="q-small">${esc(text)}</h2><p class="why how">${esc(fill(card.handled.how || ''))}</p>`
+    : `<h2 class="${long ? 'long' : ''}">${esc(text)}</h2>${why ? `<p class="why">${esc(why)}</p>` : ''}`;
   return `
     <div class="flip">
       <div class="face">
         <div class="glint"></div>
-        <div class="chips"><span>${esc(kind.label)}</span>${label ? `<span class="warn">· ${esc(label)}</span>` : ''}</div>
-        <h2 class="${long ? 'long' : ''}">${esc(card.text)}</h2>
-        ${card.why ? `<p class="why">${esc(card.why)}</p>` : ''}
+        ${card.handled ? `<div class="handled-band">${icon('check')}<span>Handled</span></div>` : ''}
+        <div class="chips"><span>${esc(card.handled ? 'My conclusion' : kind.label)}</span>${label ? `<span class="warn">· ${esc(label)}</span>` : ''}</div>
+        ${body}
+        ${options ? `<div class="options">${options.map(o => {
+          const src = o.image ? images(o.image) : null;
+          return `<div class="option${o.id === card.pick ? ' mypick' : ''}" data-opt="${esc(o.id)}">
+            ${src ? `<img src="${esc(src)}" alt="">` : ''}
+            <span class="opt-text"><b>${esc(fill(o.label || ''))}</b>${o.text ? `<small>${esc(fill(o.text))}</small>` : ''}</span>
+            ${o.id === card.pick ? `<em>${esc(kind.pickLabel || 'My pick')}</em>` : ''}
+            <i class="opt-tick">${icon('check')}</i>
+          </div>`;
+        }).join('')}</div><div class="opt-chosen" hidden></div>` : ''}
         <div class="prev" hidden></div>
-        ${card.pick ? `<div class="pick"><b>${esc(kind.pickLabel || 'My pick')}</b>${esc(card.pick)}</div>` : '<div class="pickgap"></div>'}
+        ${pick && !options && !card.handled ? `<div class="pick"><b>${esc(kind.pickLabel || 'My pick')}</b>${esc(pick)}</div>` : '<div class="pickgap"></div>'}
         <button class="attached" data-act="opencomment" hidden>${icon('message-square-text')}<span></span></button>
-        ${breaks ? '<div class="holdline">Hold right to break through</div>' : ''}
+        ${breaks ? `<div class="holdline">Hold ${esc(physicalOf('right'))} to break through</div>` : ''}
         ${hasMore ? `<div class="more">Tap for ${esc(moreText)}</div>` : ''}
         <div class="stamp"></div>
       </div>
       <div class="back">
         <div class="back-scroll">
-          <h3>${esc(card.title || card.text)}</h3>
+          <h3>${esc(card.title || text)}</h3>
           ${pics.map(src => `<img src="${esc(src)}" alt="">`).join('')}
-          ${paras(card.details)}
+          ${paras(fill(card.details || ''))}
         </div>
         <button class="back-hint" data-act="flipback">Tap to flip back</button>
       </div>
@@ -176,14 +240,15 @@ export class DeckView {
     this.charge = 0;
     this.push = null;
     this.broke = false;
+    this.scrolling = null;
   }
 
   async open() {
     this.key = deckKey(this.pack, this.deck);
     this.s = (await store.get(this.key)) || fresh(this.deck);
-    reconcile(this.s, this.deck);
     this.s.draftsSent = this.s.draftsSent || {};
     this.s.wordsSent = this.s.wordsSent || {};
+    reconcile(this.s, this.deck);
     this.render();
     this.deal();
     this.save();
@@ -249,6 +314,7 @@ export class DeckView {
         <div class="progress"><b id="bar"></b></div>
         <div class="tablewrap">
           <div class="table" id="table"><div class="glow" id="glow"></div></div>
+          ${markHTML()}
           <div class="endbox" id="end" hidden></div>
         </div>
         <div class="composer" id="composer" hidden>${padHTML('comment', 'Your comment. Drag down to close.')}</div>
@@ -260,7 +326,7 @@ export class DeckView {
       <div class="overview" id="overview" hidden></div>`;
     const $ = id => this.host.querySelector('#' + id);
     Object.assign(this, {
-      root: $('deck'), table: $('table'), glow: $('glow'), composer: $('composer'), comment: $('comment'),
+      root: $('deck'), table: $('table'), glow: $('glow'), mark: $('mark'), composer: $('composer'), comment: $('comment'),
       notesSheet: $('notes'), notesText: $('notestext'), endBox: $('end'), overview: $('overview'),
       countEl: $('count'), barEl: $('bar'), undoBtn: $('undo'), skipBtn: $('skip'), notesBtn: $('notesbtn'),
     });
@@ -281,6 +347,8 @@ export class DeckView {
       this.lift = { t: performance.now(), x: e.clientX, y: e.clientY }; // its click may land on whatever just opened
       this.act(b.dataset.act, b);
     });
+    // No click at all after a touch, or it could put the cursor mid-text in a pad that just opened under it.
+    this.root.querySelector('.tools').addEventListener('touchend', e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
     padReady(this.comment, text => {
       const id = this.topId();
       if (!id) return;
@@ -292,7 +360,7 @@ export class DeckView {
     });
     padReady(this.notesText, text => this.notesChanged(text));
 
-    // Dragging down brings the comment box or the notes back down, on the box as well as the card.
+    // Dragging down brings the comment box or the notes back down, whatever the swipe directions are.
     const follow = el => dy => {
       el.classList.toggle('following', dy > 0);
       el.style.transform = dy > 0 ? `translate3d(0,${dy * 0.8}px,0)` : '';
@@ -302,6 +370,7 @@ export class DeckView {
 
     this.untrack = track(this.table, {
       blocked: e => this.flipped || !this.topId() || (e.target && e.target.closest && e.target.closest('button')),
+      start: e => { this.dragFrom = e.target; this.scrolling = null; },
       move: d => this.onMove(d),
       release: d => this.onRelease(d),
       cancel: () => { if (this.broke) this.broke = false; else this.spring(); },
@@ -323,8 +392,11 @@ export class DeckView {
       grid: () => this.showOverview(),
       closegrid: () => this.hideOverview(),
       jump: () => this.jump(btn.dataset.id),
-      gridnotes: () => { this.hideOverview(); if (this.topId()) this.toggleNotes(true); },
-      gridreplan: () => { this.hideOverview(); this.showEnd(true); },
+      gridnotes: () => { this.hideOverview(); if (this.topId()) this.toggleNotes(true); else padFocus(this.endBox.querySelector('#endnotes')); },
+      gridreplan: () => { this.hideOverview(); this.showEnd('replan'); },
+      gridover: () => { this.hideOverview(); this.showStartOver(); },
+      overkeep: () => this.startOver(true),
+      overclear: () => this.startOver(false),
       flipback: () => this.flip(false),
       done: () => this.verdict('done'),
       replan: () => this.verdict('replan'),
@@ -341,14 +413,15 @@ export class DeckView {
 
   topId() { return this.s.order[0] || null; }
   topNode() { return this.nodes.get(this.topId()); }
+  topCard() { return this.cards.get(this.topId()); }
 
   // ---------- cards
 
   buildCard(card) {
     const n = document.createElement('div');
-    n.className = `card ${card.rarity || 'common'}`;
+    n.className = `card ${card.rarity || 'common'}${card.handled ? ' is-handled' : ''}${card.kind === 'options' ? ' is-options' : ''}`;
     n.dataset.id = card.id;
-    n.innerHTML = cardHTML(card, this.images);
+    n.innerHTML = cardHTML(card, this.images, this.pack.demo ? fillDirs : t => t);
     return n;
   }
 
@@ -373,6 +446,7 @@ export class DeckView {
     });
     this.table.style.setProperty('--rise', 0);
     this.glow.style.opacity = 0;
+    this.hideMark();
     this.armed = false;
     this.flipped = false;
     this.table.classList.remove('flipped');
@@ -392,6 +466,7 @@ export class DeckView {
       }
       this.syncPrev();
       this.syncAttached();
+      this.syncOptions();
     }
     this.updateCounts();
     if (!ids.length) this.showEnd();
@@ -399,10 +474,10 @@ export class DeckView {
   }
 
   updateCounts() {
-    const total = this.deck.cards.length;
-    const done = Object.keys(this.s.answers).length;
-    plainSlot(this.countEl, `${done} / ${total}`);
-    this.barEl.style.width = `${(done / Math.max(1, total)) * 100}%`;
+    const sum = deckSummary(this.deck, this.s);
+    const done = sum.total - sum.left;
+    plainSlot(this.countEl, sum.total ? `${done} / ${sum.total}` : `${sum.handled} handled`);
+    this.barEl.style.width = `${(done / Math.max(1, sum.total)) * 100}%`;
     this.undoBtn.disabled = !this.s.log.length;
     this.skipBtn.disabled = !this.topId();
   }
@@ -425,35 +500,102 @@ export class DeckView {
     const box = top.querySelector('.prev');
     const a = this.s.answers[id];
     box.hidden = !a;
-    if (a) box.textContent = `You said ${stampWord(this.cards.get(id), a.swipe)}${a.comment ? `: ${a.comment}` : ''}. Throw it again to change that.`;
+    if (!a) return;
+    const card = this.cards.get(id);
+    const chosen = a.selected && a.selected.length ? `: ${this.optionNames(card, a.selected)}` : '';
+    const again = card.handled ? 'This is a newer conclusion.' : 'Swipe it again to change that.';
+    box.textContent = `You said ${stampWord(card, a.swipe)}${chosen}${a.comment ? `, "${a.comment}"` : ''}. ${again}`;
   }
 
-  // Epic and legendary cards: a right swipe has to break through. See pushAgainst.
+  // ---------- option cards
+
+  optionNames(card, ids) {
+    return ids.map(id => (card.options || []).find(o => o.id === id)).filter(Boolean).map(o => o.label).join(', ');
+  }
+
+  chosen(id = this.topId()) { return (this.s.selections[id] || []).slice(); }
+
+  syncOptions() {
+    const top = this.topNode();
+    const card = this.topCard();
+    if (!top || !card || card.kind !== 'options') return;
+    const picked = this.chosen();
+    top.querySelectorAll('.option').forEach(o => o.classList.toggle('on', picked.includes(o.dataset.opt)));
+    const line = top.querySelector('.opt-chosen');
+    if (line) {
+      line.hidden = !picked.length;
+      line.textContent = picked.length ? `Picked: ${this.optionNames(card, picked)}` : '';
+    }
+  }
+
+  // Right on an option card needs something to go with: what's tapped, or my marked pick.
+  cannotGo(logical) {
+    const card = this.topCard();
+    return logical === 'right' && card && card.kind === 'options' && !this.chosen().length && !card.pick;
+  }
+
+  // Epic and legendary cards: a go has to break through. See pushAgainst.
   breakable() {
-    const id = this.topId();
-    const rarity = id && this.cards.get(id).rarity;
-    return !!(RARITY[rarity] && RARITY[rarity].breaks);
+    const c = this.topCard();
+    return !!(c && RARITY[c.rarity] && RARITY[c.rarity].breaks);
   }
 
   size() { return { w: this.host.clientWidth || innerWidth, h: this.root.clientHeight || innerHeight }; }
+
+  // ---------- what shows while swiping
+
+  showMark(phys, logical, word, amount, armed, grow = 1) {
+    const m = this.mark;
+    m.dataset.at = phys;
+    m.dataset.act = word === 'CLOSE' ? 'close' : logical;
+    m.querySelector('.mark-word').textContent = word;
+    m.querySelector('.mark-icon').innerHTML = icon(word === 'CLOSE' ? 'chevron-down' : MARK_ICON[logical]);
+    m.style.opacity = amount;
+    m.style.setProperty('--s', (0.86 + 0.14 * Math.min(amount, 1)) * grow);
+    m.classList.toggle('armed', armed);
+    this.glow.dataset.dir = phys;
+    this.glow.dataset.act = word === 'CLOSE' ? 'close' : logical;
+  }
+
+  hideMark() {
+    if (!this.mark) return;
+    this.mark.style.opacity = 0;
+    this.mark.classList.remove('armed');
+  }
 
   // ---------- swipes
 
   onMove({ dx, dy }) {
     if (this.broke) return; // the card has gone; wait for the finger to lift
+    if (this.scrolling) { this.scrolling.el.scrollTop = this.scrolling.top - dy; return; }
     const top = this.topNode();
     if (!top) return;
-    const dir = dominant(dx, dy);
+    const phys = dominant(dx, dy);
+    const logical = logicalOf(phys);
+
+    // In the comment box the description scrolls by hand, because the table takes every touch for
+    // swipes. A sideways drag on it is still a throw, and so is a vertical one with nowhere to scroll.
+    if (this.composing && !top.classList.contains('dragging')) {
+      const why = this.dragFrom && this.dragFrom.closest && this.dragFrom.closest('.why');
+      const room = why && (dy > 0 ? why.scrollTop > 0 : why.scrollTop + why.clientHeight < why.scrollHeight - 1);
+      if (room && Math.abs(dy) > Math.abs(dx)) {
+        this.scrolling = { el: why, top: why.scrollTop + dy };
+        return;
+      }
+    }
+
     top.classList.add('dragging');
-    if (dir === 'right' && this.breakable()) { this.pushAgainst(dx, dy); return; }
+    if (logical === 'right' && this.breakable()) { this.pushAgainst(dx, dy); return; }
     this.push = null;
     top.style.transform = `translate3d(${dx}px,${dy}px,0) rotate(${clamp(dx * 0.055, -16, 16)}deg)`;
     const { w, h } = this.size();
     const p = progress(dx, dy, w, h, this.composing);
+    const closes = this.composing && (logical === 'down' || (logical === 'up' && !this.draft().trim()));
+    const word = closes ? 'CLOSE' : stampWord(this.topCard(), logical);
     const st = top.querySelector('.stamp');
-    const closes = this.composing && (dir === 'down' || (dir === 'up' && !this.draft().trim()));
-    st.dataset.dir = dir;
-    st.textContent = closes ? 'CLOSE' : stampWord(this.cards.get(this.topId()), dir);
+    st.dataset.dir = phys;
+    st.dataset.act = closes ? 'close' : logical;
+    st.textContent = word;
     st.style.opacity = clamp((p - 0.12) / 0.5, 0, 1);
     st.style.setProperty('--s', 0.84 + 0.16 * Math.min(p, 1));
     const armed = p >= 1;
@@ -462,13 +604,14 @@ export class DeckView {
       st.classList.toggle('armed', armed);
       if (armed && !this.composing) tick();
     }
+    this.showMark(phys, logical, word, clamp((p - 0.12) / 0.5, 0, 1), armed);
     this.table.style.setProperty('--rise', Math.min(p, 1));
-    this.glow.dataset.dir = dir;
     this.glow.style.opacity = Math.min(p, 1) * 0.9;
   }
 
   // The card pushes against resistance while the build-up runs on a clock, because a held finger
-  // sends no moves. Letting go or pulling back drains it, and nothing is sent.
+  // sends no moves. Letting go or pulling back drains it, and nothing is sent. It works along
+  // whichever way go points.
   pushAgainst(dx, dy) {
     this.push = { dx, dy };
     if (this.breakRun) return;
@@ -478,7 +621,9 @@ export class DeckView {
       const dt = now - last;
       last = now;
       const { w } = this.size();
-      const pushing = this.push && this.push.dx >= w * TUNE.breakStart;
+      const [ux, uy] = UNIT[physicalOf('right')];
+      const along = this.push ? this.push.dx * ux + this.push.dy * uy : 0;
+      const pushing = this.push && along >= w * TUNE.breakStart;
       this.charge = clamp(this.charge + (pushing ? dt / TUNE.breakHoldMs : -dt / TUNE.breakDecayMs), 0, 1);
       this.drawCharge();
       if (this.charge >= 1) { this.breakRun = false; this.breakThrough(); return; }
@@ -488,29 +633,40 @@ export class DeckView {
     requestAnimationFrame(step);
   }
 
-  // What builds on a hold: a glow at the edge and behind the card, the stamp growing, the pick box
+  // What builds on a hold: a glow at the edge and behind the card, the mark growing, the pick box
   // filling like a bar and a slight tremble.
   drawCharge() {
     const top = this.topNode();
     if (!top) return;
     const c = this.charge;
+    const card = this.topCard();
+    const phys = physicalOf('right');
     top.style.setProperty('--charge', c.toFixed(3));
     this.table.style.setProperty('--rise', c);
-    this.glow.dataset.dir = 'break';
-    this.glow.dataset.rarity = this.cards.get(this.topId()).rarity;
+    this.glow.dataset.dir = phys;
+    this.glow.dataset.act = 'break';
+    this.glow.dataset.rarity = card.rarity;
     this.glow.style.opacity = c;
-    if (!this.push) return;
+    if (!this.push) { this.mark.style.opacity = c; return; }
     const { w } = this.size();
-    const x = w * TUNE.breakPush * (1 - Math.exp(-this.push.dx / (w * 0.2)));
+    const [ux, uy] = UNIT[phys];
+    const along = this.push.dx * ux + this.push.dy * uy;
+    const across = this.push.dx * uy - this.push.dy * ux;
+    const dist = w * TUNE.breakPush * (1 - Math.exp(-Math.max(0, along) / (w * 0.2)));
     const j = c * c * 2;
     const jx = (Math.random() - 0.5) * j, jy = (Math.random() - 0.5) * j;
-    top.style.transform = `translate3d(${x + jx}px,${this.push.dy * 0.12 + jy}px,0) rotate(${x * 0.03 + jx * 0.2}deg) scale(${1 + c * 0.018})`;
+    const x = ux * dist + uy * across * 0.12 + jx, y = uy * dist - ux * across * 0.12 + jy;
+    top.style.transform = `translate3d(${x}px,${y}px,0) rotate(${ux * dist * 0.03 + jx * 0.2}deg) scale(${1 + c * 0.018})`;
+    const word = stampWord(card, 'right');
     const st = top.querySelector('.stamp');
-    st.dataset.dir = 'right';
-    st.textContent = stampWord(this.cards.get(this.topId()), 'right');
+    st.dataset.dir = phys;
+    st.dataset.act = 'right';
+    st.textContent = word;
     st.style.opacity = clamp(0.3 + c * 0.7, 0, 1);
     st.style.setProperty('--s', 0.8 + 0.34 * c);
     st.classList.toggle('armed', c > 0.85);
+    this.showMark(phys, 'right', word, clamp(0.35 + c * 0.65, 0, 1), c > 0.85, 1 + c * 0.55);
+    this.glow.dataset.act = 'break';
     const stage = Math.floor(c * 3);
     if (stage !== this.chargeStage) {
       this.chargeStage = stage;
@@ -522,25 +678,29 @@ export class DeckView {
     this.broke = true;
     this.push = null;
     this.chargeStage = 0;
-    this.commit('right', undefined, true);
+    if (this.cannotGo('right')) { this.spring(); this.nudgeOptions(); return; }
+    this.commit('right', physicalOf('right'), undefined, true);
   }
 
   onRelease(d) {
     if (this.broke) { this.broke = false; return; }
+    if (this.scrolling) { this.scrolling = null; return; }
     const { w, h } = this.size();
-    if (this.push) { // a right swipe let go before breaking through
+    if (this.push) { // a go let go before breaking through
       this.spring();
       this.holdHint();
       return;
     }
-    const dir = decide({ ...d, w, h, compact: this.composing });
-    if (!dir) { this.spring(); return; }
-    if (this.composing && dir === 'down') { this.spring(); this.closeComposer(); return; }
-    if (dir === 'up') {
+    const phys = decide({ ...d, w, h, compact: this.composing });
+    if (!phys) { this.spring(); return; }
+    const logical = logicalOf(phys);
+    if (this.composing && logical === 'down') { this.spring(); this.closeComposer(); return; }
+    if (logical === 'up') {
       if (!this.composing) { this.spring(); this.openComposer(); return; }
       if (!this.draft().trim()) { this.spring(); this.closeComposer(); return; }
     }
-    this.commit(dir, d);
+    if (this.cannotGo(logical)) { this.spring(); this.nudgeOptions(); return; }
+    this.commit(logical, phys, d);
   }
 
   holdHint() {
@@ -548,6 +708,11 @@ export class DeckView {
     const line = top && top.querySelector('.holdline');
     if (!line || !line.animate) return;
     line.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.14)' }, { transform: 'scale(1)' }], { duration: 320 });
+  }
+
+  nudgeOptions() {
+    const box = this.topNode() && this.topNode().querySelector('.options');
+    if (box && box.animate) box.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(5px)' }, { transform: 'translateX(0)' }], { duration: 220 });
   }
 
   spring() {
@@ -558,6 +723,7 @@ export class DeckView {
     if (!draining) {
       this.table.style.setProperty('--rise', 0);
       this.glow.style.opacity = 0;
+      this.hideMark();
     }
     this.armed = false;
     if (!top) return;
@@ -574,11 +740,23 @@ export class DeckView {
   }
 
   onTap(e) {
-    const t = e.target;
+    const t = this.dragFrom || e.target; // the lift's own target is the table, which holds the finger
     if (t && t.closest && t.closest('.attached')) { this.openComposer(); return; }
     if (this.composing) return;
     const id = this.topId();
     if (!id) return;
+    const opt = t && t.closest && t.closest('.option');
+    if (opt) {
+      const picked = this.chosen();
+      const at = picked.indexOf(opt.dataset.opt);
+      if (at >= 0) picked.splice(at, 1); else picked.push(opt.dataset.opt);
+      const inOrder = (this.cards.get(id).options || []).map(o => o.id);
+      this.s.selections[id] = picked.sort((a, b) => inOrder.indexOf(a) - inOrder.indexOf(b));
+      this.syncOptions();
+      this.save();
+      tick();
+      return;
+    }
     const c = this.cards.get(id);
     if (c.details || (c.images || []).length) this.flip(true);
     else {
@@ -598,31 +776,41 @@ export class DeckView {
     if (on) top.querySelector('.back-scroll').scrollTop = 0;
   }
 
-  // Throws the top card, records the answer and has the next card ready at once.
-  commit(dir, d = { dx: 0, dy: 0, vx: 0, vy: 0 }, punched = false) {
+  // Throws the top card, records the answer and has the next card ready at once. `logical` is what
+  // it means, `phys` is the way it went.
+  commit(logical, phys = physicalOf(logical), d = { dx: 0, dy: 0, vx: 0, vy: 0 }, punched = false) {
     const id = this.topId();
     const card = this.cards.get(id);
     const comment = this.draft().trim();
     const eid = newId();
     const prev = this.s.answers[id] || null;
     const version = card.version || 1;
-    this.s.answers[id] = { swipe: dir, comment, at: Date.now(), eid, version };
-    this.s.log.push({ t: 'answer', id, eid, dir, comment, prev });
+    const event = { type: 'answer', eid, card: id, cardVersion: version, title: card.title || '', kind: card.kind || 'question', swipe: logical, stamp: stampWord(card, logical), comment };
+    const answer = { swipe: logical, comment, at: Date.now(), eid, version };
+    if (card.handled) event.handledAt = answer.handledAt = card.handled.at;
+    const tapped = card.kind === 'options' ? this.chosen() : [];
+    if (card.kind === 'options') {
+      let selected = tapped;
+      if (logical === 'right' && !tapped.length) { selected = [card.pick]; event.byPick = true; }
+      if (logical === 'right' || logical === 'left') event.selected = answer.selected = selected;
+    }
+    this.s.answers[id] = answer;
+    this.s.log.push({ t: 'answer', id, eid, dir: logical, phys, comment, prev, tapped });
     this.s.order.shift();
     this.s.reviewing = null;
     delete this.s.drafts[id];
     delete this.s.draftsSent[id];
     if (comment) this.s.wordsSent[`c:${id}`] = comment;
-    this.send({ type: 'answer', eid, card: id, cardVersion: version, title: card.title || '', kind: card.kind || 'question', swipe: dir, stamp: stampWord(card, dir), comment }, !!comment);
+    this.send(event, !!comment);
     if (this.composing) this.closeComposer(true);
-    if (punched) this.punch(id, card.rarity);
-    else this.fly(id, dir, d);
+    if (punched) this.punch(id, card.rarity, phys);
+    else this.fly(id, phys, d);
     tick();
     this.deal();
     this.saveNow();
   }
 
-  fly(id, dir, { dx, dy, vx, vy }) {
+  fly(id, phys, { dx, dy, vx, vy }) {
     const node = this.nodes.get(id);
     if (!node) return;
     this.nodes.delete(id);
@@ -630,8 +818,8 @@ export class DeckView {
     node.classList.remove('dragging');
     node.style.zIndex = 30;
     const { w, h } = this.size();
-    const side = dir === 'left' || dir === 'right';
-    const sign = dir === 'right' || dir === 'down' ? 1 : -1;
+    const side = phys === 'left' || phys === 'right';
+    const sign = phys === 'right' || phys === 'down' ? 1 : -1;
     const tx = side ? sign * w * 1.35 : dx + (Math.abs(vy) > 0.05 ? (vx / Math.abs(vy)) * h : 0);
     const ty = side ? dy + (Math.abs(vx) > 0.05 ? (vy / Math.abs(vx)) * w : 0) : sign * h * 1.25;
     const rot = clamp(tx * 0.055, -30, 30);
@@ -644,17 +832,18 @@ export class DeckView {
       { duration: dur, easing: 'cubic-bezier(.3,.7,.7,1)' }).onfinish = () => node.remove();
   }
 
-  // The end of a break-through: the card punches off to the right, with a quick flash.
-  punch(id, rarity) {
+  // The end of a break-through: the card punches off the way go points, with a quick flash.
+  punch(id, rarity, phys) {
     const node = this.nodes.get(id);
     if (!node) return;
     this.nodes.delete(id);
     node.classList.add('ghost');
     node.classList.remove('dragging');
     node.style.zIndex = 30;
-    const { w } = this.size();
+    const { w, h } = this.size();
+    const [ux, uy] = UNIT[phys];
     const from = node.style.transform || 'none';
-    const to = `translate3d(${w * 1.4}px,-6px,0) rotate(7deg) scale(1.03)`;
+    const to = `translate3d(${ux * w * 1.4}px,${uy ? uy * h * 1.2 : -6}px,0) rotate(${ux * 7}deg) scale(1.03)`;
     node.style.transform = to;
     if (node.animate) node.animate([{ transform: from }, { transform: to }], { duration: 170, easing: 'cubic-bezier(.5,.05,.8,.5)' }).onfinish = () => node.remove();
     else node.remove();
@@ -681,11 +870,13 @@ export class DeckView {
       if (e.prev) { this.s.answers[e.id] = e.prev; this.s.reviewing = e.id; }
       else delete this.s.answers[e.id];
       if (e.comment) this.s.drafts[e.id] = e.comment;
+      if (e.tapped && e.tapped.length) this.s.selections[e.id] = e.tapped;
       this.send({ type: 'undo', card: e.id, of: e.eid }, !!e.comment);
     }
+    if (e.t === 'skip-handled') delete this.s.handledSkipped[e.id];
     this.s.order.unshift(e.id);
     this.deal();
-    this.enter(e.t === 'answer' ? e.dir : 'skip');
+    this.enter(e.t === 'answer' ? (e.phys || physicalOf(e.dir)) : 'skip');
     this.saveNow();
   }
 
@@ -707,7 +898,10 @@ export class DeckView {
     if (!id) return;
     this.toggleNotes(false);
     if (this.composing) this.closeComposer();
-    if (this.s.order.length === 1 && !this.s.reviewing) {
+    const card = this.cards.get(id);
+    const nothingOwedElse = !this.s.order.some(x => x !== id && !this.cards.get(x).handled);
+    const leaves = card.handled && nothingOwedElse; // a handled card isn't owed, so a deck can end without it
+    if (this.s.order.length === 1 && !this.s.reviewing && !leaves) {
       const top = this.topNode();
       top.animate && top.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-7px)' }, { transform: 'translateX(5px)' }, { transform: 'translateX(0)' }], { duration: 200 });
       return;
@@ -724,9 +918,13 @@ export class DeckView {
     }
     this.s.order.shift();
     if (this.s.reviewing === id) this.s.reviewing = null; // an answered card just leaves again
-    else {
+    else if (leaves) {
+      this.s.handledSkipped[id] = card.handled.at;
+      this.s.log.push({ t: 'skip-handled', id });
+    } else {
       this.s.order.push(id);
       this.s.log.push({ t: 'skip', id });
+      arrange(this.s, this.cards);
     }
     this.deal();
     this.saveNow();
@@ -749,7 +947,8 @@ export class DeckView {
 
   toggleNotes(force) {
     if (force === undefined && !this.endBox.hidden) { // at the end of a deck the pad is already on screen
-      padFocus(this.endBox.querySelector('#endnotes'));
+      const pad = this.endBox.querySelector('#endnotes');
+      if (pad) padFocus(pad);
       return;
     }
     const on = force === undefined ? this.notesSheet.hidden : force;
@@ -798,7 +997,7 @@ export class DeckView {
     const top = this.topNode();
     if (top && !this.pinchFired) {
       top.classList.add('dragging');
-      top.style.transform = `scale(${clamp(scale, 0.6, 1.06)})`;
+      top.style.transform = `scale(${clamp(scale, 0.6, 1)})`; // never bigger: it would reach the screen's edges and cover the buttons
     }
     if (!this.pinchFired && scale < TUNE.pinchOpen) {
       this.pinchFired = true;
@@ -816,24 +1015,27 @@ export class DeckView {
     const cur = this.topId();
     const tiles = this.deck.cards.map(c => {
       const a = this.s.answers[c.id];
-      const stamp = a ? stampWord(c, a.swipe) : '';
-      const cls = [c.rarity || 'common', c.id === cur ? 'current' : '', a ? 'answered' : ''].join(' ');
+      const fresher = a && (!c.handled || a.at >= (Date.parse(c.handled.at) || 0));
+      const stamp = fresher ? stampWord(c, a.swipe) : '';
+      const cls = [c.rarity || 'common', c.id === cur ? 'current' : '', fresher ? 'answered' : '', c.handled ? 'handled' : ''].join(' ');
       return `<button class="tile ${cls}" data-act="jump" data-id="${esc(c.id)}">
-        <span class="tile-title">${esc(c.title || c.text)}</span>
-        <span class="tile-state ${a ? 'dir-' + a.swipe : ''}">${esc(stamp) || 'Waiting'}${a && a.comment ? `<i>${icon('message-square-text')}</i>` : ''}</span>
+        <span class="tile-title">${c.handled ? `<i class="tile-tick">${icon('check')}</i>` : ''}${esc(c.title || c.text)}</span>
+        <span class="tile-state ${fresher ? 'dir-' + a.swipe : ''}">${esc(stamp) || (c.handled ? 'Handled' : 'Waiting')}${a && a.comment ? `<i>${icon('message-square-text')}</i>` : ''}</span>
       </button>`;
     }).join('');
+    const sum = deckSummary(this.deck, this.s);
     this.overview.innerHTML = `
       <div class="ov-head">
         <div class="t">${esc(this.deck.title)}</div>
-        <div class="n">${Object.keys(this.s.answers).length} / ${this.deck.cards.length}</div>
+        <div class="n">${sum.total ? `${sum.total - sum.left} / ${sum.total}` : `${sum.handled} handled`}</div>
         <button class="iconbtn" data-act="closegrid" aria-label="Back to the card">${icon('x')}</button>
       </div>
       <div class="ov-grid scroll">
         ${tiles}
         <div class="ov-foot">
           <button class="ghostbtn" data-act="gridnotes">${icon('notebook-pen')}Deck notes</button>
-          <button class="ghostbtn" data-act="gridreplan">${icon('rotate-ccw')}Send this whole deck back</button>
+          <button class="ghostbtn" data-act="gridreplan">${icon('message-square-text')}Replan this deck</button>
+          <button class="ghostbtn" data-act="gridover">${icon('rotate-ccw')}Start this deck over</button>
         </div>
       </div>`;
     this.overview.hidden = false;
@@ -841,7 +1043,7 @@ export class DeckView {
 
   hideOverview() { this.overview.hidden = true; }
 
-  // Brings any card to the top. An answered one can be thrown again to change the answer.
+  // Brings any card to the top. An answered one can be swiped again to change the answer.
   jump(id) {
     this.hideOverview();
     if (this.s.reviewing && this.s.reviewing !== id) {
@@ -856,7 +1058,8 @@ export class DeckView {
 
   // ---------- the end of the deck
 
-  showEnd(early = false) {
+  // `mode` is null at the real end, or 'replan' when sent here from the grid to confirm that.
+  showEnd(mode = null) {
     this.toggleNotes(false);
     if (this.composing) this.closeComposer();
     const groups = DIRS.map(dir => {
@@ -865,18 +1068,21 @@ export class DeckView {
       return { dir, n: hits.length, words };
     }).filter(g => g.n);
     const mins = Math.max(1, Math.round((Date.now() - (this.s.startedAt || Date.now())) / 60000));
-    const total = this.deck.cards.length, done = Object.keys(this.s.answers).length;
-    const sub = early ? `${done} of ${total} cards answered.` : `${total} card${total === 1 ? '' : 's'} in about ${mins} minute${mins === 1 ? '' : 's'}.`;
+    const sum = deckSummary(this.deck, this.s);
+    const early = mode === 'replan';
+    const sub = early
+      ? `This asks for the deck to be rethought from the base. Your ${sum.total - sum.left} answer${sum.total - sum.left === 1 ? '' : 's'} stay, and nothing here is cleared.`
+      : `${sum.total} card${sum.total === 1 ? '' : 's'} in about ${mins} minute${mins === 1 ? '' : 's'}.`;
     this.endBox.innerHTML = `
       <div class="end-scroll scroll">
-        <div class="end-stamp">${early ? 'SEND BACK?' : 'DECK DONE'}</div>
+        <h2 class="end-title">${early ? 'Replan this deck?' : 'Deck done'}</h2>
         <div class="end-sub">${esc(sub)}</div>
         <div class="tally">${groups.map(g => `<div class="dir-${g.dir}"><b data-to="${g.n}">0</b><span>${esc(g.words)}</span></div>`).join('')}</div>
         ${padHTML('endnotes', 'Anything else on this deck?')}
         <div class="end-actions">
-          <button class="primary" data-act="done" ${early ? 'hidden' : ''}>Deck's done</button>
-          <button class="secondary" data-act="replan">Replan from the base</button>
-          ${early ? '<button class="ghostbtn" data-act="keepgoing">Keep going</button>' : ''}
+          ${early ? '' : `<button class="primary" data-act="done">Deck's done</button>`}
+          <button class="${early ? 'primary' : 'secondary'}" data-act="replan">Replan this deck</button>
+          ${early ? '<button class="ghostbtn" data-act="keepgoing">Never mind</button>' : ''}
         </div>
       </div>`;
     const pad = this.endBox.querySelector('#endnotes');
@@ -895,6 +1101,60 @@ export class DeckView {
     this.root.classList.remove('ended');
   }
 
+  showStartOver() {
+    this.toggleNotes(false);
+    if (this.composing) this.closeComposer();
+    const words = wordsIn(this.deck, this.s);
+    this.endBox.innerHTML = `
+      <div class="end-scroll scroll">
+        <h2 class="end-title">Start this deck over?</h2>
+        <div class="end-sub">Your swipes get cleared and every card is dealt again. Anything already sent stays with the writer.</div>
+        ${words.length ? `<button class="primary" data-act="overkeep">Keep my notes and comments</button>
+          <div class="end-sub small">Comments come back as drafts on their cards.</div>
+          <button class="secondary" data-act="overclear">Clear those too</button>
+          <div class="end-sub small">Anything not sent yet goes first, so it isn't lost.</div>`
+        : '<button class="primary" data-act="overclear">Start over</button>'}
+        <button class="ghostbtn" data-act="keepgoing">Never mind</button>
+      </div>`;
+    this.endBox.hidden = false;
+    this.root.classList.add('ended');
+    this.skipBtn.disabled = true;
+  }
+
+  // Unsent words go first, so nothing that was written can be lost by starting over.
+  startOver(keep) {
+    this.secure();
+    const words = wordsIn(this.deck, this.s);
+    if (this.pack.demo) {
+      sendWords(this.pack, this.deck, this.s, words.filter(w => !w.sent));
+      if (!keep) archiveWords(words);
+    }
+    this.send({ type: 'deck-reset', keptNotes: keep }, false);
+    const next = fresh(this.deck);
+    next.wordsSent = this.s.wordsSent || {};
+    next.draftsSent = {};
+    if (keep) {
+      next.notes = this.s.notes || '';
+      next.notesSent = this.s.notes || '';
+      next.drafts = { ...this.s.drafts };
+      next.draftsSent = { ...this.s.draftsSent };
+      for (const [id, a] of Object.entries(this.s.answers)) {
+        if (a.comment && !next.drafts[id]) {
+          next.drafts[id] = a.comment;
+          next.draftsSent[id] = a.comment; // it went with the answer
+        }
+      }
+    }
+    this.s = next;
+    reconcile(this.s, this.deck);
+    for (const node of this.nodes.values()) node.remove();
+    this.nodes.clear();
+    padSet(this.notesText, this.s.notes);
+    this.hideOverview();
+    this.deal();
+    this.saveNow();
+  }
+
   countUp(el) {
     const to = +el.dataset.to, start = performance.now();
     const step = now => {
@@ -909,9 +1169,10 @@ export class DeckView {
     this.sendNotes();
     const tally = {};
     for (const a of Object.values(this.s.answers)) tally[a.swipe] = (tally[a.swipe] || 0) + 1;
+    const sum = deckSummary(this.deck, this.s);
     this.s.verdict = which;
     this.s.verdictSig = deckSig(this.deck);
-    this.send({ type: 'deck', verdict: which, tally, answered: Object.keys(this.s.answers).length, total: this.deck.cards.length });
+    this.send({ type: 'deck', verdict: which, tally, answered: sum.total - sum.left, total: sum.total }, false);
     Promise.resolve(this.saveNow()).then(() => this.onVerdict(which));
   }
 }

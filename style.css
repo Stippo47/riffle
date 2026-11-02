@@ -4,8 +4,8 @@
 /* Cards stay light in every look: dark text on a tint of their rarity's colour. */
 :root{
   --sat:env(safe-area-inset-top,0px); --sab:env(safe-area-inset-bottom,0px);
-  --card-common:#ffffff; --card-uncommon:#fff5b0; --card-rare:#cff5f5; --card-epic:#e7d6ff; --card-legendary:#ffdc9a;
-  --edge-common:transparent; --edge-uncommon:#e2c62e; --edge-rare:#62d3d3; --edge-epic:#b48cff; --edge-legendary:#ee9f12;
+  --card-common:#ffffff; --card-uncommon:#fff9d6; --card-rare:#cff5f5; --card-epic:#e7d6ff; --card-legendary:#ffdc9a;
+  --edge-common:transparent; --edge-uncommon:#efdc78; --edge-rare:#62d3d3; --edge-epic:#b48cff; --edge-legendary:#ee9f12;
   --card-ink:#17161c; --card-dim:#55535f; --pick-bg:rgba(23,22,28,.06); --pick-rule:#17161c;
   --go:#17a35a; --work:#e8741c; --idk:#2d7fd6; --note:#a87c00; --bad:#d8362f;
 }
@@ -219,7 +219,7 @@ svg{display:block}
 /* ---------- the deck */
 .deck{position:relative;gap:6px;padding:calc(var(--sat) + 2px) 12px calc(var(--sab) + 10px)}
 .topline{display:contents}
-.deckbar{order:1}
+.deck .deckbar{order:1}
 .progress{order:2;height:3px;background:var(--line);overflow:hidden;flex:none}
 .progress b{display:block;height:100%;width:0;background:var(--ink);transition:width .2s}
 .tools{order:3;display:grid;grid-template-columns:repeat(4,1fr);background:var(--rail);box-shadow:inset 0 0 0 1px var(--rail-line);border-radius:var(--rail-radius);color:var(--rail-ink);flex:none}
@@ -249,6 +249,9 @@ svg{display:block}
 [data-look=inventory][data-layout=one] .deck .tools button{width:36px;min-height:38px}
 [data-look=inventory][data-layout=one] .deck .topline{background:none}
 [data-look=table][data-layout=one] .deck .deckbar .t,[data-look=table][data-layout=one] .deck .deckbar .n,[data-look=table][data-layout=one] .deck .iconbtn{color:var(--rail-ink)}
+
+/* A confirm for Start over sits in the same place as the end of a deck. */
+.end-scroll>.primary,.end-scroll>.secondary,.end-scroll>.ghostbtn{flex:none}
 
 /* Layout: row under the card */
 [data-layout=under] .deck .tablewrap{order:3;margin-bottom:20px}
@@ -281,15 +284,45 @@ svg{display:block}
 [data-layout=story] .deck:not(.composing):not(.ended) .card[data-pos="2"]{display:none}
 [data-layout=story] .deck:not(.composing):not(.ended) .face h2{font-size:clamp(27px,8.4vw,34px);margin-top:18px}
 [data-layout=story] .deck:not(.composing):not(.ended) .why{font-size:clamp(17px,5vw,19px)}
-[data-layout=story] .deck:not(.composing):not(.ended) .glow{display:none}
 
-.glow{position:absolute;inset:-30px -16px;opacity:0;pointer-events:none;z-index:0}
-.glow[data-dir=right]{background:radial-gradient(60% 55% at 100% 50%,color-mix(in srgb,var(--go) 62%,transparent),transparent)}
-.glow[data-dir=left]{background:radial-gradient(60% 55% at 0% 50%,color-mix(in srgb,var(--work) 62%,transparent),transparent)}
-.glow[data-dir=down]{background:radial-gradient(60% 45% at 50% 100%,color-mix(in srgb,var(--idk) 62%,transparent),transparent)}
-.glow[data-dir=up]{background:radial-gradient(60% 45% at 50% 0%,color-mix(in srgb,#e8c52a 62%,transparent),transparent)}
-.glow[data-dir=break]{background:radial-gradient(70% 62% at 58% 50%,var(--aura,#b47cff),transparent)}
-.glow[data-rarity=legendary]{--aura:#ffae1a}
+/* The glow: at the edge the card is heading for, in the colour of what that means. */
+.glow{position:absolute;inset:0;opacity:0;pointer-events:none;z-index:31;--gc:var(--go);overflow:hidden;border-radius:var(--radius)}
+.glow[data-act=left]{--gc:var(--work)}
+.glow[data-act=down]{--gc:var(--idk)}
+.glow[data-act=up]{--gc:#d9b200}
+.glow[data-act=close]{--gc:#8c8f98}
+.glow[data-act=break]{--gc:#a35cff}
+.glow[data-act=break][data-rarity=legendary]{--gc:#ff9d00}
+.glow[data-dir=right]{background:radial-gradient(46% 62% at 100% 50%,color-mix(in srgb,var(--gc) 78%,transparent),transparent)}
+.glow[data-dir=left]{background:radial-gradient(46% 62% at 0% 50%,color-mix(in srgb,var(--gc) 78%,transparent),transparent)}
+.glow[data-dir=down]{background:radial-gradient(72% 34% at 50% 100%,color-mix(in srgb,var(--gc) 78%,transparent),transparent)}
+.glow[data-dir=up]{background:radial-gradient(72% 34% at 50% 0%,color-mix(in srgb,var(--gc) 78%,transparent),transparent)}
+
+/* What shows while swiping. The word and icon sit at the edge of the card's area, so they never
+   cover the title or the buttons in any layout. */
+.edgemark{position:absolute;z-index:33;opacity:0;pointer-events:none;display:flex;align-items:center;justify-content:center;--s:1;--t:none;--mc:var(--go);transform:var(--t) scale(var(--s));transform-origin:center}
+.edgemark[data-act=left]{--mc:var(--work)}
+.edgemark[data-act=down]{--mc:var(--idk)}
+.edgemark[data-act=up]{--mc:#a88a00}
+.edgemark[data-act=close]{--mc:#6c6f78}
+.edgemark[data-at=right]{right:-4px;top:50%;--t:translateY(-50%)}
+.edgemark[data-at=left]{left:-4px;top:50%;--t:translateY(-50%)}
+.edgemark[data-at=up]{top:4px;left:50%;--t:translateX(-50%)}
+.edgemark[data-at=down]{bottom:4px;left:50%;--t:translateX(-50%)}
+.mark-word{display:block;padding:5px 11px;background:var(--mc);color:#fff;font-family:var(--font);font-size:15px;font-weight:800;letter-spacing:.05em;border-radius:min(var(--radius),8px);white-space:nowrap}
+.mark-icon{display:none;width:58px;height:58px;border-radius:50%;background:var(--mc);color:#fff;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(0,0,0,.3)}
+.mark-icon svg{width:32px;height:32px;fill:none;stroke:currentColor;stroke-width:2.6}
+[data-mark=icon] .mark-word{display:none}
+[data-mark=icon] .mark-icon{display:flex}
+[data-mark=colour] .edgemark,[data-mark=stamp] .edgemark{display:none}
+:root:not([data-mark=stamp]) .face>.stamp{display:none}
+.edgemark.armed .mark-word{box-shadow:0 0 0 2px #fff,0 0 0 4px var(--mc)}
+.edgemark.armed .mark-icon{box-shadow:0 0 0 2px #fff,0 0 0 5px var(--mc)}
+[data-layout=story] .deck:not(.composing):not(.ended) .edgemark[data-at=up]{top:calc(var(--sat) + 58px)}
+[data-layout=story] .deck:not(.composing):not(.ended) .edgemark[data-at=down]{bottom:calc(var(--sab) + 8px)}
+[data-layout=story] .deck:not(.composing):not(.ended) .edgemark[data-at=right]{right:6px}
+[data-layout=story] .deck:not(.composing):not(.ended) .edgemark[data-at=left]{left:6px}
+.pv-moving{transform:translate3d(20px,2px,0) rotate(1.8deg)!important}
 
 .card{position:absolute;inset:0;transform-origin:50% 112%;transition:transform .18s cubic-bezier(.2,.9,.3,1.12);will-change:transform;--charge:0}
 .card.dragging{transition:none}
@@ -334,13 +367,18 @@ svg{display:block}
 .more{margin-top:8px;font-size:13.5px;color:var(--card-dim);text-align:center}
 .face>.stamp{position:absolute;z-index:4;top:42%;font-family:var(--stamp-font);font-weight:800;font-size:clamp(38px,12vw,50px);letter-spacing:.03em;padding:1px 13px;border:5px solid currentColor;border-radius:10px;line-height:1.08;background:rgba(255,255,255,.72);opacity:0;pointer-events:none;white-space:nowrap;--s:1}
 [data-look=inventory] .face>.stamp{border-radius:0;font-weight:700}
-.stamp[data-dir=right]{left:16px;color:var(--go);transform:rotate(-12deg) scale(var(--s))}
-.stamp[data-dir=left]{right:16px;color:var(--work);transform:rotate(12deg) scale(var(--s))}
-.stamp[data-dir=down]{top:10%!important;left:50%;color:var(--idk);transform:translateX(-50%) rotate(-5deg) scale(var(--s))}
-.stamp[data-dir=up]{top:auto!important;bottom:17%;left:50%;color:var(--note);transform:translateX(-50%) rotate(5deg) scale(var(--s))}
+.stamp[data-dir=right]{left:16px;transform:rotate(-12deg) scale(var(--s))}
+.stamp[data-dir=left]{right:16px;transform:rotate(12deg) scale(var(--s))}
+.stamp[data-dir=down]{top:10%!important;left:50%;transform:translateX(-50%) rotate(-5deg) scale(var(--s))}
+.stamp[data-dir=up]{top:auto!important;bottom:17%;left:50%;transform:translateX(-50%) rotate(5deg) scale(var(--s))}
+.stamp[data-act=right]{color:var(--go)}
+.stamp[data-act=left]{color:var(--work)}
+.stamp[data-act=down]{color:var(--idk)}
+.stamp[data-act=up]{color:var(--note)}
+.stamp[data-act=close]{color:#6c6f78}
 .stamp.armed{box-shadow:0 0 0 3px currentColor}
 
-/* What builds while a right swipe breaks through: the edge glow, here, plus the stamp and the pick's fill. */
+/* What builds while a swipe breaks through: the edge glow, here, plus the mark and the pick's fill. */
 .face::after{content:"";position:absolute;inset:0;z-index:3;border-radius:inherit;pointer-events:none;opacity:var(--charge);box-shadow:inset 0 0 30px 9px var(--charge-glow,transparent)}
 .flash{position:absolute;inset:-8px;z-index:29;pointer-events:none;background:#fff;opacity:0}
 .flash.epic{background:radial-gradient(closest-side,#fff,#d9bfff)}
@@ -361,17 +399,21 @@ svg{display:block}
 .notes-sheet .pad{flex:1}
 
 /* The comment box. The title and buttons go away, and the card and box share all the height the keyboard leaves. */
-.composer{flex:1 1 56%;min-height:0;display:flex;flex-direction:column;transition:transform .16s ease-out}
+.composer{flex:1 1 42%;min-height:0;display:flex;flex-direction:column;transition:transform .16s ease-out}
 .composer.following{transition:none}
 .composer .pad{flex:1}
 .deck.composing{gap:8px;padding:calc(var(--sat) + 6px) 10px 8px}
 .deck.composing .topline,.deck.composing .progress{display:none}
-.deck.composing .tablewrap{flex:1 1 44%;min-height:110px;margin:0}
-.deck.composing .why,.deck.composing .more,.deck.composing .holdline,.deck.composing .attached,.deck.composing .chips,.deck.composing .prev,.deck.composing .glow{display:none}
-.deck.composing .face{padding:12px 16px}
-.deck.composing .face h2{font-size:clamp(18px,5.4vw,21px);margin:0 0 6px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
-.deck.composing .pick{font-size:14.5px;padding:6px 10px;margin-top:auto;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.deck.composing .tablewrap{flex:1 1 58%;min-height:150px;margin:0}
+.deck.composing .more,.deck.composing .holdline,.deck.composing .attached,.deck.composing .chips,.deck.composing .prev,.deck.composing .handled-band,.deck.composing .options{display:none}
+.deck.composing .face{padding:11px 16px}
+.deck.composing .face h2{flex:none;font-size:clamp(17px,5vw,20px);margin:0 0 5px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+/* The description scrolls here if it needs to. js/deck.js scrolls it by hand, since swipes own the touch. */
+.deck.composing .why{touch-action:none;flex:1 1 0;min-height:24px;overflow-y:auto;overscroll-behavior:contain;font-size:14.5px;line-height:1.3;margin-bottom:6px;font-weight:400;color:var(--card-dim)}
+.deck.composing .pickgap{display:none}
+.deck.composing .pick{flex:none;font-size:14px;padding:5px 10px;margin-top:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .deck.composing .pick b{display:none}
+.deck.composing .opt-chosen{font-size:14px;margin-bottom:4px}
 .deck.composing .face>.stamp{font-size:30px;border-width:3px;top:24%}
 .deck.composing .card[data-pos="1"],.deck.composing .card[data-pos="2"]{display:none}
 .deck.noting .table{visibility:hidden}
@@ -382,7 +424,8 @@ svg{display:block}
 .ov-head{display:flex;align-items:center;gap:8px;flex:none;min-height:42px}
 .ov-head .t{font-family:var(--display);font-size:20px;font-weight:700;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ov-head .n{font-size:15px;color:var(--dim)}
-.ov-grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,1fr);gap:9px;align-content:start;padding:6px 0 calc(var(--sab) + 16px)}
+/* The side padding is room for the current tile's outline, which the scrolling box would otherwise cut off. */
+.ov-grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,1fr);gap:9px;align-content:start;margin:0 -7px;padding:6px 7px calc(var(--sab) + 16px)}
 .tile{display:flex;flex-direction:column;justify-content:space-between;aspect-ratio:3/4;padding:9px;border-radius:min(var(--radius),12px);background:var(--tint);color:var(--card-ink);text-align:left;box-shadow:inset 0 0 0 1.5px var(--rim,transparent),0 0 0 1px rgba(0,0,0,.08)}
 [data-look=inventory] .tile{box-shadow:0 0 0 3px #1d1d1d}
 .tile.current{outline:3px solid var(--ink);outline-offset:2px}
@@ -398,10 +441,9 @@ svg{display:block}
 .endbox{position:absolute;inset:0;z-index:20}
 .end-scroll{position:absolute;inset:0;display:flex;flex-direction:column;align-items:stretch}
 .deck.ended .table{visibility:hidden}
-.end-stamp{align-self:center;font-family:var(--stamp-font);font-weight:800;font-size:38px;color:var(--go);border:4px solid currentColor;border-radius:9px;padding:0 12px;transform:rotate(-4deg);margin:6px 0 8px;line-height:1.1;background:rgba(255,255,255,.94);animation:slam .26s cubic-bezier(.2,1.4,.4,1)}
-[data-look=inventory] .end-stamp{border-radius:0}
-@keyframes slam{from{transform:rotate(-4deg) scale(1.7);opacity:0}to{transform:rotate(-4deg) scale(1);opacity:1}}
-.end-sub{text-align:center;font-size:15px;color:var(--dim);margin-bottom:10px}
+.end-title{font-family:var(--display);font-size:28px;font-weight:700;text-align:center;margin:8px 0 6px;line-height:1.1}
+.end-sub{text-align:center;font-size:15px;line-height:1.3;color:var(--dim);margin-bottom:10px}
+.end-sub.small{font-size:13px;margin:4px 0 14px}
 .tally{display:flex;justify-content:center;gap:20px;margin-bottom:12px}
 .tally div{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0}
 .tally b{font-size:32px;font-variant-numeric:tabular-nums;line-height:1.05;font-family:var(--display)}
@@ -413,7 +455,7 @@ svg{display:block}
 [data-look=paper] .tally .dir-up b,[data-look=inventory] .tally .dir-up b{color:#7c5c00}
 .endbox .pad{flex:1 1 90px;min-height:72px}
 /* While typing at the end of a deck, the pad gets the room. */
-.endbox:has(.pad:focus) :is(.end-stamp,.end-sub,.tally){display:none}
+.endbox:has(.pad:focus) :is(.end-title,.end-sub,.tally){display:none}
 .deck.ended:has(.pad:focus) .progress{display:none}
 .end-actions{display:flex;flex-direction:column;gap:8px;margin-top:10px}
 canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:60}
@@ -468,6 +510,8 @@ canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:
 [data-look=inventory] .choices button.on{box-shadow:0 0 0 3px #1d1d1d,var(--tile-shadow)}
 .looks{grid-template-columns:1fr 1fr}
 .looks button{min-height:54px}
+.marks{grid-template-columns:1fr 1fr}
+.marks button{align-items:flex-start}
 .swatch{flex:none;width:38px;height:38px;display:flex;align-items:center;justify-content:center;background-color:var(--bg);background-image:var(--bg-art);border-radius:var(--tile-radius);box-shadow:0 0 0 1px rgba(127,127,127,.5)}
 .swatch b{display:block;width:16px;height:22px;background:#fff;border-radius:calc(var(--radius)/4);box-shadow:0 1px 3px rgba(0,0,0,.4)}
 .mini{flex:none;position:relative;width:30px;height:46px;border-radius:5px;box-shadow:inset 0 0 0 1.5px currentColor;display:block;overflow:hidden}
@@ -481,6 +525,76 @@ canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:
 .mini-story u{inset:0;opacity:.45}
 .mini-under b{bottom:3px;height:6px}
 .mini-under u{top:3px;bottom:12px}
+
+/* Handled cards: recognisable at a glance */
+.handled-band{display:flex;align-items:center;gap:7px;margin:-16px -18px 10px;padding:7px 18px;background:#15803f;color:#fff;font-size:14px;font-weight:800;letter-spacing:.03em;flex:none}
+.handled-band svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:3}
+.handled-band.small{margin:4px 0 0;padding:3px 8px;font-size:12px;border-radius:5px;width:max-content}
+.handled-band.small svg{width:13px;height:13px}
+.face h2.q-small{font-size:clamp(15px,4.4vw,17px);font-weight:600;color:var(--card-dim);margin:6px 0 8px;letter-spacing:0;line-height:1.25}
+.why.how{font-size:clamp(21px,6vw,25px);font-weight:600;line-height:1.22;color:var(--card-ink)}
+.tile.handled{box-shadow:inset 0 0 0 2.5px #15803f,0 0 0 1px rgba(0,0,0,.08)}
+.tile-tick{display:inline-flex;width:15px;height:15px;margin-right:4px;vertical-align:-2px;color:#15803f}
+.tile-tick svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:3.2}
+.handledcount{font-size:12.5px;color:var(--go);font-weight:600}
+.bigcount{color:#b48cff;font-weight:600}
+[data-look=paper] .bigcount,[data-look=inventory] .bigcount{color:#6a2bd6}
+.readfirst{display:block;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);margin-bottom:1px}
+
+/* Option cards */
+.options{display:grid;gap:7px;margin-top:10px;flex:none}
+.option{position:relative;display:flex;align-items:center;gap:10px;min-height:54px;padding:8px 40px 8px 12px;border-radius:min(var(--radius),12px);background:rgba(23,22,28,.055);box-shadow:inset 0 0 0 1.5px rgba(23,22,28,.12);line-height:1.22}
+.option img{width:46px;height:46px;object-fit:cover;border-radius:7px;flex:none}
+.opt-text{min-width:0;display:block}
+.opt-text b{display:block;font-size:16.5px}
+.opt-text small{display:block;font-size:13.5px;color:var(--card-dim);margin-top:1px}
+.option em{position:absolute;right:10px;top:5px;font-style:normal;font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--card-dim)}
+.opt-tick{position:absolute;right:9px;bottom:9px;width:22px;height:22px;border-radius:50%;box-shadow:inset 0 0 0 2px rgba(23,22,28,.28);display:flex;align-items:center;justify-content:center;color:transparent}
+.opt-tick svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:3.4}
+.option.on{background:rgba(21,128,63,.13);box-shadow:inset 0 0 0 2.5px #15803f}
+.option.on .opt-tick{background:#15803f;box-shadow:none;color:#fff}
+.opt-chosen{font-size:14px;font-weight:600;margin-top:8px;color:var(--card-ink)}
+.tight .option{min-height:44px;padding-top:5px;padding-bottom:5px}
+.tighter .opt-text small{display:none}
+
+/* Thoughts */
+.thoughtsrow{display:flex;align-items:center;gap:12px;width:100%;min-height:58px;padding:9px 14px;margin:4px 0 2px;background:var(--row-bg);box-shadow:inset 0 0 0 1px var(--row-line);border-radius:var(--row-radius);text-align:left}
+.thoughtsrow svg{width:25px;height:25px;fill:none;stroke:currentColor;flex:none}
+.thoughtsrow strong{display:block;font-family:var(--display);font-size:17px}
+.thoughtsrow small{display:block;font-size:13px;color:var(--dim);margin-top:1px}
+[data-look=inventory] .thoughtsrow{box-shadow:var(--tile-shadow);color:#fff}
+[data-look=inventory] .thoughtsrow small{color:#efefef}
+.thoughts{gap:8px}
+.thoughts .pad{flex:0 0 auto;height:clamp(92px,24%,190px)}
+.thoughts .primary{flex:none;min-height:44px;padding:6px 18px}
+.thoughts .primary:disabled{opacity:.4}
+.thoughtlist{flex:1 1 0;min-height:0;display:flex;flex-direction:column;gap:7px;padding-bottom:6px}
+.word.thought{flex:none}
+.word .how{font-weight:600}
+
+/* Swipe directions */
+.dirplus{display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,92px);gap:8px;margin:6px 0 14px}
+.dir{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;background:var(--row-bg);box-shadow:inset 0 0 0 1px var(--row-line);border-radius:var(--row-radius);padding:6px;text-align:center}
+.dir small{font-size:11.5px;color:var(--dim)}
+.dir strong{font-size:15.5px}
+.dir.up{grid-column:2;grid-row:1}
+.dir.left{grid-column:1;grid-row:2}
+.dir.right{grid-column:3;grid-row:2}
+.dir.down{grid-column:2;grid-row:3}
+.dircentre{grid-column:2;grid-row:2;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+.dircentre svg{width:30px;height:30px;fill:none;stroke:currentColor}
+.dir.on{box-shadow:inset 0 0 0 3px var(--ink)}
+.dir[data-act=right] strong{color:#27c06f}
+.dir[data-act=left] strong{color:#f08a3c}
+.dir[data-act=down] strong{color:#5aa6f0}
+.dir[data-act=up] strong{color:#e8c52a}
+[data-look=paper] .dir[data-act=right] strong,[data-look=inventory] .dir[data-act=right] strong{color:#0d8146}
+[data-look=paper] .dir[data-act=left] strong,[data-look=inventory] .dir[data-act=left] strong{color:#b85306}
+[data-look=paper] .dir[data-act=down] strong,[data-look=inventory] .dir[data-act=down] strong{color:#1c63b0}
+[data-look=paper] .dir[data-act=up] strong,[data-look=inventory] .dir[data-act=up] strong{color:#7c5c00}
+[data-look=inventory] .dir{box-shadow:var(--tile-shadow);color:#fff}
+[data-look=inventory] .dir small{color:#efefef}
+.dirnote{margin-top:12px}
 
 .hap{position:fixed;left:-9px;top:-9px;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden}
 

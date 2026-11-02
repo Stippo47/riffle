@@ -1,16 +1,18 @@
 // The screens around the deck: the packs, a pack's topics, style, settings and connecting.
 import { DEMO_PACK } from './demo.js';
-import { DeckView, cardHTML, deckKey, deckSummary, queueUnsentWords, sendWords, toolsHTML, wordsIn } from './deck.js';
-import { confetti, esc, icon, paintNotices, safeIcon, setNotice, tick } from './ui.js';
+import { DeckView, archiveWords, cardHTML, deckKey, deckSummary, markHTML, queueUnsentWords, sendWords, toolsHTML, wordsIn } from './deck.js';
+import { ThoughtsView, thoughtCount } from './thoughts.js';
+import { DEFAULT_DIRS, MEANING, confetti, esc, getDirs, icon, paintNotices, safeIcon, setDirs, setNotice, tick } from './ui.js';
 import * as store from './store.js';
 import * as sync from './sync.js';
 
-const VERSION = '0.2.1';
+const VERSION = '0.3.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
 const DEFAULT_LAYOUT = 'rows';
 const DEFAULT_LOOK = 'plain';
+const DEFAULT_MARK = 'word';
 const LAYOUTS = [
   { id: 'rows', name: 'Two rows', says: 'Title, then the labelled buttons, then the card.', home: 'tiles' },
   { id: 'one', name: 'One line', says: 'Title and icons share a row. The most room for the card.', home: 'list' },
@@ -25,7 +27,14 @@ const LOOKS = [
   { id: 'inventory', name: 'Inventory' },
 ];
 
-let current = null;     // the DeckView on screen, if any
+const MARKS = [
+  { id: 'word', name: 'Edge word', says: 'A small plain word at the edge the card is heading for.' },
+  { id: 'icon', name: 'Icon', says: 'A round icon at that edge.' },
+  { id: 'colour', name: 'Colour only', says: 'Just the glow.' },
+  { id: 'stamp', name: 'Stamp', says: 'A big stamp on the card.' },
+];
+
+let current = null;     // the view on screen that holds typed words, if any
 let render = () => {};  // draws the current screen again
 let pullNow = () => {};
 let updateReady = false;
@@ -62,8 +71,12 @@ function trackViewport() {
 
 const layoutOf = id => LAYOUTS.find(l => l.id === id) || LAYOUTS[0];
 
-async function setStyle({ layout, look }) {
+async function setStyle({ layout, look, mark }) {
   const root = document.documentElement;
+  if (mark) {
+    root.dataset.mark = mark;
+    store.set('style-mark', mark);
+  }
   if (layout) {
     root.dataset.layout = layout;
     root.dataset.home = layoutOf(layout).home;
@@ -74,7 +87,7 @@ async function setStyle({ layout, look }) {
     await store.set('style-look', look);
   }
   // Read before the first paint by the script at the top of index.html, so a look doesn't flash.
-  try { localStorage.setItem('riffle-style', JSON.stringify({ layout: root.dataset.layout, home: root.dataset.home, look: root.dataset.look })); } catch { /* it just flashes */ }
+  try { localStorage.setItem('riffle-style', JSON.stringify({ layout: root.dataset.layout, home: root.dataset.home, look: root.dataset.look, mark: root.dataset.mark })); } catch { /* it just flashes */ }
 }
 
 function sampleHome() {
@@ -88,6 +101,7 @@ function sampleHome() {
 
 function sampleDeck() {
   const card = { kind: 'question', rarity: 'common', text: 'Is this the layout you want?', why: 'Tap the choices below and this changes straight away.', pick: 'Try each with the looks.' };
+  const word = 'GO';
   return `<div class="deck screen">
     <div class="topline">
       <div class="deckbar"><span class="iconbtn">${icon('chevron-left')}</span><div class="t">Sample deck</div><div class="n">3 / 8</div></div>
@@ -95,10 +109,11 @@ function sampleDeck() {
     </div>
     <div class="progress"><b style="width:38%"></b></div>
     <div class="tablewrap"><div class="table">
+      <div class="glow" data-dir="right" data-act="right" style="opacity:.85"></div>
       <div class="card common" data-pos="2" style="z-index:8">${cardHTML({ text: '' })}</div>
       <div class="card common" data-pos="1" style="z-index:9">${cardHTML({ text: '' })}</div>
-      <div class="card common" data-pos="0" style="z-index:10">${cardHTML(card)}</div>
-    </div></div>
+      <div class="card common pv-moving" data-pos="0" style="z-index:10">${cardHTML(card).replace('<div class="stamp"></div>', `<div class="stamp armed" data-dir="right" data-act="right" style="opacity:1">${word}</div>`)}</div>
+    </div>${markHTML('').replace('<span class="mark-word"></span>', `<span class="mark-word">${word}</span>`).replace('<span class="mark-icon"></span>', `<span class="mark-icon">${icon('check')}</span>`).replace('class="edgemark"', 'class="edgemark armed" data-at="right" data-act="right" style="opacity:1"')}</div>
   </div>`;
 }
 
@@ -124,6 +139,10 @@ function showStyle() {
       <div class="choices looks">
         ${LOOKS.map(l => `<button data-look-pick="${l.id}"><i class="swatch" data-look="${l.id}"><b></b></i><strong>${esc(l.name)}</strong></button>`).join('')}
       </div>
+      <div class="set-title">While swiping</div>
+      <div class="choices marks">
+        ${MARKS.map(m => `<button data-mark-pick="${m.id}"><span><strong>${esc(m.name)}</strong><small>${esc(m.says)}</small></span></button>`).join('')}
+      </div>
     </div>`;
   const size = () => {
     const box = app.querySelector('.pvbox');
@@ -133,11 +152,56 @@ function showStyle() {
   const mark = () => {
     app.querySelectorAll('[data-layout-pick]').forEach(b => b.classList.toggle('on', b.dataset.layoutPick === root.dataset.layout));
     app.querySelectorAll('[data-look-pick]').forEach(b => b.classList.toggle('on', b.dataset.lookPick === root.dataset.look));
+    app.querySelectorAll('[data-mark-pick]').forEach(b => b.classList.toggle('on', b.dataset.markPick === root.dataset.mark));
   };
   mark();
   app.querySelector('[data-go=back]').onclick = showSettings;
   app.querySelectorAll('[data-layout-pick]').forEach(b => { b.onclick = async () => { await setStyle({ layout: b.dataset.layoutPick }); mark(); }; });
   app.querySelectorAll('[data-look-pick]').forEach(b => { b.onclick = async () => { await setStyle({ look: b.dataset.lookPick }); mark(); }; });
+  app.querySelectorAll('[data-mark-pick]').forEach(b => { b.onclick = async () => { await setStyle({ mark: b.dataset.markPick }); mark(); }; });
+}
+
+// ---------- swipe directions
+
+// A plus-shaped picture of what each way of swiping does. Tap two to swap them.
+function showDirections() {
+  current = null;
+  render = () => {};
+  let picked = null;
+  const draw = () => {
+    const map = getDirs();
+    const same = Object.keys(DEFAULT_DIRS).every(k => map[k] === DEFAULT_DIRS[k]);
+    const cell = phys => `<button class="dir ${phys}${picked === phys ? ' on' : ''}" data-phys="${phys}" data-act="${map[phys]}"><small>Swipe ${phys}</small><strong>${esc(MEANING[map[phys]])}</strong></button>`;
+    app.innerHTML = `
+      <div class="settings screen scroll">
+        <div class="deckbar">
+          <button class="iconbtn" data-go="back" aria-label="Back">${icon('chevron-left')}</button>
+          <div class="t">Swipe directions</div>
+        </div>
+        <div class="set-text">${picked ? 'Now tap the one to swap it with.' : 'Tap two to swap what they do.'}</div>
+        <div class="dirplus">
+          ${cell('up')}${cell('left')}<div class="dircentre">${icon('arrow-left-right')}</div>${cell('right')}${cell('down')}
+        </div>
+        <button class="secondary" data-go="reset-dirs" ${same ? 'disabled' : ''}>${icon('rotate-ccw')}Reset</button>
+        <div class="set-text small dirnote">Answers record what you meant, not which way you swiped, so swapping these can't be misread.</div>
+      </div>`;
+    app.querySelector('[data-go=back]').onclick = showSettings;
+    app.querySelector('[data-go=reset-dirs]').onclick = () => { setDirs(DEFAULT_DIRS); store.set('swipe-dirs', getDirs()); picked = null; draw(); };
+    app.querySelectorAll('[data-phys]').forEach(b => {
+      b.onclick = () => {
+        const phys = b.dataset.phys;
+        if (!picked || picked === phys) { picked = picked === phys ? null : phys; draw(); return; }
+        const m = getDirs();
+        [m[picked], m[phys]] = [m[phys], m[picked]];
+        setDirs(m);
+        store.set('swipe-dirs', m);
+        picked = null;
+        draw();
+        tick();
+      };
+    });
+  };
+  draw();
 }
 
 function registerWorker() {
@@ -190,6 +254,10 @@ async function library() {
     if (!m || !packs.has(m[1])) continue;
     const d = json(f);
     if (d && Array.isArray(d.cards)) packs.get(m[1]).decks.push({ ...d, id: m[2] });
+  }
+  for (const f of files) {
+    const m = f.path.match(/^packs\/([^/]+)\/thoughts\.json$/);
+    if (m && packs.has(m[1])) packs.get(m[1]).thoughtAnswers = json(f) || {};
   }
   const list = [...packs.values()].sort((a, b) => (a.order ?? 50) - (b.order ?? 50) || a.title.localeCompare(b.title));
   list.push(DEMO_PACK);
@@ -260,9 +328,13 @@ async function showHome() {
   const packs = await library();
   const rows = [];
   for (const p of packs) {
-    const left = packLeft(await summaries(p));
-    const count = p.decks.reduce((n, d) => n + d.cards.length, 0);
-    rows.push({ p, left, count });
+    const sums = await summaries(p);
+    const all = [...sums.values()];
+    rows.push({
+      p, left: packLeft(sums),
+      count: all.reduce((n, s) => n + s.total, 0),
+      big: all.reduce((n, s) => n + s.big, 0),
+    });
   }
   app.innerHTML = `
     <div class="home screen scroll">
@@ -282,7 +354,7 @@ async function showHome() {
           <span>Safari and the Home Screen app keep separate data, so connect from the icon. You can try the Feel test here first.</span>
         </div>` : ''}
       <div class="packs">
-        ${rows.map(({ p, left, count }) => packTile(p, left, count)).join('')}
+        ${rows.map(({ p, left, count, big }) => packTile(p, left, count, big)).join('')}
       </div>
     </div>`;
   app.querySelectorAll('[data-pack]').forEach(b => { b.onclick = () => showPack(b.dataset.pack); });
@@ -290,12 +362,12 @@ async function showHome() {
   await refreshStatusLine();
 }
 
-function packTile(p, left, count) {
+function packTile(p, left, count, big = 0) {
   const donePart = count ? (count - left) / count : 0;
   return `<button class="pack ${left ? '' : 'cleared'}" data-pack="${esc(p.id)}" style="--pc:${esc(p.color || '#7b8294')}">
     <div class="art">${safeIcon(p.icon) || icon('card-random')}</div>
     <div class="name">${esc(p.title)}</div>
-    <div class="left">${left ? `${left} left` : 'Cleared'}</div>
+    <div class="left">${left ? `${left} left` : 'Cleared'}${big ? `<span class="bigcount"> · ${big} big</span>` : ''}</div>
     <div class="bar"><b style="width:${Math.round(donePart * 100)}%"></b></div>
   </button>`;
 }
@@ -311,9 +383,10 @@ async function showPack(id, message = '') {
   const { topics, misc } = topicsOf(pack);
   const deckRow = (d, inStack) => {
     const s = sums.get(d.id);
+    const main = s.finished ? (s.verdict === 'replan' ? 'Sent back' : 'Done') : s.left ? `${s.left} left` : 'At the end';
     return `<button class="deckrow ${s.finished ? 'finished' : ''} ${inStack ? 'instack' : ''}" data-deck="${esc(d.id)}">
-      <span class="deckrow-title">${esc(d.title)}</span>
-      <span class="deckrow-left">${s.finished ? (s.verdict === 'replan' ? 'Sent back' : 'Done') : s.left ? `${s.left} left` : 'At the end'}</span>
+      <span class="deckrow-title">${d.stack && !inStack ? '<small class="readfirst">Read first</small>' : ''}${esc(d.title)}</span>
+      <span class="deckrow-left">${main}${s.handled ? `<small class="handledcount"> · ${s.handled} handled</small>` : ''}</span>
     </button>`;
   };
   const topicBlock = t => {
@@ -328,6 +401,7 @@ async function showPack(id, message = '') {
       <div class="deckrows">${t.decks.map((d, i) => deckRow(d, d.stack && i > 0 && t.decks[i - 1].stack === d.stack)).join('')}</div>
     </section>`;
   };
+  const thoughts = await thoughtCount(pack);
   app.innerHTML = `
     <div class="packpage screen scroll">
       <div class="deckbar">
@@ -336,12 +410,14 @@ async function showPack(id, message = '') {
         <div class="n" data-slot="notice" data-plain="${packLeft(sums)} left"></div>
       </div>
       ${message ? `<div class="set-text problem">${esc(message)}</div>` : ''}
+      <button class="thoughtsrow" data-go="thoughts">${icon('lightbulb')}<span><strong>Thoughts</strong><small>${thoughts ? `${thoughts} filed` : 'Anything on your mind about this project'}</small></span></button>
       ${topics.map(topicBlock).join('')}
       ${misc.length ? `<section class="topic misc" style="--pc:${esc(pack.color || '#7b8294')}"><div class="deckrows">${misc.map(d => deckRow(d, false)).join('')}</div></section>` : ''}
       ${pack.demo ? '<div id="feelwords"></div>' : ''}
     </div>`;
   paintNotices();
   app.querySelector('[data-go=home]').onclick = showHome;
+  app.querySelector('[data-go=thoughts]').onclick = () => openThoughts(pack);
   if (pack.demo) await drawFeelWords(pack);
   app.querySelectorAll('[data-deck]').forEach(b => { b.onclick = () => openDeck(pack, b.dataset.deck); });
 }
@@ -426,11 +502,23 @@ async function drawFeelWords(pack, confirming = false) {
   on('reset-yes', async () => {
     // Words first: queued, then kept in the list, and only then is anything cleared.
     sendUnsent(pack, words);
-    const keep = words.live.map(w => ({ where: w.where, text: w.text }));
-    if (keep.length) store.set('feel-archive', [...keep, ...words.old]);
+    await archiveWords(words.live);
     for (const d of pack.decks) store.del(deckKey(pack, d));
     showPack(pack.id);
   });
+}
+
+async function openThoughts(pack) {
+  const view = new ThoughtsView({ host: app, pack, onExit: () => { current = null; showPack(pack.id); } });
+  current = view;
+  render = () => {};
+  try {
+    await view.open();
+    paintNotices();
+  } catch {
+    current = null;
+    showPack(pack.id, "Couldn't read your thoughts on this phone just now. Close Riffle and open it again.");
+  }
 }
 
 async function openDeck(pack, deckId) {
@@ -514,7 +602,8 @@ async function showSettings() {
         <button class="iconbtn" data-go="home" aria-label="Back">${icon('chevron-left')}</button>
         <div class="t">Settings</div>
       </div>
-      <button class="setrow" data-go="style">${icon('palette')}<span><strong>Style</strong><small>${esc(nameOf(LAYOUTS, root.dataset.layout))} · ${esc(nameOf(LOOKS, root.dataset.look))}</small></span></button>
+      <button class="setrow" data-go="style">${icon('palette')}<span><strong>Style</strong><small>${esc(nameOf(LAYOUTS, root.dataset.layout))} · ${esc(nameOf(LOOKS, root.dataset.look))} · ${esc(nameOf(MARKS, root.dataset.mark))}</small></span></button>
+      <button class="setrow" data-go="dirs">${icon('arrow-left-right')}<span><strong>Swipe directions</strong><small>Choose what each way of swiping does</small></span></button>
       <div class="set-title">Sending answers</div>
       <div class="set-text" id="sendtext">${esc(sendingText(st))}</div>
       ${store.troubleNow() ? `<div class="set-text problem" id="saveproblem">${esc(troubleWords(store.troubleNow()))}</div>` : ''}
@@ -544,6 +633,7 @@ async function showSettings() {
   });
   app.querySelector('[data-go=home]').onclick = showHome;
   app.querySelector('[data-go=style]').onclick = showStyle;
+  app.querySelector('[data-go=dirs]').onclick = showDirections;
   const on = (name, fn) => { const b = app.querySelector(`[data-go=${name}]`); if (b) b.onclick = fn; };
   on('connect', showConnect);
   on('send', async () => {
@@ -620,7 +710,9 @@ async function start() {
   setStyle({
     layout: (await store.get('style-layout').catch(() => null)) || document.documentElement.dataset.layout || DEFAULT_LAYOUT,
     look: (await store.get('style-look').catch(() => null)) || document.documentElement.dataset.look || DEFAULT_LOOK,
+    mark: (await store.get('style-mark').catch(() => null)) || document.documentElement.dataset.mark || DEFAULT_MARK,
   });
+  setDirs((await store.get('swipe-dirs').catch(() => null)) || DEFAULT_DIRS);
   const lib = await library();
   await queueUnsentWords((packId, deckId) => {
     const p = lib.find(x => x.id === packId);
@@ -639,5 +731,5 @@ start();
 
 // For the tests in tests/, on a local test server only.
 if (isLocalHost) {
-  window.__riffle = { get current() { return current; }, showHome, showPack, showConnect, showSettings, showStyle, setStyle, setNotice, onHide, sync, store };
+  window.__riffle = { get current() { return current; }, showHome, showPack, showConnect, showSettings, showStyle, showDirections, setStyle, setDirs, getDirs, setNotice, onHide, openThoughts, library, sync, store };
 }

@@ -6,6 +6,7 @@ import * as store from './store.js';
 export const OWNER = 'Stippo47', REPO = 'riffle-data', BRANCH = 'main';
 const FULL = `${OWNER}/${REPO}`;
 const SEND_EVERY = 15000, MAX_BATCH = 200, KEEPALIVE_LIMIT = 40000, PULL_EVERY = 120000;
+const PICTURE_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
 const CALL_TIMEOUT = 25000, STUCK_AFTER = 40000, STREAK_LIMIT = 3;
 
 // A local test server can stand in for GitHub, but only on this computer.
@@ -260,7 +261,8 @@ export async function pull() {
       const blob = await call(`/repos/${FULL}/git/blobs/${t.sha}`, key, { accept: 'application/vnd.github.raw+json' });
       if (!blob.ok) { missed++; continue; }
       const isJson = t.path.endsWith('.json');
-      const data = isJson ? await blob.text() : await blob.blob();
+      // GitHub labels raw files as its own type, so a picture gets its real one back.
+      const data = isJson ? await blob.text() : new Blob([await blob.arrayBuffer()], { type: PICTURE_TYPES[t.path.split('.').pop().toLowerCase()] || 'application/octet-stream' });
       await store.files.set(t.path, { path: t.path, sha: t.sha, data });
       changed = true;
     } catch { missed++; }

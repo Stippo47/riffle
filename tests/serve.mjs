@@ -40,7 +40,31 @@ const startFiles = [
       { id: 'c2', kind: 'question', title: 'Second', text: 'A second card, for a comment.', pick: 'Yes.' },
       { id: 'c3', kind: 'report', title: 'Third', text: 'A third card.' },
       { id: 'c4', kind: 'report', title: 'Fourth', text: 'A fourth card.' },
-      { id: 'c5', kind: 'report', title: 'Fifth', text: 'A fifth card.' },
+      { id: 'c5', kind: 'report', title: 'Fifth', text: 'A fifth card, with a picture on its back.', images: ['img/dot.png'] },
+    ],
+  })],
+  // A two-pixel picture, to prove pictures come down and show.
+  ['packs/test-pack/img/dot.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAIAAAB7QOjdAAAAD0lEQVR4nGM8YWPDwMAAAAbaAUIi0kNIAAAAAElFTkSuQmCC', 'base64')],
+  ['packs/test-pack/decks/h1.json', JSON.stringify({
+    topic: 't1', title: 'Handled deck', cards: [
+      { id: 'h0', kind: 'question', title: 'Owed', text: 'A card still owed.', pick: 'Yes.' },
+      { id: 'h1', kind: 'question', title: 'Handled one', text: 'What should the door do?', handled: { how: 'It stays shut, because of what came up in another deck.', at: '2026-01-01T00:00:00.000Z' } },
+      { id: 'h2', kind: 'question', rarity: 'epic', title: 'Handled epic', text: 'A big one I settled.', handled: { how: 'Settled this way, for good.', at: '2026-01-01T00:00:00.000Z' } },
+    ],
+  })],
+  ['packs/test-pack/decks/o1.json', JSON.stringify({
+    topic: 't1', title: 'Options deck', cards: [
+      { id: 'o0', kind: 'options', title: 'With a pick', text: 'Which of these?', pick: 'b', options: [{ id: 'a', label: 'First' }, { id: 'b', label: 'Second' }, { id: 'c', label: 'Third' }] },
+      { id: 'o1', kind: 'options', title: 'Tapped', text: 'Which of these again?', pick: 'a', options: [{ id: 'a', label: 'First' }, { id: 'b', label: 'Second' }, { id: 'c', label: 'Third' }] },
+      { id: 'o2', kind: 'options', title: 'Left', text: 'And these?', options: [{ id: 'a', label: 'First' }, { id: 'b', label: 'Second' }] },
+      { id: 'o3', kind: 'options', title: 'No pick', text: 'No pick marked here.', options: [{ id: 'a', label: 'First' }, { id: 'b', label: 'Second' }] },
+    ],
+  })],
+  ['packs/test-pack/decks/s1.json', JSON.stringify({
+    topic: 't1', title: 'Start over deck', cards: [
+      { id: 's0', kind: 'question', title: 'One', text: 'First card.', pick: 'Yes.' },
+      { id: 's1', kind: 'question', title: 'Two', text: 'Second card.', pick: 'Yes.' },
+      { id: 's2', kind: 'question', title: 'Three', text: 'Third card.', pick: 'Yes.' },
     ],
   })],
 ];
@@ -58,7 +82,7 @@ createServer(async (req, res) => {
   };
   const send = (status, body, headers = {}) => {
     res.writeHead(status, { ...cors, 'Content-Type': 'application/json', ...headers });
-    res.end(typeof body === 'string' ? body : JSON.stringify(body));
+    res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
   };
   if (req.method === 'OPTIONS') { res.writeHead(204, cors); res.end(); return; }
   const url = new URL(req.url, 'http://x');
@@ -81,6 +105,11 @@ createServer(async (req, res) => {
     files.clear();
     for (const [k, v] of startFiles) files.set(k, v);
     down = false; fail = null; writes = 0;
+    send(200, { files: files.size });
+    return;
+  }
+  if (url.pathname === '/__put') { // adds or changes one file
+    files.set(url.searchParams.get('path'), body);
     send(200, { files: files.size });
     return;
   }

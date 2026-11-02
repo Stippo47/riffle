@@ -5,7 +5,7 @@ Riffle is a phone web app for answering questions and reading reports one card a
 ## The levels
 
 - **Dashboard:** lists every **pack**. A pack is a project.
-- **Pack:** its page groups decks under **topics**. Topics don't depend on each other. Each pack has one **Misc deck** for one-offs, which sits apart at the end.
+- **Pack:** its page has a **Thoughts** row at the top, then decks grouped under **topics**. Topics don't depend on each other. Each pack has one **Misc deck** for one-offs, which sits apart at the end.
 - **Topic:** several decks. Decks in a topic can be **stacked**: a discussion sits on the questions it leads to, and finishing one deals the next.
 - **Deck:** a run of cards.
 - **Card:** one question, report or design, seen one at a time.
@@ -17,10 +17,11 @@ Riffle is a phone web app for answering questions and reading reports one card a
 | question | A question with the writer's pick | GO: go with the pick | WORKSHOP: not that, work on it | IDK: need more context |
 | report | What happened, with nothing asked | GOOD | PROBLEM: something's wrong with where this is going | HUH?: not following. Mostly so the writer knows; it doesn't need much back |
 | design | The writer's design for something, to approve, deny or add to | YES | RETHINK | IDK |
+| options | Several options and a question: tap the ones wanted, then swipe | GO: only those. With nothing tapped, the writer's marked pick. With no pick either, it just bounces | REDO: even those weren't good, redo in their direction. With nothing tapped, all of them are bad | IDK |
 
-Up always opens the comment box (stamp NOTE). Stamp words live in `js/ui.js`.
+Comment always opens the comment box. These words live in `js/ui.js`. The table names the default directions; see Swipe directions below.
 
-Option cards (several options plus a question; tap the ones wanted, then swipe them all) come in a later stage. Right means only those; left means even those weren't good, redo in their direction. With nothing tapped, right takes the writer's marked pick and left means all of them are bad.
+**Handled cards.** A card can be marked as settled, with one or two sentences on how, by whoever writes the deck. It stays in the deck. It has a green band and tick, with the conclusion as the main text and the question smaller above it, so it can be recognised without reading it. Right is FINE, left is WORKSHOP (they don't like the conclusion), down is IDK, and comments work as usual. It isn't owed: counts leave it out, the pack's page shows a quiet "2 handled", and a deck can finish without it. It's still dealt, after everything owed. Skipping it with nothing else owed ends the deck. A new conclusion deals it again, showing what they said last time. Epic and legendary ones still need the hold.
 
 ## Importance
 
@@ -36,7 +37,18 @@ Five levels, in the usual game rarity colours. Each card's background is a light
 
 ## Style
 
-The gear opens settings, and Style sits at the top of them. **Layout** and **look** are separate choices, so any layout goes with any look. Tapping an option changes a live preview on that screen straight away: a small deck screen and a small home screen, built from the real parts. New installs start with `DEFAULT_LAYOUT` and `DEFAULT_LOOK` in `js/app.js`.
+The gear opens settings, and Style sits at the top of them. **Layout**, **look** and **while swiping** are separate choices, so any goes with any. Tapping an option changes a live preview on that screen straight away: a small deck screen and a small home screen, built from the real parts. New installs start with `DEFAULT_LAYOUT`, `DEFAULT_LOOK` and `DEFAULT_MARK` in `js/app.js`.
+
+**While swiping.** What shows you what a swipe will do, along with a glow on the edge the card is heading for.
+
+| Choice | What shows |
+|---|---|
+| Edge word (the default) | A small plain word at that edge, with nothing on the card |
+| Icon | A round icon at that edge |
+| Colour only | Just the glow |
+| Stamp | A big stamp on the card |
+
+The word and icon sit at the edge of the card's area rather than the true edge of the screen, so they never cover the title or the buttons in any layout.
 
 **Layouts.** Each one sets the deck screen, and the home and pack pages follow the same choice. No layout leaves empty room above the card.
 
@@ -61,19 +73,24 @@ In Full screen, a black band sits behind the phone's clock, because iPhones draw
 
 ## Swipes
 
-Dragging moves the top card, which tilts as it goes. A stamp fades in with distance and snaps on where the throw counts. A glow shows on the side it's heading for, and the next card rises underneath. On release the card flies off at the finger's speed, and the next card can be thrown at once.
+Dragging moves the top card, which tilts as it goes. The chosen mark fades in with distance and snaps on where the swipe counts. A glow shows on the side it's heading for, and the next card rises underneath. On release the card flies off at the finger's speed, and the next card can be thrown at once.
 
 A throw counts at 27% of the screen's width sideways or 15% of its height up and down, or as a quick flick from 34 pixels. Pulling back before letting go keeps the card. Numbers are in `TUNE` in `js/gesture.js`.
 
-**Breaking through (epic and legendary):** a right swipe has to be held for `TUNE.breakHoldMs` (one second). The card pushes against resistance with a slight tremble. A glow builds at the card's edge and behind it, the stamp grows, and the bar in the pick box fills. At the end it breaks through while the finger is still down: the card punches off to the right with a quick flash. Letting go or pulling back early springs it back and sends nothing, and the glow drains away. Left, down and up stay free. The glint on arrival stays, as a sign to read the card.
+**Breaking through (epic and legendary):** going with the pick has to be held for `TUNE.breakHoldMs` (one second), along whichever direction go is set to. The card pushes against resistance with a slight tremble. A glow builds at the card's edge and over it, the word, icon or stamp grows, and the bar in the pick box fills. At the end it breaks through while the finger is still down: the card punches off with a quick flash. Letting go or pulling back early springs it back and sends nothing, and the glow drains away. The other directions stay free. The glint on arrival stays, as a sign to read the card. The line on the card names the current direction.
+
+**Swipe directions.** Settings has a plus-shaped picture of what each way of swiping does. Tap two to swap them, and Reset puts them back. Answers record what was meant, not which way the finger went, so swapped directions can't be misread. The card, glow and mark follow the way the finger goes. Wording in the Feel test is filled in from the map, and writers never name a direction on a card.
 
 ## The comment box
 
-Swiping up opens a comment box under a small copy of the card, with the keyboard up. The title and buttons go away, and the card and box share all the height the keyboard leaves. There's no hint line and no close button. From there:
+The comment swipe opens a comment box under a small copy of the card, with the keyboard up. The title and buttons go away, and the card and box share all the height the keyboard leaves, with more of it going to the card. The small card keeps its title, description and pick. There's no hint line and no close button. From there, in terms of what each swipe means:
 
-- Throw the small card right or left: sends that answer with the comment.
-- Throw it up again: sends the comment alone, as the reader's own suggestion. With nothing typed, it just closes the box.
-- Drag down, on the card or on the box: closes the box, drops the keyboard and keeps the text as a chip on the card. Tapping the chip reopens it. A normal down swipe after that is IDK with the comment.
+- Go or workshop: sends that answer with the comment.
+- Comment again: sends the comment alone, as the reader's own suggestion. With nothing typed, it just closes the box.
+- IDK: closes the box, drops the keyboard and keeps the text as a chip on the card. Tapping the chip reopens it. An IDK swipe after that sends IDK with the comment.
+- Dragging down on the box itself always closes it, whatever the directions are.
+
+A long description scrolls in its own small box. A vertical drag that starts on it scrolls it, and sideways is still a swipe. If it has nowhere left to scroll that way, the drag is a swipe too, and the title and pick always swipe.
 
 Drafts survive closing the app.
 
@@ -90,7 +107,14 @@ Undo, Notes, Skip and Grid. They act as the finger lifts.
 
 ## The overview
 
-Pinching a card, or Grid, lays out every card in the deck on a grid: its short title, its importance colour, and whether and how it was answered, with a mark if there's a comment. Tapping one goes to it. An answered card shows what was said, and throwing it again changes the answer. It also has a way to the deck's notes and a way to send the whole deck back at any point.
+Pinching a card, or Grid, lays out every card in the deck on a grid: its short title, its importance colour, and whether and how it was answered, with a mark if there's a comment. Handled cards have a green tick. Tapping one goes to it. An answered card shows what was said, and swiping it again changes the answer. It also has a way to the deck's notes, and two actions on the whole deck, each with a clear second step:
+
+- **Replan this deck:** asks for it to be rethought from the base. The answers stay.
+- **Start this deck over:** clears the swipes, and every card is dealt again. The second step offers keeping notes and comments (comments come back as drafts on their cards) or clearing those too. Anything unsent goes first, and anything already sent stays with the writer.
+
+## Thoughts
+
+A row at the top of every pack's page, always there, needing no deck file. It isn't a deck, because decks end and this doesn't. It opens a screen with a pad on top and earlier thoughts below, newest first, each with its time. Filing one sends it. What's being typed has the same protection as a comment. The writer can answer a thought through a file, and the answer shows on it with the handled look.
 
 ## Details
 
@@ -100,7 +124,7 @@ Up and down are swipes, so a card can't scroll. The face has a size limit, and t
 
 Kept quiet on purpose.
 
-- **Deck:** a stamp, the tally counting up, the notes pad, and two choices: "Deck's done" or "Replan from the base". No confetti.
+- **Deck:** a plain heading, the tally counting up, the notes pad, and two choices: "Deck's done" or "Replan this deck". No confetti.
 - **Next in a stack:** "Deck's done" deals the next deck in the stack straight away.
 - **Topic:** clearing every deck in a topic gets a small pop, because a busy pack may rarely be empty.
 - **Pack:** clearing everything gets one short modest burst, and the dashboard shows the pack as cleared until new cards arrive. Both are gone in about a second, with plain words.
@@ -136,4 +160,4 @@ On a local test server only: `?api=` points the app at a stand-in for GitHub, an
 
 ## Still to build
 
-Option cards; the writer's side (commands to make decks, shrink pictures, pick icons, read answers, deal cards back as second tries, show the reader what's been read); a real pictures test.
+Photos on comments, notes and thoughts; notifications; the writer's side (commands to make decks, shrink pictures, pick icons, read answers, mark cards handled, answer thoughts, deal cards back as second tries).

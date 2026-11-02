@@ -6,9 +6,26 @@ export const KINDS = {
   question: { label: 'Question', pickLabel: 'My pick', right: 'GO', left: 'WORKSHOP', down: 'IDK', up: 'NOTE' },
   report: { label: 'Report', right: 'GOOD', left: 'PROBLEM', down: 'HUH?', up: 'NOTE' },
   design: { label: 'Design', pickLabel: 'My design', right: 'YES', left: 'RETHINK', down: 'IDK', up: 'NOTE' },
+  options: { label: 'Options', pickLabel: 'My pick', right: 'GO', left: 'REDO', down: 'IDK', up: 'NOTE' },
 };
+const HANDLED_WORDS = { right: 'FINE', left: 'WORKSHOP', down: 'IDK', up: 'NOTE' };
 export const kindOf = card => KINDS[card.kind] || KINDS.question;
-export const stampWord = (card, dir) => kindOf(card)[dir];
+export const stampWord = (card, dir) => (card.handled ? HANDLED_WORDS : kindOf(card))[dir];
+
+// What each way of swiping means. Keys are the way the finger goes, values are the meaning, and
+// meanings are what get recorded: right is go, left is workshop, down is idk, up is comment.
+export const DEFAULT_DIRS = { right: 'right', left: 'left', up: 'up', down: 'down' };
+let dirs = { ...DEFAULT_DIRS };
+export const setDirs = map => { dirs = { ...DEFAULT_DIRS, ...map }; };
+export const getDirs = () => ({ ...dirs });
+export const logicalOf = phys => dirs[phys];
+export const physicalOf = logical => Object.keys(dirs).find(k => dirs[k] === logical);
+export const MEANING = { right: 'Go', left: 'Workshop', down: 'IDK', up: 'Comment' };
+export const MARK_ICON = { right: 'check', left: 'x', down: 'circle-help', up: 'message-square-text' };
+
+// Lets wording name a meaning and still be right whichever way it has been swapped to.
+const FILL = { go: 'right', workshop: 'left', idk: 'down', comment: 'up' };
+export const fillDirs = text => String(text || '').replace(/\{(go|workshop|idk|comment)\}/g, (_, k) => physicalOf(FILL[k]));
 
 // Five levels in the usual game rarity colours. The tints live in style.css.
 export const RARITY = {

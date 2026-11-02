@@ -44,8 +44,8 @@ export function decide({ dx, dy, vx = 0, vy = 0, w, h, compact = false }) {
   return null;
 }
 
-// Follows one finger as a drag and two as a pinch. Handlers: blocked, move, release, cancel, tap,
-// pinchStart, pinch(scale), pinchEnd(scale).
+// Follows one finger as a drag and two as a pinch. Handlers: blocked, start, move, release, cancel, tap,
+// pinchStart, pinch(scale), pinchEnd(scale). Directions here are the way the finger goes.
 export function track(el, h) {
   const pts = new Map();
   let drag = null, pinch = null, ignore = false, samples = [], spread0 = 1;
@@ -80,6 +80,7 @@ export function track(el, h) {
     if (pts.size === 1) {
       ignore = false;
       drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: e.timeStamp, moved: false };
+      h.start && h.start(e);
       samples = [{ x: e.clientX, y: e.clientY, t: e.timeStamp }];
     } else if (pts.size === 2) {
       spread0 = spread();
