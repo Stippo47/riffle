@@ -1,4 +1,4 @@
-// Small shared helpers: card kinds and their stamps, escaping, the tick, and confetti.
+// Small shared helpers: card kinds and their stamps, escaping, the tick, notices, typing pads, and the small pops.
 import { ICON } from './icons.js';
 
 // What each direction means on each kind of card. To change a stamp's word, change it here.
@@ -15,8 +15,8 @@ export const RARITY = {
   common: { label: '' },
   uncommon: { label: 'Uncommon' },
   rare: { label: 'Rare · matters, can change later' },
-  epic: { label: "Epic · can't be undone", breaks: true, burst: ['#ffffff', '#e7d6ff', '#c79bff', '#9a5be0', '#ff8ae2'] },
-  legendary: { label: 'Legendary · shapes everything after', breaks: true, burst: ['#ffffff', '#ffe98a', '#ffc847', '#ffaa00', '#ff7a18'] },
+  epic: { label: "Epic · can't be undone", breaks: true },
+  legendary: { label: 'Legendary · shapes everything after', breaks: true },
 };
 
 export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => (
@@ -37,7 +37,9 @@ export function safeIcon(text) {
     const svg = doc.documentElement;
     if (svg.nodeName !== 'svg') return '';
     const box = svg.getAttribute('viewBox') || '0 0 512 512';
-    const paths = [...svg.querySelectorAll('path')].map(p => `<path d="${esc(p.getAttribute('d'))}" fill="currentColor"/>`);
+    const paths = [...svg.querySelectorAll('path')]
+      .filter(p => p.getAttribute('d') !== 'M0 0h512v512H0z') // game icons' black background
+      .map(p => `<path d="${esc(p.getAttribute('d'))}" fill="currentColor"/>`);
     return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${esc(box)}">${paths.join('')}</svg>`;
   } catch { return ''; }
 }
@@ -56,8 +58,109 @@ export function tick() {
   hap.click();
 }
 
-// A short burst of bits, from the top middle of the screen unless told where.
-export function confetti(host, { count = 70, origin = null, force = 1, colors = ['#ff8ae2', '#ffe98a', '#9dffc8', '#8ad8ff', '#c79bff', '#ffffff'] } = {}) {
+// One short message for the screen's title line, shown in place of its count, so nothing ever
+// floats over the buttons or a card. A screen marks its place with data-slot="notice".
+let notice = null;
+export function setNotice(next) {
+  notice = next;
+  paintNotices();
+}
+export function paintNotices() {
+  document.querySelectorAll('[data-slot=notice]').forEach(el => {
+    const on = !!notice;
+    el.textContent = on ? notice.text : (el.dataset.plain || '');
+    el.classList.toggle('is-notice', on);
+    el.parentElement.classList.toggle('has-notice', on);
+    el.onclick = on ? notice.act : null;
+  });
+}
+export const plainSlot = (el, text) => {
+  el.dataset.plain = text;
+  paintNotices();
+};
+
+// A place to type that isn't a form field, in the hope iPhones then leave out their autofill bar
+// above the keyboard. Autocorrect, dictation and pasting work as usual.
+export const padHTML = (id, placeholder) =>
+  `<div class="pad is-empty" id="${id}" contenteditable="plaintext-only" role="textbox" aria-multiline="true" aria-label="${esc(placeholder)}" data-placeholder="${esc(placeholder)}" autocorrect="on" autocapitalize="sentences" spellcheck="true"></div>`;
+export function padReady(el, onInput) {
+  if (!el.isContentEditable) el.contentEditable = 'true';
+  el.addEventListener('input', () => {
+    el.classList.toggle('is-empty', !padText(el));
+    onInput && onInput(padText(el));
+  });
+}
+export const padText = el => el.innerText.replace(/\n+$/, '');
+export function padSet(el, text) {
+  el.textContent = text || '';
+  el.classList.toggle('is-empty', !text);
+}
+function caretToEnd(el) {
+  const sel = getSelection();
+  if (!sel) return;
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  r.collapse(false);
+  sel.removeAllRanges();
+  sel.addRange(r);
+}
+// iPhones only raise the keyboard for a focus during a finger's lift. This runs during the pointer's
+// lift and tries once more on the touch's own end, whichever of them counts.
+export function padFocus(el) {
+  el.focus();
+  caretToEnd(el);
+  document.addEventListener('touchend', () => {
+    if (document.activeElement !== el && !el.closest('[hidden]')) { el.focus(); caretToEnd(el); }
+  }, { once: true, capture: true });
+}
+export function padBlur(el) {
+  el.blur();
+  const sel = getSelection();
+  if (sel) sel.removeAllRanges();
+}
+
+// Dragging down on a panel brings it back down. A long text scrolled away from its top scrolls
+// first. shift(dy) moves the panel with the finger, and close() runs if the drag was far or fast.
+export function dragToClose(panel, scroller, shift, close, distance = 56) {
+  let y0 = null, x0 = 0, t0 = 0, dragging = false;
+  panel.addEventListener('touchstart', e => {
+    y0 = null;
+    if (e.touches.length !== 1) return;
+    const sc = scroller(e.target);
+    if (sc && sc.scrollTop > 0) return;
+    y0 = e.touches[0].clientY; x0 = e.touches[0].clientX; t0 = e.timeStamp; dragging = false;
+  }, { passive: true });
+  panel.addEventListener('touchmove', e => {
+    if (y0 === null) return;
+    if (e.touches.length !== 1) { y0 = null; if (dragging) { dragging = false; shift(0); } return; }
+    const dy = e.touches[0].clientY - y0, dx = e.touches[0].clientX - x0;
+    if (!dragging) {
+      if (e.timeStamp - t0 > 350) { y0 = null; return; } // a slow start is someone selecting text
+      if (dy > 8 && dy > Math.abs(dx) * 1.3) dragging = true;
+      else if (dy < -8 || Math.abs(dx) > 12) { y0 = null; return; }
+      else return;
+    }
+    if (e.cancelable) e.preventDefault();
+    shift(Math.max(0, dy));
+  }, { passive: false });
+  panel.addEventListener('touchend', e => {
+    if (y0 === null || !dragging) { y0 = null; return; }
+    const dy = e.changedTouches[0].clientY - y0;
+    const fast = dy / Math.max(1, e.timeStamp - t0) > 0.5 && dy > 26;
+    y0 = null;
+    dragging = false;
+    shift(0);
+    if (dy >= distance || fast) close();
+  });
+  panel.addEventListener('touchcancel', () => {
+    if (dragging) shift(0);
+    y0 = null;
+    dragging = false;
+  });
+}
+
+// A small pop of bits, from the top third of the screen, gone within a second.
+export function confetti(host, { count = 24, force = 0.7, colors = ['#ffffff'] } = {}) {
   if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
   const c = document.createElement('canvas');
   c.className = 'confetti';
@@ -68,25 +171,26 @@ export function confetti(host, { count = 70, origin = null, force = 1, colors = 
   const g = c.getContext('2d');
   g.scale(dpr, dpr);
   const bits = Array.from({ length: count }, () => {
-    const a = Math.random() * Math.PI * 2, v = (3 + Math.random() * 8) * force;
-    return { x: origin ? origin[0] : W / 2, y: origin ? origin[1] : H * 0.34, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 4, r: Math.random() * 6,
-      vr: (Math.random() - .5) * .4, w: 5 + Math.random() * 5, h: 9 + Math.random() * 7,
+    const a = Math.random() * Math.PI * 2, v = (2 + Math.random() * 7) * force;
+    return { x: W / 2, y: H * 0.3, vx: Math.cos(a) * v, vy: Math.sin(a) * v - 3, r: Math.random() * 6,
+      vr: (Math.random() - .5) * .4, w: 4 + Math.random() * 4, h: 7 + Math.random() * 5,
       col: colors[Math.floor(Math.random() * colors.length)] };
   });
+  const LIFE = 950;
   const start = performance.now();
   const step = now => {
     const t = now - start;
     g.clearRect(0, 0, W, H);
     for (const b of bits) {
-      b.vy += .24; b.vx *= .985; b.x += b.vx; b.y += b.vy; b.r += b.vr;
+      b.vy += .22; b.vx *= .985; b.x += b.vx; b.y += b.vy; b.r += b.vr;
       g.save();
-      g.globalAlpha = clamp(1.6 - t / 1100, 0, 1);
+      g.globalAlpha = clamp(1.5 * (1 - t / LIFE), 0, 1);
       g.translate(b.x, b.y); g.rotate(b.r);
       g.fillStyle = b.col;
       g.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
       g.restore();
     }
-    if (t < 1800) requestAnimationFrame(step); else c.remove();
+    if (t < LIFE) requestAnimationFrame(step); else c.remove();
   };
   requestAnimationFrame(step);
 }

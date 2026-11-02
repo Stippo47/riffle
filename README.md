@@ -26,6 +26,7 @@ node tests/e2e.mjs
 
 - Tuning numbers for swipes and the break-through hold: `TUNE` in `js/gesture.js`
 - Stamp words and importance labels: `js/ui.js`
-- Colours and looks: the top of `style.css`; the default look: `DEFAULT_LOOK` in `js/app.js`
+- Colours and looks: the top of `style.css`; layouts: further down it, under each layout's name
+- The layouts and looks on offer, and the defaults: the top of `js/app.js`
 - Icons: add the SVG to `vendor/`, then run `python tools/build-icons.py`
 - Before releasing, change `VERSION` in `sw.js` and `js/app.js`, or phones keep the old copy

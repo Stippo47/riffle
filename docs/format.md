@@ -76,7 +76,7 @@ Written by the phone, one new file per batch. A file named `connect-check-…` i
 }
 ```
 
-Every event has `v`, `eid` (unique), `at`, `pack`, `topic`, `deck`, and `demo: true` if it came from the built-in Feel test.
+Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. The built-in Feel test's answers are never sent.
 
 | type | Extra fields | Meaning |
 |---|---|---|

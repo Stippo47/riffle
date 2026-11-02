@@ -7,3 +7,5 @@
 - `card-random` by Faithtoken
 
 **Button icons** from [Lucide](https://lucide.dev), under the ISC licence: see `vendor/lucide/LICENSE`.
+
+**Pixel font** for the Inventory look: [Pixelify Sans](https://github.com/eifetx/Pixelify-Sans) by its project authors, under the SIL Open Font Licence: see `vendor/fonts/LICENSE`.

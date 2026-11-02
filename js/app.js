@@ -1,18 +1,35 @@
-// The screens around the deck: the packs, a pack's topics, setup and settings.
+// The screens around the deck: the packs, a pack's topics, style, settings and connecting.
 import { DEMO_PACK } from './demo.js';
-import { DeckView, deckKey, deckSummary } from './deck.js';
-import { confetti, esc, icon, safeIcon, tick } from './ui.js';
+import { DeckView, cardHTML, deckKey, deckSummary, toolsHTML } from './deck.js';
+import { confetti, esc, icon, paintNotices, safeIcon, setNotice, tick } from './ui.js';
 import * as store from './store.js';
 import * as sync from './sync.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const app = document.getElementById('app');
-const LOOKS = [['foil', 'Foil boosters'], ['table', 'Tabletop'], ['quiet', 'Quiet']];
-const DEFAULT_LOOK = 'foil'; // the look a new install starts with
+
+// Layout and look are two separate choices. To change what a new install starts with, change these.
+const DEFAULT_LAYOUT = 'rows';
+const DEFAULT_LOOK = 'plain';
+const LAYOUTS = [
+  { id: 'rows', name: 'Two rows', says: 'Title, then the labelled buttons, then the card.', home: 'tiles' },
+  { id: 'one', name: 'One line', says: 'Title and icons share a row. The most room for the card.', home: 'list' },
+  { id: 'story', name: 'Full screen', says: 'The card is the whole screen, in its importance colour.', home: 'banners' },
+  { id: 'under', name: 'Row under the card', says: 'The alternative to a top row: buttons near your thumb.', home: 'list' },
+];
+const LOOKS = [
+  { id: 'plain', name: 'Plain dark' },
+  { id: 'paper', name: 'Paper' },
+  { id: 'table', name: 'Tabletop' },
+  { id: 'foil', name: 'Foil' },
+  { id: 'inventory', name: 'Inventory' },
+];
 
 let current = null;     // the DeckView on screen, if any
 let render = () => {};  // draws the current screen again
 let pullNow = () => {};
+let updateReady = false;
+const isLocalHost = ['localhost', '127.0.0.1'].includes(location.hostname);
 
 // ---------- the phone itself
 
@@ -32,31 +49,121 @@ function trackViewport() {
   if (vv) { vv.addEventListener('resize', set); vv.addEventListener('scroll', set); }
   addEventListener('resize', set);
   document.addEventListener('gesturestart', e => e.preventDefault());
+  // On a local test server only: pretend to have an iPhone's safe areas, to check the true spacing.
+  const fake = isLocalHost && new URLSearchParams(location.search).get('insets');
+  if (fake) {
+    const [top, bottom] = fake.split(',');
+    document.documentElement.style.setProperty('--sat', `${top}px`);
+    document.documentElement.style.setProperty('--sab', `${bottom}px`);
+  }
 }
 
-async function setLook(look) {
-  document.documentElement.dataset.look = look;
-  await store.set('look', look);
+// ---------- style
+
+const layoutOf = id => LAYOUTS.find(l => l.id === id) || LAYOUTS[0];
+
+async function setStyle({ layout, look }) {
+  const root = document.documentElement;
+  if (layout) {
+    root.dataset.layout = layout;
+    root.dataset.home = layoutOf(layout).home;
+    await store.set('style-layout', layout);
+  }
+  if (look) {
+    root.dataset.look = look;
+    await store.set('style-look', look);
+  }
+  // Read before the first paint by the script at the top of index.html, so a look doesn't flash.
+  try { localStorage.setItem('riffle-style', JSON.stringify({ layout: root.dataset.layout, home: root.dataset.home, look: root.dataset.look })); } catch { /* it just flashes */ }
+}
+
+function sampleHome() {
+  const packs = [['Project one', 'poker-hand', '#2f8fe0', 12, .4], ['Project two', 'card-pickup', '#d9622b', 30, .2], ['Odds and ends', 'card-random', '#2fa56f', 4, .7]];
+  return `<div class="home screen">
+    <div class="home-head"><div class="apptitle">Riffle</div><span class="iconbtn">${icon('settings')}</span></div>
+    <div class="appsub">Everything sent. 46 cards waiting.</div>
+    <div class="packs">${packs.map(([name, ic, color, left, part]) => packTile({ id: name, title: name, icon: ic, color }, left, Math.round(left / (1 - part)))).join('')}</div>
+  </div>`;
+}
+
+function sampleDeck() {
+  const card = { kind: 'question', rarity: 'common', text: 'Is this the layout you want?', why: 'Tap the choices below and this changes straight away.', pick: 'Try each with the looks.' };
+  return `<div class="deck screen">
+    <div class="topline">
+      <div class="deckbar"><span class="iconbtn">${icon('chevron-left')}</span><div class="t">Sample deck</div><div class="n">3 / 8</div></div>
+      ${toolsHTML(false)}
+    </div>
+    <div class="progress"><b style="width:38%"></b></div>
+    <div class="tablewrap"><div class="table">
+      <div class="card common" data-pos="2" style="z-index:8">${cardHTML({ text: '' })}</div>
+      <div class="card common" data-pos="1" style="z-index:9">${cardHTML({ text: '' })}</div>
+      <div class="card common" data-pos="0" style="z-index:10">${cardHTML(card)}</div>
+    </div></div>
+  </div>`;
+}
+
+function showStyle() {
+  current = null;
+  render = () => {};
+  const root = document.documentElement;
+  app.innerHTML = `
+    <div class="settings stylepage screen scroll">
+      <div class="deckbar">
+        <button class="iconbtn" data-go="back" aria-label="Back">${icon('chevron-left')}</button>
+        <div class="t">Style</div>
+      </div>
+      <div class="preview" id="preview">
+        <div class="pvbox"><div class="pvphone">${sampleDeck()}</div></div>
+        <div class="pvbox"><div class="pvphone">${sampleHome()}</div></div>
+      </div>
+      <div class="set-title">Layout</div>
+      <div class="choices layouts">
+        ${LAYOUTS.map(l => `<button data-layout-pick="${l.id}"><i class="mini mini-${l.id}"><b></b><u></u></i><span><strong>${esc(l.name)}</strong><small>${esc(l.says)}</small></span></button>`).join('')}
+      </div>
+      <div class="set-title">Look</div>
+      <div class="choices looks">
+        ${LOOKS.map(l => `<button data-look-pick="${l.id}"><i class="swatch" data-look="${l.id}"><b></b></i><strong>${esc(l.name)}</strong></button>`).join('')}
+      </div>
+    </div>`;
+  const size = () => {
+    const box = app.querySelector('.pvbox');
+    if (box) app.querySelector('#preview').style.setProperty('--pvs', box.clientWidth / 390);
+  };
+  size();
+  const mark = () => {
+    app.querySelectorAll('[data-layout-pick]').forEach(b => b.classList.toggle('on', b.dataset.layoutPick === root.dataset.layout));
+    app.querySelectorAll('[data-look-pick]').forEach(b => b.classList.toggle('on', b.dataset.lookPick === root.dataset.look));
+  };
+  mark();
+  app.querySelector('[data-go=back]').onclick = showSettings;
+  app.querySelectorAll('[data-layout-pick]').forEach(b => { b.onclick = async () => { await setStyle({ layout: b.dataset.layoutPick }); mark(); }; });
+  app.querySelectorAll('[data-look-pick]').forEach(b => { b.onclick = async () => { await setStyle({ look: b.dataset.lookPick }); mark(); }; });
 }
 
 function registerWorker() {
-  if (!('serviceWorker' in navigator) || ['localhost', '127.0.0.1'].includes(location.hostname)) return;
+  if (!('serviceWorker' in navigator) || isLocalHost) return;
   navigator.serviceWorker.register('sw.js').then(reg => {
     reg.addEventListener('updatefound', () => {
       const w = reg.installing;
       w && w.addEventListener('statechange', () => {
-        if (w.state === 'activated' && navigator.serviceWorker.controller) toast('New version ready. Tap to load it.', () => location.reload());
+        if (w.state === 'activated' && navigator.serviceWorker.controller) markUpdate();
       });
     });
   }).catch(() => {});
 }
 
-function toast(text, onTap) {
-  const t = document.createElement('button');
-  t.className = 'toast';
-  t.textContent = text;
-  t.onclick = () => { t.remove(); onTap && onTap(); };
-  document.body.append(t);
+// A new version waits for a tap, told about in the title line. Nothing floats over the screen.
+function markUpdate() {
+  updateReady = true;
+  refreshNotice();
+  refreshStatusLine();
+}
+
+function refreshNotice() {
+  const st = sync.status();
+  if (st.problem) setNotice({ text: 'Not sending · tap', act: showSettings });
+  else if (updateReady) setNotice({ text: 'Update ready · tap', act: () => location.reload() });
+  else setNotice(null);
 }
 
 // ---------- the library
@@ -117,11 +224,24 @@ const imagesFor = async pack => {
 // ---------- the first screen
 
 function statusLine(st, left) {
-  const wait = st.waiting;
-  if (!st.connected) return wait ? `${wait} answer${wait === 1 ? '' : 's'} kept on this phone. Connect to send them.` : 'Not connected yet. The Feel test works without it.';
-  if (st.error === 'key') return 'GitHub stopped accepting your key. Open the gear to connect again.';
-  if (wait) return `${wait} waiting to send${st.error === 'offline' ? ', when there is signal' : ''}.`;
+  if (st.problem) return st.problem;
+  if (updateReady) return 'New version ready. Tap here to load it.';
+  if (!st.connected) return st.waiting ? `${st.waiting} answer${st.waiting === 1 ? '' : 's'} kept on this phone. Connect to send them.` : 'Not connected yet. The Feel test works without it.';
+  if (st.waiting) return `${st.waiting} waiting to send${st.noSignal ? ', when there is signal' : ''}.`;
   return left ? `Everything sent. ${left} card${left === 1 ? '' : 's'} waiting.` : 'Everything sent. Nothing waiting.';
+}
+
+async function refreshStatusLine() {
+  const line = document.getElementById('statusline');
+  if (!line) return;
+  let left = 0;
+  for (const p of await library()) left += packLeft(await summaries(p));
+  const again = document.getElementById('statusline');
+  if (!again) return;
+  const st = sync.status();
+  again.textContent = statusLine(st, left);
+  again.classList.toggle('is-problem', !!st.problem);
+  again.onclick = st.problem ? showSettings : updateReady ? () => location.reload() : null;
 }
 
 async function showHome() {
@@ -129,21 +249,18 @@ async function showHome() {
   render = showHome;
   const packs = await library();
   const rows = [];
-  let total = 0;
   for (const p of packs) {
     const left = packLeft(await summaries(p));
-    total += left;
     const count = p.decks.reduce((n, d) => n + d.cards.length, 0);
     rows.push({ p, left, count });
   }
-  const st = sync.status();
   app.innerHTML = `
     <div class="home screen scroll">
       <div class="home-head">
         <div class="apptitle">Riffle</div>
         <button class="iconbtn" data-go="settings" aria-label="Settings">${icon('settings')}</button>
       </div>
-      <div class="appsub" id="statusline">${esc(statusLine(st, total))}</div>
+      <div class="appsub" id="statusline"></div>
       ${mustInstall ? `
         <div class="install">
           <b>Add Riffle to your Home Screen</b>
@@ -160,6 +277,7 @@ async function showHome() {
     </div>`;
   app.querySelectorAll('[data-pack]').forEach(b => { b.onclick = () => showPack(b.dataset.pack); });
   app.querySelector('[data-go=settings]').onclick = showSettings;
+  await refreshStatusLine();
 }
 
 function packTile(p, left, count) {
@@ -195,9 +313,9 @@ async function showPack(id) {
       <div class="topic-head">
         <span class="topic-art">${safeIcon(t.icon) || icon('card-random')}</span>
         <span class="topic-title">${esc(t.title)}</span>
-        <span class="topic-count">${cleared ? 'Cleared' : `${done} of ${t.decks.length} decks`}</span>
+        <span class="topic-count">${cleared ? 'Cleared' : `${done} of ${t.decks.length} deck${t.decks.length === 1 ? '' : 's'}`}</span>
       </div>
-      ${t.decks.map((d, i) => deckRow(d, d.stack && i > 0 && t.decks[i - 1].stack === d.stack)).join('')}
+      <div class="deckrows">${t.decks.map((d, i) => deckRow(d, d.stack && i > 0 && t.decks[i - 1].stack === d.stack)).join('')}</div>
     </section>`;
   };
   app.innerHTML = `
@@ -205,12 +323,13 @@ async function showPack(id) {
       <div class="deckbar">
         <button class="iconbtn" data-go="home" aria-label="Back">${icon('chevron-left')}</button>
         <div class="t">${esc(pack.title)}</div>
-        <div class="n">${packLeft(sums)} left</div>
+        <div class="n" data-slot="notice" data-plain="${packLeft(sums)} left"></div>
       </div>
       ${topics.map(topicBlock).join('')}
-      ${misc.length ? `<section class="topic misc">${misc.map(d => deckRow(d, false)).join('')}</section>` : ''}
-      ${pack.demo ? `<button class="ghostbtn resetbtn" data-go="reset">${icon('rotate-ccw')}Start the Feel test again</button>` : ''}
+      ${misc.length ? `<section class="topic misc" style="--pc:${esc(pack.color || '#7b8294')}"><div class="deckrows">${misc.map(d => deckRow(d, false)).join('')}</div></section>` : ''}
+      ${pack.demo ? `<div class="demo-note">The Feel test's answers stay on this phone and are never sent.</div><button class="ghostbtn resetbtn" data-go="reset">${icon('rotate-ccw')}Start the Feel test again</button>` : ''}
     </div>`;
+  paintNotices();
   app.querySelector('[data-go=home]').onclick = showHome;
   const reset = app.querySelector('[data-go=reset]');
   if (reset) reset.onclick = async () => {
@@ -252,31 +371,42 @@ async function afterVerdict(pack, deck, which) {
   else showPack(pack.id);
 }
 
-// The bigger payoffs. A topic gets its own moment, because a busy pack may rarely be empty.
+// The payoffs: a small pop for a topic, because a busy pack may rarely be empty, and one short
+// modest burst for a pack. Gone within a second, with quiet words.
 function reward(level, pack, title, iconText, color, decks, sums) {
   const cards = decks.reduce((n, d) => n + sums.get(d.id).total, 0);
   const isPack = level === 'pack';
+  const pc = color || '#9a5be0';
   app.innerHTML = `
-    <div class="reward screen lvl-${level}" style="--pc:${esc(color || '#9a5be0')}">
-      <div class="rays"></div>
+    <div class="reward screen lvl-${level}" style="--pc:${esc(pc)}">
       <div class="reward-art">${safeIcon(iconText) || icon('card-random')}</div>
-      <div class="reward-word">${isPack ? 'PACK CLEARED' : 'CLEARED'}</div>
-      <div class="reward-title">${esc(title)}</div>
-      <div class="reward-sub">${decks.length} deck${decks.length === 1 ? '' : 's'}, ${cards} card${cards === 1 ? '' : 's'}${isPack ? '. All of it.' : '.'}</div>
+      <div class="reward-word">${esc(title)} cleared</div>
+      <div class="reward-sub">${decks.length} deck${decks.length === 1 ? '' : 's'}, ${cards} card${cards === 1 ? '' : 's'}.</div>
       <button class="primary" data-go="pack">${isPack ? 'Back to the packs' : 'Back to the pack'}</button>
     </div>`;
   app.querySelector('[data-go=pack]').onclick = () => (isPack ? showHome() : showPack(pack.id));
-  confetti(app, { count: isPack ? 220 : 110, force: isPack ? 1.5 : 1.1 });
-  if (isPack) setTimeout(() => confetti(app, { count: 150, force: 1.3 }), 420);
+  confetti(app, isPack ? { count: 56, force: 0.95, colors: [pc, '#ffffff', '#ffd76a'] } : { count: 20, force: 0.6, colors: [pc, '#ffffff'] });
   tick();
 }
 
 // ---------- settings and connecting
 
+const nameOf = (list, id) => (list.find(x => x.id === id) || list[0]).name;
+
+function sendingText(st) {
+  const parts = [];
+  if (st.connected) parts.push(`Connected to ${sync.REPO}.`);
+  else parts.push('Not connected yet.');
+  if (st.waiting) parts.push(`${st.waiting} waiting to send.`);
+  if (st.connected && !st.waiting) parts.push('Nothing waiting.');
+  if (st.sentAt) parts.push(`${st.sentCount} sent so far (last at ${new Date(st.sentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})`);
+  return parts.join(' ');
+}
+
 async function showSettings() {
   current = null;
   render = showSettings;
-  const look = document.documentElement.dataset.look;
+  const root = document.documentElement;
   const st = sync.status();
   app.innerHTML = `
     <div class="settings screen scroll">
@@ -284,26 +414,46 @@ async function showSettings() {
         <button class="iconbtn" data-go="home" aria-label="Back">${icon('chevron-left')}</button>
         <div class="t">Settings</div>
       </div>
-      <div class="set-title">Look</div>
-      <div class="lookpick">
-        ${LOOKS.map(([id, name]) => `<button data-look-pick="${id}" class="${id === look ? 'on' : ''}">${esc(name)}</button>`).join('')}
-      </div>
+      <button class="setrow" data-go="style">${icon('palette')}<span><strong>Style</strong><small>${esc(nameOf(LAYOUTS, root.dataset.layout))} · ${esc(nameOf(LOOKS, root.dataset.look))}</small></span></button>
       <div class="set-title">Sending answers</div>
-      <div class="set-text">${st.connected ? `Connected to ${esc(sync.REPO)}. ${st.waiting ? `${st.waiting} waiting to send.` : 'Everything sent.'}` : 'Not connected. Answers stay on this phone until you connect.'}</div>
+      <div class="set-text" id="sendtext">${esc(sendingText(st))}</div>
+      ${st.problem ? `<div class="set-text problem" id="sendproblem">${esc(st.problem)}</div>` : ''}
+      ${!st.problem && st.lastTry ? `<div class="set-text small" id="lasttry">${esc(st.lastTry)}</div>` : ''}
+      ${st.pullProblem ? `<div class="set-text problem">${esc(st.pullProblem)}</div>` : ''}
       ${st.connected
-        ? `<div class="set-row"><button class="secondary" data-go="sync">${icon('refresh-cw')}Check for new decks</button><button class="ghostbtn" data-go="disconnect">Disconnect</button></div>`
+        ? `<div class="set-row">
+             <button class="secondary" data-go="send">${icon('cloud-upload')}Send now</button>
+             <button class="secondary" data-go="sync">${icon('refresh-cw')}Check for decks</button>
+           </div>
+           <div class="set-text small" id="sendresult"></div>
+           <button class="ghostbtn" data-go="disconnect">Disconnect</button>`
         : `<button class="primary" data-go="connect">${icon('link')}Connect</button>`}
       <div class="set-title">Credits</div>
-      <div class="set-text small">Pack and deck icons from game-icons.net by Lorc, Quoting and Faithtoken, CC BY 3.0. Button icons from Lucide, ISC licence.</div>
+      <div class="set-text small">Pack and deck icons from game-icons.net by Lorc, Quoting and Faithtoken, CC BY 3.0. Button icons from Lucide, ISC licence. Pixelify Sans by its project authors, SIL Open Font Licence.</div>
       <div class="set-text small">Riffle ${VERSION}</div>
     </div>`;
   app.querySelector('[data-go=home]').onclick = showHome;
-  app.querySelectorAll('[data-look-pick]').forEach(b => {
-    b.onclick = async () => { await setLook(b.dataset.lookPick); showSettings(); };
-  });
+  app.querySelector('[data-go=style]').onclick = showStyle;
   const on = (name, fn) => { const b = app.querySelector(`[data-go=${name}]`); if (b) b.onclick = fn; };
   on('connect', showConnect);
-  on('sync', () => { sync.flush(); pullNow(); showHome(); });
+  on('send', async () => {
+    const out = app.querySelector('#sendresult');
+    if (out) out.textContent = 'Sending…';
+    const r = await sync.flush();
+    await showSettings();
+    const again = app.querySelector('#sendresult');
+    if (again) again.textContent = r ? r.message : '';
+    const last = app.querySelector('#lasttry');
+    if (last) last.remove(); // the result just shown says the same
+  });
+  on('sync', async () => {
+    const out = app.querySelector('#sendresult');
+    if (out) out.textContent = 'Checking…';
+    await pullNow();
+    await showSettings();
+    const again = app.querySelector('#sendresult');
+    if (again && !sync.status().pullProblem) again.textContent = 'Checked. You have the latest decks.';
+  });
   on('disconnect', async () => { await sync.disconnect(); showSettings(); });
 }
 
@@ -336,10 +486,10 @@ function showConnect() {
     out.textContent = 'Checking…';
     const r = await sync.connect(box.value);
     btn.disabled = false;
-    box.value = '';
+    if (!r.keepText) box.value = '';
     out.className = `connect-result ${r.ok ? 'good' : 'bad'}`;
     out.textContent = r.message;
-    if (r.ok) setTimeout(showHome, 1400);
+    if (r.ok) setTimeout(showHome, 1600);
   };
 }
 
@@ -347,17 +497,12 @@ function showConnect() {
 
 async function start() {
   trackViewport();
-  await setLook((await store.get('look')) || DEFAULT_LOOK);
-  navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(() => {});
-  sync.onChange(st => {
-    const line = document.getElementById('statusline');
-    if (line) library().then(async packs => {
-      let left = 0;
-      for (const p of packs) left += packLeft(await summaries(p));
-      const again = document.getElementById('statusline');
-      if (again) again.textContent = statusLine(st, left);
-    });
+  await setStyle({
+    layout: (await store.get('style-layout')) || document.documentElement.dataset.layout || DEFAULT_LAYOUT,
+    look: (await store.get('style-look')) || document.documentElement.dataset.look || DEFAULT_LOOK,
   });
+  navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(() => {});
+  sync.onChange(() => { refreshNotice(); refreshStatusLine(); });
   await showHome();
   pullNow = await sync.start(() => render());
   registerWorker();
@@ -369,6 +514,6 @@ async function start() {
 start();
 
 // For the tests in tests/, on a local test server only.
-if (['localhost', '127.0.0.1'].includes(location.hostname)) {
-  window.__riffle = { get current() { return current; }, showHome, showPack, showConnect, showSettings, sync, store };
+if (isLocalHost) {
+  window.__riffle = { get current() { return current; }, showHome, showPack, showConnect, showSettings, showStyle, setStyle, setNotice, sync, store };
 }

@@ -1,5 +1,5 @@
 // The test pack built into the app. It needs no key, so the swipes can be felt straight away.
-// Its answers stay on the phone until it's connected, then they get sent like any others.
+// Its answers mean nothing: they stay on the phone and are never sent.
 
 export const DEMO_PACK = {
   id: 'feel-test',
@@ -55,7 +55,7 @@ export const DEMO_PACK = {
         {
           id: 'comment', kind: 'report', rarity: 'common', title: 'Comment box',
           text: 'Swipe this one up.',
-          why: 'The comment box opens under a small copy of the card. Type something, then throw the small card right, left or down to send both. Throw it up again to send the comment alone.',
+          why: 'The comment box opens under a small copy of the card. Type something, then throw the small card right or left to send both, or up to send the comment alone. Drag down on the card or the box to close it and keep your text.',
         },
         {
           id: 'skip', kind: 'question', rarity: 'common', title: 'Skip',
@@ -67,12 +67,12 @@ export const DEMO_PACK = {
           id: 'flip', kind: 'report', rarity: 'common', title: 'Details',
           text: 'Tap this card to flip it.',
           why: 'Up and down are swipes, so a card can\'t scroll. Anything long lives on the back, where swipes switch off and scrolling works.',
-          details: 'This side scrolls. Try it.\n\nThe front of a card has a size limit, so it can always be read at a glance. The back has no limit: the longer explanation, the numbers, and any pictures.\n\nPictures sit here too, because a phone has no room beside the card. On a wider screen the back could sit next to the front instead.\n\nThis paragraph is only here to make the side long enough to scroll. Keep going.\n\nStill here. The swipes stay off until you flip back, so your thumb can move however it likes without sending the card anywhere.\n\nThat is the idea behind it: quick on the front, as long as it needs on the back.\n\nLast line. Tap below to flip back.',
+          details: 'This side scrolls. Try it.\n\nThe front of a card has a size limit, so it can always be read at a glance. The back has no limit: the longer explanation, the numbers, and any pictures.\n\nPictures sit here too, because a phone has no room beside the card. On a wider screen the back could sit next to the front instead.\n\nThis paragraph is only here to make the side long enough to scroll. Keep going.\n\nStill here. The swipes stay off until you flip back, so your thumb can move however it likes without sending the card anywhere.\n\nThat is the idea behind it: quick on the front, as long as it needs on the back.\n\nA report on a big stage of work might run to several paragraphs here, with a table of numbers and a few pictures, and none of that would slow down the people who only want the front.\n\nThe same goes for a question. The front says what is being asked, what it changes and what I would pick. The back says why, what else was tried, and what could go wrong.\n\nThis is still only here to make the side long enough to scroll on a big phone.\n\nLast line. Tap below to flip back.',
         },
         {
           id: 'notes', kind: 'report', rarity: 'common', title: 'Notes',
           text: 'Tap Notes above this card.',
-          why: 'It is a scratchpad for the whole deck, for thoughts that don\'t fit the card you\'re on. Tap Notes again and you\'re back on this card. The same pad is at the deck\'s end.',
+          why: 'It is a scratchpad for the whole deck, for thoughts that don\'t fit the card you\'re on. Drag it down and you\'re back on this card. The same pad is at the deck\'s end.',
         },
         {
           id: 'pinch', kind: 'question', rarity: 'common', title: 'Overview',
@@ -109,14 +109,14 @@ export const DEMO_PACK = {
         {
           id: 'epic', kind: 'question', rarity: 'epic', title: 'Epic',
           text: 'Light purple is epic. Hold right on this card.',
-          why: 'A right swipe has to break through: keep your thumb there for about a second and the card cracks, glows, then bursts. Let go early and nothing is sent. Left, down and up stay free.',
+          why: 'A right swipe has to break through: keep your thumb there for about a second. The edge glows, the stamp grows and the bar fills, then the card punches off. Let go early and nothing is sent. Left, down and up stay free.',
           pick: 'About one second of holding on anything that can\'t be undone.',
           details: 'Epic cards are the ones that can\'t be undone, or are close to it.\n\nThe hold means a fast run of right swipes can never go over one. Your thumb has to mean it.\n\nThe bar in this box fills while you hold, so you can see how long is left.',
         },
         {
           id: 'legendary', kind: 'question', rarity: 'legendary', title: 'Legendary',
           text: 'Gold is legendary: it shapes everything after it.',
-          why: 'The biggest calls of all, and the rarest. Same hold as epic, with a bigger burst.',
+          why: 'The biggest calls of all, and the rarest. Same hold as epic.',
           pick: 'Only for calls the whole project rests on.',
         },
       ],
@@ -128,10 +128,10 @@ export const DEMO_PACK = {
       title: 'Misc',
       cards: [
         {
-          id: 'look', kind: 'question', rarity: 'common', title: 'The look',
-          text: 'Which look do you want to keep?',
-          why: 'Back on the first screen, the gear switches between Quiet, Tabletop and Foil, so you can try each of them on these cards.',
-          pick: 'Foil boosters. Swipe up to pick another.',
+          id: 'look', kind: 'question', rarity: 'common', title: 'Style',
+          text: 'Which layout and look do you want to keep?',
+          why: 'On the first screen, the gear opens Style. Layout and look are separate choices, so mix them, and the preview changes as you tap.',
+          pick: 'Two rows with Plain dark. Swipe up to say what you settled on.',
         },
       ],
     },

@@ -24,7 +24,7 @@ Option cards (several options plus a question; tap the ones wanted, then swipe t
 
 ## Importance
 
-Five levels, in the usual game rarity colours. Each card's background is a light tint that dark text stays readable on. Tints are in `style.css`, labels in `js/ui.js`.
+Five levels, in the usual game rarity colours. Each card's background is a light tint that dark text stays readable on, in every look. Tints are in `style.css`, labels in `js/ui.js`.
 
 | Level | Colour | Used for |
 |---|---|---|
@@ -34,30 +34,57 @@ Five levels, in the usual game rarity colours. Each card's background is a light
 | epic | light purple | High importance, or can't be undone |
 | legendary | orange-gold | The biggest calls, which shape everything after |
 
+## Style
+
+The gear opens settings, and Style sits at the top of them. **Layout** and **look** are separate choices, so any layout goes with any look. Tapping an option changes a live preview on that screen straight away: a small deck screen and a small home screen, built from the real parts. New installs start with `DEFAULT_LAYOUT` and `DEFAULT_LOOK` in `js/app.js`.
+
+**Layouts.** Each one sets the deck screen, and the home and pack pages follow the same choice. No layout leaves empty room above the card.
+
+| Layout | Deck screen | Home and pack pages |
+|---|---|---|
+| Two rows | A title line, the labelled buttons directly under it, then the card | Tiles |
+| One line | Back, title, count and the buttons as icons share one row, with the card filling everything below | List rows |
+| Full screen | The card is the whole screen, so its importance colour fills the phone. Thin progress at the very top, and the row floats on the card's top edge | Big banners |
+| Row under the card | Title line, the card, then the labelled buttons under it. The alternative to a top row, for thumb reach | List rows |
+
+In Full screen, a black band sits behind the phone's clock, because iPhones draw the clock in white and the card is light.
+
+**Looks.** Tokens at the top of `style.css`, plus a few surfaces. Cards stay white or their importance tint in all of them.
+
+| Look | What it is |
+|---|---|
+| Plain dark | Near-black and flat |
+| Paper | Light, warm paper, with serif headings and a dark band behind the clock |
+| Tabletop | Felt, a wood rail, card boxes for tiles |
+| Foil | Dark and shiny, crimped foil boosters for tiles |
+| Inventory | Blocky game inventory: hard corners, bevels, slots and a free pixel font |
+
 ## Swipes
 
 Dragging moves the top card, which tilts as it goes. A stamp fades in with distance and snaps on where the throw counts. A glow shows on the side it's heading for, and the next card rises underneath. On release the card flies off at the finger's speed, and the next card can be thrown at once.
 
 A throw counts at 27% of the screen's width sideways or 15% of its height up and down, or as a quick flick from 34 pixels. Pulling back before letting go keeps the card. Numbers are in `TUNE` in `js/gesture.js`.
 
-**Breaking through (epic and legendary):** a right swipe has to be held for `TUNE.breakHoldMs` (one second). The card pushes against resistance and trembles more and more. Cracks spread from a point right of the middle, a glow builds around the edge and behind the card, the stamp grows, and the bar in the pick box fills. At the end it breaks through while the finger is still down: the card comes apart along its cracks, with a flash, a burst of bits and a knock to the table. Letting go or pulling back early springs it back and sends nothing, and the cracks heal. Left, down and up stay free. The glint on arrival stays, as a sign to read the card.
+**Breaking through (epic and legendary):** a right swipe has to be held for `TUNE.breakHoldMs` (one second). The card pushes against resistance with a slight tremble. A glow builds at the card's edge and behind it, the stamp grows, and the bar in the pick box fills. At the end it breaks through while the finger is still down: the card punches off to the right with a quick flash. Letting go or pulling back early springs it back and sends nothing, and the glow drains away. Left, down and up stay free. The glint on arrival stays, as a sign to read the card.
 
 ## The comment box
 
-Swiping up opens a comment box under a small copy of the card, with the keyboard up. From there:
+Swiping up opens a comment box under a small copy of the card, with the keyboard up. The title and buttons go away, and the card and box share all the height the keyboard leaves. There's no hint line and no close button. From there:
 
-- Throw the small card right, left or down: sends that answer with the comment.
+- Throw the small card right or left: sends that answer with the comment.
 - Throw it up again: sends the comment alone, as the reader's own suggestion. With nothing typed, it just closes the box.
-- The X closes the box and keeps the text. The card then shows the text as a chip, and tapping that reopens it.
+- Drag down, on the card or on the box: closes the box, drops the keyboard and keeps the text as a chip on the card. Tapping the chip reopens it. A normal down swipe after that is IDK with the comment.
 
 Drafts survive closing the app.
 
-## The row above the card
+The box and the notes pad are `contenteditable="plaintext-only"` rather than form fields, in the hope iPhones then leave out the autofill bar above the keyboard. Autocorrect, dictation and pasting work as usual.
 
-Undo, Notes, Skip and Grid sit directly above the card, which stands low on the screen so a thumb can reach. They act as the finger lifts.
+## The buttons
+
+Undo, Notes, Skip and Grid. They act as the finger lifts.
 
 - **Undo:** brings back the last card, from the way it left, and takes back its answer. Also takes back a skip.
-- **Notes:** a scratchpad for the whole deck, for thoughts that don't fit the card on screen. One tap there and one tap back, in the same place. It's sent with the deck, and the same pad is on the end screen.
+- **Notes:** a scratchpad for the whole deck, for thoughts that don't fit the card on screen. It opens as a full sheet. Dragging it down, or tapping its head, returns to the same card. It's sent with the deck, and the same pad is on the end screen.
 - **Skip:** sends the card to the bottom of the deck.
 - **Grid:** the overview, the same as a pinch, for when only one hand is free.
 
@@ -71,25 +98,32 @@ Up and down are swipes, so a card can't scroll. The face has a size limit, and t
 
 ## Endings and rewards
 
-- **Deck:** a stamp, the tally counting up, a burst of confetti, the notes pad, and two choices: "Deck's done" or "Replan from the base".
+Kept quiet on purpose.
+
+- **Deck:** a stamp, the tally counting up, the notes pad, and two choices: "Deck's done" or "Replan from the base". No confetti.
 - **Next in a stack:** "Deck's done" deals the next deck in the stack straight away.
-- **Topic:** clearing every deck in a topic gets its own moment, because a busy pack may rarely be empty.
-- **Pack:** clearing everything gets the biggest one, and the dashboard shows the pack as cleared until new cards arrive.
+- **Topic:** clearing every deck in a topic gets a small pop, because a busy pack may rarely be empty.
+- **Pack:** clearing everything gets one short modest burst, and the dashboard shows the pack as cleared until new cards arrive. Both are gone in about a second, with plain words.
 
-## Looks
+## Messages
 
-Three, as swappable tokens at the top of `style.css`: foil boosters, tabletop and quiet. Settings switches between them. `DEFAULT_LOOK` in `js/app.js` sets the one a new install starts with.
+Nothing floats over the screen, so nothing can cover the buttons or a card's words. A short message sits in the title line in place of the count, and can be tapped: "Update ready", or "Not sending", which opens settings. The first screen's status line says the same at full length.
 
 ## Storage and sync
 
 - **App code:** a public repo served by GitHub Pages. It holds no project content.
 - **Content and answers:** a private repo, `riffle-data`. The format is in [format.md](format.md).
-- **Connecting:** the phone reads and writes the private repo through GitHub's API, with a fine-grained key that reaches only that repo. The person makes the key and pastes it into the app, once. The app checks it can read and write, and refuses to keep a key that can see any other private repo.
+- **Connecting:** the phone reads and writes the private repo through GitHub's API, with a fine-grained key that reaches only that repo. The person makes the key and pastes it into the app, once. The app checks it can read and write, with a real test write, and refuses to keep a key that can really open any other private repo.
 - **Offline:** a service worker keeps the app on the phone. A pack's decks and pictures come down when there's signal. Answers wait in a queue with a count on the dashboard.
-- **Sending:** at most one batch every 15 seconds, plus when the app is hidden and when signal returns. Each batch is a new file, so nothing can collide with whoever is writing decks.
-- **The built-in Feel test** needs no key. Its answers wait on the phone until it's connected, then they're sent marked as demo.
+- **Sending:** at most one batch every 15 seconds, plus when the app is hidden, comes back or signal returns. Each batch is a new file, so nothing can collide with whoever is writing decks.
+- **When sending fails, it says why.** A refusal from GitHub gives the status code and what to do, on the first screen, in the title line ("Not sending") and in settings. One miss counts as no signal; three in a row while the phone says it's online counts as a problem and says so. Settings shows how many have been sent and when, and has Send now, which reports what happened. Every call gives up after 25 seconds, so a call frozen with the page can't hold up the ones after it.
+- **The built-in Feel test** needs no key. Its answers mean nothing: they stay on the phone and are never queued. Any an older version queued are cleared on start.
 
 On iPhone, the app has to be added to the Home Screen: Safari and the Home Screen app keep separate data, and Safari can clear a site's data when it isn't used for a while. iPhones only send while the app is open. Web pages can't vibrate there, so the tick uses a switch-control trick that works on recent versions, and does nothing otherwise.
+
+## For testing
+
+On a local test server only: `?api=` points the app at a stand-in for GitHub, and `?insets=59,34` pretends to have an iPhone's top and bottom safe areas, to check the true spacing.
 
 ## Still to build
 
