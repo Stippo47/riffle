@@ -1,6 +1,6 @@
 # Credits
 
-**Pack and deck icons** from [game-icons.net](https://game-icons.net), under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). The app removes their black background and colours them to fit.
+**Pack and deck icons** from [game-icons.net](https://game-icons.net), under [CC BY 3.0](https://creativecommons.org/licenses/by/3.0/). The app removes their black background and colours them to fit. Those bundled in this repo:
 
 - `poker-hand` by Lorc
 - `card-pickup` by Quoting

@@ -6,7 +6,7 @@ import { DEFAULT_DIRS, MEANING, confetti, esc, getDirs, icon, paintNotices, safe
 import * as store from './store.js';
 import * as sync from './sync.js';
 
-const VERSION = '0.3.0';
+const VERSION = '0.3.1';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -14,10 +14,10 @@ const DEFAULT_LAYOUT = 'rows';
 const DEFAULT_LOOK = 'plain';
 const DEFAULT_MARK = 'word';
 const LAYOUTS = [
-  { id: 'rows', name: 'Two rows', says: 'Title, then the labelled buttons, then the card.', home: 'tiles' },
-  { id: 'one', name: 'One line', says: 'Title and icons share a row. The most room for the card.', home: 'list' },
-  { id: 'story', name: 'Full screen', says: 'The card is the whole screen, in its importance colour.', home: 'banners' },
-  { id: 'under', name: 'Row under the card', says: 'The alternative to a top row: buttons near your thumb.', home: 'list' },
+  { id: 'rows', name: 'Two rows', says: 'Title, then the labelled buttons, then the card.', home: 'edge', decks: 'tiles' },
+  { id: 'one', name: 'One line', says: 'Title and icons share a row. The most room for the card.', home: 'list', decks: 'list' },
+  { id: 'story', name: 'Full screen', says: 'The card is the whole screen, in its importance colour.', home: 'banners', decks: 'banners' },
+  { id: 'under', name: 'Row under the card', says: 'The alternative to a top row: buttons near your thumb.', home: 'list', decks: 'list' },
 ];
 const LOOKS = [
   { id: 'plain', name: 'Plain dark' },
@@ -80,6 +80,7 @@ async function setStyle({ layout, look, mark }) {
   if (layout) {
     root.dataset.layout = layout;
     root.dataset.home = layoutOf(layout).home;
+    root.dataset.decks = layoutOf(layout).decks;
     await store.set('style-layout', layout);
   }
   if (look) {
@@ -87,7 +88,7 @@ async function setStyle({ layout, look, mark }) {
     await store.set('style-look', look);
   }
   // Read before the first paint by the script at the top of index.html, so a look doesn't flash.
-  try { localStorage.setItem('riffle-style', JSON.stringify({ layout: root.dataset.layout, home: root.dataset.home, look: root.dataset.look, mark: root.dataset.mark })); } catch { /* it just flashes */ }
+  try { localStorage.setItem('riffle-style', JSON.stringify({ layout: root.dataset.layout, home: root.dataset.home, decks: root.dataset.decks, look: root.dataset.look, mark: root.dataset.mark })); } catch { /* it just flashes */ }
 }
 
 function sampleHome() {
@@ -205,12 +206,14 @@ function showDirections() {
 }
 
 function registerWorker() {
-  if (!('serviceWorker' in navigator) || isLocalHost) return;
+  // On a local test server only with ?sw, so a working copy doesn't get stuck behind its own cache.
+  if (!('serviceWorker' in navigator) || (isLocalHost && !new URLSearchParams(location.search).has('sw'))) return;
+  const hadOne = !!navigator.serviceWorker.controller; // a first install has nothing to update from
   navigator.serviceWorker.register('sw.js').then(reg => {
     reg.addEventListener('updatefound', () => {
       const w = reg.installing;
       w && w.addEventListener('statechange', () => {
-        if (w.state === 'activated' && navigator.serviceWorker.controller) markUpdate();
+        if (w.state === 'activated' && hadOne) markUpdate();
       });
     });
   }).catch(() => {});
@@ -367,6 +370,7 @@ function packTile(p, left, count, big = 0) {
   return `<button class="pack ${left ? '' : 'cleared'}" data-pack="${esc(p.id)}" style="--pc:${esc(p.color || '#7b8294')}">
     <div class="art">${safeIcon(p.icon) || icon('card-random')}</div>
     <div class="name">${esc(p.title)}</div>
+    ${big ? `<div class="big">${big} big</div>` : ''}
     <div class="left">${left ? `${left} left` : 'Cleared'}${big ? `<span class="bigcount"> · ${big} big</span>` : ''}</div>
     <div class="bar"><b style="width:${Math.round(donePart * 100)}%"></b></div>
   </button>`;
@@ -381,10 +385,11 @@ async function showPack(id, message = '') {
   render = () => showPack(id);
   const sums = await summaries(pack);
   const { topics, misc } = topicsOf(pack);
-  const deckRow = (d, inStack) => {
+  const deckRow = (d, inStack, art) => {
     const s = sums.get(d.id);
     const main = s.finished ? (s.verdict === 'replan' ? 'Sent back' : 'Done') : s.left ? `${s.left} left` : 'At the end';
     return `<button class="deckrow ${s.finished ? 'finished' : ''} ${inStack ? 'instack' : ''}" data-deck="${esc(d.id)}">
+      <span class="art">${art}</span>
       <span class="deckrow-title">${d.stack && !inStack ? '<small class="readfirst">Read first</small>' : ''}${esc(d.title)}</span>
       <span class="deckrow-left">${main}${s.handled ? `<small class="handledcount"> · ${s.handled} handled</small>` : ''}</span>
     </button>`;
@@ -392,13 +397,14 @@ async function showPack(id, message = '') {
   const topicBlock = t => {
     const done = t.decks.filter(d => sums.get(d.id).finished).length;
     const cleared = done === t.decks.length;
+    const art = safeIcon(t.icon) || safeIcon(pack.icon) || icon('card-random');
     return `<section class="topic ${cleared ? 'cleared' : ''}" style="--pc:${esc(t.color || pack.color || '#7b8294')}">
       <div class="topic-head">
         <span class="topic-art">${safeIcon(t.icon) || icon('card-random')}</span>
         <span class="topic-title">${esc(t.title)}</span>
         <span class="topic-count">${cleared ? 'Cleared' : `${done} of ${t.decks.length} deck${t.decks.length === 1 ? '' : 's'}`}</span>
       </div>
-      <div class="deckrows">${t.decks.map((d, i) => deckRow(d, d.stack && i > 0 && t.decks[i - 1].stack === d.stack)).join('')}</div>
+      <div class="deckrows">${t.decks.map((d, i) => deckRow(d, d.stack && i > 0 && t.decks[i - 1].stack === d.stack, art)).join('')}</div>
     </section>`;
   };
   const thoughts = await thoughtCount(pack);
@@ -412,7 +418,7 @@ async function showPack(id, message = '') {
       ${message ? `<div class="set-text problem">${esc(message)}</div>` : ''}
       <button class="thoughtsrow" data-go="thoughts">${icon('lightbulb')}<span><strong>Thoughts</strong><small>${thoughts ? `${thoughts} filed` : 'Anything on your mind about this project'}</small></span></button>
       ${topics.map(topicBlock).join('')}
-      ${misc.length ? `<section class="topic misc" style="--pc:${esc(pack.color || '#7b8294')}"><div class="deckrows">${misc.map(d => deckRow(d, false)).join('')}</div></section>` : ''}
+      ${misc.length ? `<section class="topic misc" style="--pc:${esc(pack.color || '#7b8294')}"><div class="deckrows">${misc.map(d => deckRow(d, false, safeIcon(pack.icon) || icon('card-random'))).join('')}</div></section>` : ''}
       ${pack.demo ? '<div id="feelwords"></div>' : ''}
     </div>`;
   paintNotices();
@@ -621,7 +627,7 @@ async function showSettings() {
       <div class="set-title">On this phone</div>
       <div class="set-text small" id="storageline"></div>
       <div class="set-title">Credits</div>
-      <div class="set-text small">Pack and deck icons from game-icons.net by Lorc, Quoting and Faithtoken, CC BY 3.0. Button icons from Lucide, ISC licence. Pixelify Sans by its project authors, SIL Open Font Licence.</div>
+      <div class="set-text small">Pack and deck icons from game-icons.net, by its many authors, CC BY 3.0. Button icons from Lucide, ISC licence. Pixelify Sans by its project authors, SIL Open Font Licence.</div>
       <div class="set-text small">Riffle ${VERSION}</div>
     </div>`;
   store.persisted().then(yes => {

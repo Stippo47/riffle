@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-layout="rows" data-home="tiles" data-look="plain" data-mark="word">
+<html lang="en" data-layout="rows" data-home="edge" data-decks="tiles" data-look="plain" data-mark="word">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
@@ -16,7 +16,7 @@
 // The chosen style, before the first paint. js/app.js keeps this copy up to date.
 try {
   var s = JSON.parse(localStorage.getItem('riffle-style'));
-  if (s) { var d = document.documentElement.dataset; d.layout = s.layout; d.home = s.home; d.look = s.look; if (s.mark) d.mark = s.mark; }
+  if (s) { var d = document.documentElement.dataset; d.layout = s.layout; d.home = s.home; if (s.decks) d.decks = s.decks; d.look = s.look; if (s.mark) d.mark = s.mark; }
 } catch (e) {}
 </script>
 <link rel="stylesheet" href="style.css">

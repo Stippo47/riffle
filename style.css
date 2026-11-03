@@ -125,39 +125,18 @@ svg{display:block}
 [data-look=inventory][data-home=list] .pack .art{color:#2f2f2f}
 [data-look=inventory][data-home=list] .pack .bar b{background:#2f2f2f}
 
-/* Home layout: tiles */
-[data-home=tiles] .packs{grid-template-columns:repeat(3,1fr)}
-[data-home=tiles] .pack{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;min-height:148px;padding:14px 6px 12px;background:var(--tile-bg);color:var(--tile-ink);border-radius:var(--tile-radius);box-shadow:var(--tile-shadow)}
-[data-home=tiles] .pack .art{width:56px;height:56px;color:var(--tile-art,var(--pc))}
-[data-home=tiles] .pack .name{font-family:var(--display);font-size:16px;font-weight:700;margin-top:8px;line-height:1.08}
-[data-home=tiles] .pack .left{font-size:12.5px;opacity:.75;margin-top:3px}
-[data-home=tiles] .pack .bar{position:absolute;left:10px;right:10px;bottom:7px;height:3px;background:rgba(127,127,127,.25);overflow:hidden}
-[data-home=tiles] .pack .bar b{display:block;height:100%;background:var(--pc)}
-[data-look=inventory][data-home=tiles] .pack .art{filter:drop-shadow(2px 2px 0 #373737)}
-[data-look=inventory][data-home=tiles] .pack .name{font-size:17px;font-weight:400}
-[data-look=inventory][data-home=tiles] .pack .left{opacity:1}
-[data-look=inventory][data-home=tiles] .pack .bar{left:6px;right:6px;bottom:6px}
-[data-look=inventory][data-home=tiles] .pack .bar b{background:#fff}
-
-/* Tabletop's tiles are card boxes */
-[data-look=table][data-home=tiles] .pack{height:150px;padding:24px 6px 8px;justify-content:flex-start;border-radius:5px 5px 4px 4px;background:linear-gradient(100deg,color-mix(in srgb,var(--pc) 72%,#000),var(--pc) 22%,color-mix(in srgb,var(--pc) 82%,#fff) 60%,color-mix(in srgb,var(--pc) 68%,#000));box-shadow:0 8px 14px rgba(0,0,0,.5),inset 0 0 0 1px rgba(0,0,0,.2);color:#fff}
-[data-look=table][data-home=tiles] .pack::before{content:"";position:absolute;left:0;right:0;top:0;height:18px;background:rgba(0,0,0,.2);border-radius:5px 5px 40% 40%/5px 5px 12px 12px;box-shadow:inset 0 -1px 0 rgba(255,255,255,.2)}
-[data-look=table][data-home=tiles] .pack .art{width:50px;height:50px;color:#fff;filter:drop-shadow(0 1px 0 rgba(0,0,0,.5))}
-[data-look=table][data-home=tiles] .pack .bar b{background:#fff}
-
-/* Foil's tiles are crimped boosters */
-[data-look=foil][data-home=tiles] .pack{--z:5px;height:172px;color:#fff;border-radius:0;box-shadow:none;padding:18px 6px 18px;
-  background:
-    repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,rgba(0,0,0,.12) 1px 3px) top/100% 15px no-repeat,
-    repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,rgba(0,0,0,.12) 1px 3px) bottom/100% 15px no-repeat,
-    linear-gradient(112deg,transparent 18%,rgba(255,255,255,.55) 30%,transparent 42%,transparent 58%,rgba(255,255,255,.3) 68%,transparent 78%),
-    linear-gradient(135deg,color-mix(in srgb,var(--pc) 80%,#ff5fd0),color-mix(in srgb,var(--pc) 88%,#fff) 34%,var(--pc) 52%,color-mix(in srgb,var(--pc) 72%,#35e0ff) 76%,color-mix(in srgb,var(--pc) 62%,#000));
-  -webkit-mask:conic-gradient(from 135deg at top,#0000,#000 1deg 89deg,#0000 90deg) top/calc(2*var(--z)) 51% repeat-x,conic-gradient(from -45deg at bottom,#0000,#000 1deg 89deg,#0000 90deg) bottom/calc(2*var(--z)) 51% repeat-x;
-  mask:conic-gradient(from 135deg at top,#0000,#000 1deg 89deg,#0000 90deg) top/calc(2*var(--z)) 51% repeat-x,conic-gradient(from -45deg at bottom,#0000,#000 1deg 89deg,#0000 90deg) bottom/calc(2*var(--z)) 51% repeat-x}
-[data-look=foil][data-home=tiles] .pack .art{width:58px;height:58px;color:#fff;filter:drop-shadow(0 2px 2px rgba(0,0,0,.5))}
-[data-look=foil][data-home=tiles] .pack .name{font-size:21px;letter-spacing:.02em;margin-top:6px;text-shadow:0 1px 2px rgba(0,0,0,.6);line-height:1}
-[data-look=foil][data-home=tiles] .pack .left{font-weight:600;opacity:1;text-shadow:0 1px 2px rgba(0,0,0,.6)}
-[data-look=foil][data-home=tiles] .pack .bar{display:none}
+/* Home layout: rows with a coloured edge */
+[data-home=edge] .packs{grid-template-columns:1fr;gap:9px}
+[data-home=edge] .pack{display:grid;grid-template-columns:1fr auto;align-items:center;align-content:center;gap:1px 12px;min-height:74px;padding:10px 14px 10px 18px;background:var(--row-bg);box-shadow:inset 5px 0 0 var(--pc),inset 0 0 0 1px var(--row-line);border-radius:var(--row-radius)}
+[data-home=edge] .pack .art,[data-home=edge] .pack .bar,[data-home=edge] .pack .left .bigcount{display:none}
+[data-home=edge] .pack .name{font-family:var(--display);font-size:20px;font-weight:600;line-height:1.15;min-width:0}
+[data-home=edge] .pack .left{grid-column:2;grid-row:1/3;font-size:15px;color:var(--dim);white-space:nowrap}
+.pack .big{display:none}
+[data-home=edge] .pack .big{display:block;grid-column:1;font-size:12.5px;font-weight:700;color:#b48cff}
+[data-look=paper][data-home=edge] .pack .big{color:#6a2bd6}
+[data-look=inventory][data-home=edge] .pack{box-shadow:inset 7px 0 0 var(--pc),var(--tile-shadow);color:#fff;padding-left:20px}
+[data-look=inventory][data-home=edge] .pack .left{color:#efefef}
+[data-look=inventory][data-home=edge] .pack .big{color:#efe2ff}
 
 /* Home layout: big banners */
 [data-home=banners] .packs{grid-template-columns:1fr}
@@ -197,13 +176,50 @@ svg{display:block}
 .deckrow.instack{margin-left:12px;width:calc(100% - 12px)}
 [data-look=inventory] .deckrow{box-shadow:var(--tile-shadow);color:#fff;padding:12px 16px;font-family:var(--display)}
 [data-look=inventory] .deckrow-left{color:#efefef}
-[data-home=tiles] .deckrows{grid-template-columns:1fr 1fr}
-[data-home=tiles] .deckrow{flex-direction:column;align-items:flex-start;justify-content:space-between;min-height:92px;padding:12px}
-[data-home=tiles] .deckrow.instack{margin-left:0;width:100%}
 [data-home=banners] .deckrow{min-height:68px;box-shadow:inset 5px 0 0 var(--pc),inset 0 0 0 1px var(--row-line);padding-left:18px}
 [data-home=banners] .deckrow-title{font-family:var(--display);font-size:20px}
 [data-home=banners] .deckrow.instack{margin-left:0;width:100%}
 [data-look=inventory][data-home=banners] .deckrow{box-shadow:var(--tile-shadow)}
+
+/* Decks as big icon tiles under plain headings. A look's tile treatment lives here. */
+.deckrow .art{display:none}
+.deckrow .art svg{width:100%;height:100%;fill:currentColor}
+[data-decks=tiles] .topic{margin:10px 0 14px}
+[data-decks=tiles] .topic-art{display:none}
+[data-decks=tiles] .topic-head{margin-bottom:6px}
+[data-decks=tiles] .topic-title{font-size:18px}
+[data-decks=tiles] .topic:not(.cleared) .topic-count{display:none}
+[data-decks=tiles] .readfirst{display:none}
+[data-decks=tiles] .deckrows{grid-template-columns:repeat(3,minmax(0,1fr))}
+[data-decks=tiles] .deckrow{position:relative;flex-direction:column;align-items:center;justify-content:center;gap:0;text-align:center;min-height:118px;margin:0;padding:12px 6px;background:var(--tile-bg);color:var(--tile-ink);border-radius:var(--tile-radius);box-shadow:var(--tile-shadow)}
+[data-decks=tiles] .deckrow.instack{margin:0;width:100%}
+[data-decks=tiles] .deckrow .art{display:block;flex:none;width:40px;height:40px;color:var(--tile-art,var(--pc))}
+[data-decks=tiles] .deckrow-title{display:block;width:100%;font-family:var(--display);font-size:14px;font-weight:700;line-height:1.1;margin-top:8px;overflow-wrap:anywhere}
+[data-decks=tiles] .deckrow-left{font-size:12.5px;line-height:1.2;white-space:normal;color:inherit;opacity:.75;margin-top:3px}
+[data-decks=tiles] .handledcount{display:block}
+[data-look=inventory][data-decks=tiles] .deckrow .art{filter:drop-shadow(2px 2px 0 #373737)}
+[data-look=inventory][data-decks=tiles] .deckrow-title{font-size:15px;font-weight:400}
+[data-look=inventory][data-decks=tiles] .deckrow-left{opacity:1;font-family:var(--font)}
+[data-look=inventory][data-decks=tiles] .handledcount{color:#fff}
+/* Tabletop: card boxes */
+[data-look=table][data-decks=tiles] .deckrow{min-height:138px;padding:24px 6px 10px;justify-content:flex-start;border-radius:5px 5px 4px 4px;background:linear-gradient(100deg,color-mix(in srgb,var(--pc) 72%,#000),var(--pc) 22%,color-mix(in srgb,var(--pc) 82%,#fff) 60%,color-mix(in srgb,var(--pc) 68%,#000));box-shadow:0 8px 14px rgba(0,0,0,.5),inset 0 0 0 1px rgba(0,0,0,.2);color:#fff}
+[data-look=table][data-decks=tiles] .deckrow::before{content:"";position:absolute;left:0;right:0;top:0;height:18px;background:rgba(0,0,0,.2);border-radius:5px 5px 40% 40%/5px 5px 12px 12px;box-shadow:inset 0 -1px 0 rgba(255,255,255,.2)}
+[data-look=table][data-decks=tiles] .deckrow .art{color:#fff;filter:drop-shadow(0 1px 0 rgba(0,0,0,.5))}
+[data-look=table][data-decks=tiles] .deckrow-left{opacity:.9}
+[data-look=table][data-decks=tiles] .handledcount{color:#fff}
+/* Foil: crimped boosters */
+[data-look=foil][data-decks=tiles] .deckrow{--z:5px;min-height:156px;color:#fff;border-radius:0;box-shadow:none;padding:18px 6px;
+  background:
+    repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,rgba(0,0,0,.12) 1px 3px) top/100% 15px no-repeat,
+    repeating-linear-gradient(90deg,rgba(255,255,255,.22) 0 1px,rgba(0,0,0,.12) 1px 3px) bottom/100% 15px no-repeat,
+    linear-gradient(112deg,transparent 18%,rgba(255,255,255,.55) 30%,transparent 42%,transparent 58%,rgba(255,255,255,.3) 68%,transparent 78%),
+    linear-gradient(135deg,color-mix(in srgb,var(--pc) 80%,#ff5fd0),color-mix(in srgb,var(--pc) 88%,#fff) 34%,var(--pc) 52%,color-mix(in srgb,var(--pc) 72%,#35e0ff) 76%,color-mix(in srgb,var(--pc) 62%,#000));
+  -webkit-mask:conic-gradient(from 135deg at top,#0000,#000 1deg 89deg,#0000 90deg) top/calc(2*var(--z)) 51% repeat-x,conic-gradient(from -45deg at bottom,#0000,#000 1deg 89deg,#0000 90deg) bottom/calc(2*var(--z)) 51% repeat-x;
+  mask:conic-gradient(from 135deg at top,#0000,#000 1deg 89deg,#0000 90deg) top/calc(2*var(--z)) 51% repeat-x,conic-gradient(from -45deg at bottom,#0000,#000 1deg 89deg,#0000 90deg) bottom/calc(2*var(--z)) 51% repeat-x}
+[data-look=foil][data-decks=tiles] .deckrow .art{width:46px;height:46px;color:#fff;filter:drop-shadow(0 2px 2px rgba(0,0,0,.5))}
+[data-look=foil][data-decks=tiles] .deckrow-title{font-size:17px;letter-spacing:.02em;margin-top:5px;text-shadow:0 1px 2px rgba(0,0,0,.6);line-height:1.02}
+[data-look=foil][data-decks=tiles] .deckrow-left{font-weight:600;opacity:1;text-shadow:0 1px 2px rgba(0,0,0,.6)}
+[data-look=foil][data-decks=tiles] .handledcount{color:#fff}
 .demo-note{font-size:13.5px;line-height:1.3;color:var(--dim);text-align:center;margin-top:6px}
 .words{display:grid;gap:7px;margin-bottom:10px}
 .word{display:grid;gap:2px;padding:9px 12px;background:var(--row-bg);box-shadow:inset 0 0 0 1px var(--row-line);border-radius:var(--row-radius);font-size:15px;line-height:1.3;white-space:pre-wrap;overflow-wrap:anywhere}

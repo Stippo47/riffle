@@ -50,14 +50,16 @@ The gear opens settings, and Style sits at the top of them. **Layout**, **look**
 
 The word and icon sit at the edge of the card's area rather than the true edge of the screen, so they never cover the title or the buttons in any layout.
 
-**Layouts.** Each one sets the deck screen, and the home and pack pages follow the same choice. No layout leaves empty room above the card.
+**Layouts.** Each one sets the deck screen, the packs page and the page listing a pack's decks. No layout leaves empty room above the card.
 
-| Layout | Deck screen | Home and pack pages |
-|---|---|---|
-| Two rows | A title line, the labelled buttons directly under it, then the card | Tiles |
-| One line | Back, title, count and the buttons as icons share one row, with the card filling everything below | List rows |
-| Full screen | The card is the whole screen, so its importance colour fills the phone. Thin progress at the very top, and the row floats on the card's top edge | Big banners |
-| Row under the card | Title line, the card, then the labelled buttons under it. The alternative to a top row, for thumb reach | List rows |
+| Layout | Deck screen | Packs | Decks in a pack |
+|---|---|---|---|
+| Two rows | A title line, the labelled buttons directly under it, then the card | Rows with a coloured edge | Big icon tiles, three across, under plain topic headings |
+| One line | Back, title, count and the buttons as icons share one row, with the card filling everything below | List rows | One row per deck, under topic headings with icons |
+| Full screen | The card is the whole screen, so its importance colour fills the phone. Thin progress at the very top, and the row floats on the card's top edge | Big banners | Tall rows with a coloured edge |
+| Row under the card | Title line, the card, then the labelled buttons under it. The alternative to a top row, for thumb reach | List rows | One row per deck, under topic headings with icons |
+
+The Thoughts row sits at the top of a pack's page in all of them. A deck tile shows its topic's icon, and a Misc deck its pack's.
 
 In Full screen, a black band sits behind the phone's clock, because iPhones draw the clock in white and the card is light.
 
@@ -67,8 +69,8 @@ In Full screen, a black band sits behind the phone's clock, because iPhones draw
 |---|---|
 | Plain dark | Near-black and flat |
 | Paper | Light, warm paper, with serif headings and a dark band behind the clock |
-| Tabletop | Felt, a wood rail, card boxes for tiles |
-| Foil | Dark and shiny, crimped foil boosters for tiles |
+| Tabletop | Felt, a wood rail, card boxes for deck tiles |
+| Foil | Dark and shiny, crimped foil boosters for deck tiles |
 | Inventory | Blocky game inventory: hard corners, bevels, slots and a free pixel font |
 
 ## Swipes

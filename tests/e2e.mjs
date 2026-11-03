@@ -162,6 +162,22 @@ const appTitle = await rect('.apptitle');
 ok(appTitle.top >= SAT && appTitle.top - SAT <= 12, 'the title starts right under the safe area, not twice below it', String(appTitle.top));
 await shot('01-home');
 
+console.log('Two rows: packs and decks');
+const homeB = await ev(`(()=>{const p=document.querySelector('.pack');const c=getComputedStyle(p);const show=s=>{const e=p.querySelector(s);return !!e&&getComputedStyle(e).display!=='none'};return {cols:getComputedStyle(document.querySelector('.packs')).gridTemplateColumns.split(' ').length,edge:c.boxShadow.includes('inset'),art:show('.art'),bar:show('.bar'),w:p.getBoundingClientRect().width}})()`);
+ok(homeB.cols === 1 && homeB.edge && !homeB.art && !homeB.bar && homeB.w > 340, 'packs are full-width rows with a coloured edge', JSON.stringify(homeB));
+ok(await ev(`!document.querySelector('.cont')`), 'with no Carry on card');
+await ev(`__riffle.showPack('feel-test')`);
+await sleep(250);
+const packB = await ev(`(()=>{const r=e=>e.getBoundingClientRect();const tiles=[...document.querySelector('.deckrows').querySelectorAll('.deckrow')].map(r);const t=document.querySelector('.thoughtsrow');const head=document.querySelector('.topic-head');const a=document.querySelector('.deckrow .art');return {tops:tiles.map(x=>Math.round(x.top)),lefts:tiles.map(x=>Math.round(x.left)),w:Math.round(tiles[0].width),thoughtsAbove:r(t).bottom<=r(head).top,topicArt:getComputedStyle(document.querySelector('.topic-art')).display,count:getComputedStyle(document.querySelector('.topic-count')).display,art:getComputedStyle(a).display,artW:r(a).width,overflow:[...document.querySelectorAll('.deckrow')].some(x=>x.scrollWidth>x.clientWidth+1)}})()`);
+ok(packB.tops.length === 3 && new Set(packB.tops).size === 1 && new Set(packB.lefts).size === 3 && packB.w >= 105, 'decks are tiles, three across', JSON.stringify(packB));
+ok(packB.art !== 'none' && packB.artW === 40, 'each with a big icon', JSON.stringify(packB));
+ok(packB.topicArt === 'none' && packB.count === 'none', 'under plain topic headings', JSON.stringify(packB));
+ok(packB.thoughtsAbove, 'with the Thoughts row on top');
+ok(!packB.overflow, 'and no tile overflows');
+await shot('01b-decks');
+await ev('__riffle.showHome()');
+await sleep(150);
+
 console.log('Style screen');
 await tap('[data-go=settings]');
 await sleep(150);
@@ -1365,6 +1381,24 @@ await shot('30-safari');
 await ev('__riffle.showConnect()');
 await sleep(150);
 ok((await text()).includes('Do this from the Home Screen icon'), 'connecting in Safari warns first');
+
+console.log('The update notice');
+await send('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36' });
+await go(`${APP}&sw=1`);
+for (let i = 0; i < 40 && !(await ev('!!navigator.serviceWorker.controller')); i++) await sleep(200);
+ok(await ev('!!navigator.serviceWorker.controller'), 'the app installs for offline use');
+await sleep(400);
+ok(!(await text()).includes('New version ready') && (await ev(`!document.querySelector('.is-notice')`)), 'a first install does not claim a new version is ready', await text());
+await ev(`__riffle.showHome()`);
+await sleep(200);
+ok(!(await text()).includes('New version ready'), 'nor after going back to the first screen');
+await go(`${APP}&sw=1`);
+await sleep(600);
+ok(!(await text()).includes('New version ready'), 'nor on opening it again');
+await api('/__swbump');
+await go(`${APP}&sw=1`);
+for (let i = 0; i < 30 && !(await text()).includes('New version ready'); i++) await sleep(200);
+ok((await text()).includes('New version ready'), 'a real new release does say so', await text());
 
 ok(errors.length === 0, 'no errors in the console', JSON.stringify(errors.slice(0, 5)));
 console.log(`\n${passed} passed, ${failed} failed. Pictures in ${SHOTS}`);

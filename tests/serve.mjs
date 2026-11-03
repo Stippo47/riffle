@@ -7,13 +7,15 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+let swBump = 0;
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 
 createServer(async (req, res) => {
   let path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
   if (path.endsWith('\\') || path.endsWith('/')) path = join(path, 'index.html');
   try {
-    const data = await readFile(join(ROOT, path));
+    let data = await readFile(join(ROOT, path));
+    if (path.endsWith('sw.js') && swBump) data = Buffer.concat([data, Buffer.from(`\n// bump ${swBump}\n`)]); // stands in for a new release
     res.writeHead(200, { 'Content-Type': TYPES[extname(path)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(data);
   } catch {
@@ -111,6 +113,11 @@ createServer(async (req, res) => {
   if (url.pathname === '/__put') { // adds or changes one file
     files.set(url.searchParams.get('path'), body);
     send(200, { files: files.size });
+    return;
+  }
+  if (url.pathname === '/__swbump') {
+    swBump++;
+    send(200, { swBump });
     return;
   }
   if (url.pathname === '/__seed') { // replaces the decks, to make pictures with
