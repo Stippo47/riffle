@@ -8,7 +8,7 @@ import * as sync from './sync.js';
 import * as push from './push.js';
 import { countWords } from './photos.js';
 
-const VERSION = '0.4.1';
+const VERSION = '0.5.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -249,7 +249,7 @@ function refreshNotice() {
 // ---------- the library
 
 async function library() {
-  const files = await store.files.all();
+  const files = await store.files.words();
   const packs = new Map();
   const json = f => { try { return JSON.parse(f.data); } catch { return null; } };
   for (const f of files) {
@@ -294,14 +294,11 @@ function topicsOf(pack) {
   return { topics: [...groups.values()].filter(g => g.decks.length), misc };
 }
 
-const imagesFor = async pack => {
+// The pictures a deck shows on its cards. Boards fetch their own, as they're looked at.
+const imagesFor = async (pack, deck) => {
   const urls = new Map();
-  if (pack.demo) return () => null;
-  for (const f of await store.files.all()) {
-    if (f.path.startsWith(`packs/${pack.id}/`) && f.data instanceof Blob) {
-      urls.set(f.path.slice(`packs/${pack.id}/`.length), URL.createObjectURL(f.data));
-    }
-  }
+  const wanted = deck.cards.flatMap(c => [...(c.images || []), ...(c.options || []).map(o => o.image)]).filter(Boolean);
+  for (const p of new Set(wanted)) urls.set(p, await sync.pictureUrl(pack.id, p, { get: false }));
   return p => urls.get(p) || null;
 };
 
@@ -540,7 +537,7 @@ async function openThoughts(pack) {
 
 async function openDeck(pack, deckId) {
   const deck = pack.decks.find(d => d.id === deckId);
-  const images = await imagesFor(pack);
+  const images = await imagesFor(pack, deck);
   current = new DeckView({
     host: app, pack, deck, images,
     onExit: () => { current && current.close(); showPack(pack.id); },

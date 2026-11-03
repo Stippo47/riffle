@@ -24,16 +24,19 @@ LAST_NOTIFY = OWN_FILES / 'last-notify'
 NOTIFY_GAP = 600  # seconds. A run of new decks makes one notification, not one each
 ATTRIBUTION = 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
 
-KINDS = {'question', 'report', 'design', 'options'}
+KINDS = {'question', 'report', 'design', 'options', 'board'}
 RARITIES = {'common', 'uncommon', 'rare', 'epic', 'legendary'}
-CARD_FIELDS = {'id', 'version', 'kind', 'rarity', 'title', 'text', 'why', 'pick', 'details', 'images', 'options', 'handled'}
+CARD_FIELDS = {'id', 'version', 'kind', 'rarity', 'title', 'text', 'why', 'pick', 'details', 'images', 'options', 'items', 'handled'}
 DECK_FIELDS = {'title', 'topic', 'stack', 'order', 'misc', 'cards'}
 OPTION_FIELDS = {'id', 'label', 'text', 'image'}
+ITEM_FIELDS = {'id', 'label', 'text', 'image', 'thumb'}
+ITEM_LABEL_LIMIT = 36
 WORDS = {
     'question': {'right': 'GO', 'left': 'WORKSHOP', 'down': 'IDK', 'up': 'COMMENT'},
     'report': {'right': 'GOOD', 'left': 'PROBLEM', 'down': 'HUH?', 'up': 'COMMENT'},
     'design': {'right': 'YES', 'left': 'RETHINK', 'down': 'IDK', 'up': 'COMMENT'},
     'options': {'right': 'GO', 'left': 'REDO', 'down': 'IDK', 'up': 'COMMENT'},
+    'board': {'right': 'GO', 'left': 'REDO', 'down': 'IDK', 'up': 'COMMENT'},
 }
 HANDLED_WORDS = {'right': 'FINE', 'left': 'WORKSHOP', 'down': 'IDK', 'up': 'COMMENT'}
 NAMED_DIRECTION = re.compile(r'\b(swip\w*|throw\w*|drag\w*|flick\w*|hold\w*|pull\w*|push\w*)\s+(it\s+|this\s+|this one\s+|the card\s+|that\s+)?(to the\s+)?(right|left|up|down)\b', re.I)
@@ -52,7 +55,12 @@ FIT_STEPS = [
     {'pad': 20, 'width': 8, 'h2': 18, 'h2m': 11, 'h2lh': 1.13, 'why': 13, 'whylh': 1.28, 'pick': 13, 'picklh': 1.28, 'pickpad': 14, 'line': 12.5, 'linem': 5, 'optmin': 44, 'optpad': 10, 'how': 13},
 ]
 FIT_WORDS = {0: 'fits', 1: 'shrinks a little on a small iPhone', 2: 'needs the smallest type on a small iPhone', 3: "won't fit a small iPhone"}
-IMAGE_LONG_SIDE = 1400
+# Enough to zoom into on a phone, at about half a megabyte for a detailed picture. Card pictures come
+# down ahead of time. A board's come one at a time when looked at, so only its thumbnails are a cost up front.
+IMAGE_LONG_SIDE = 2000
+IMAGE_QUALITY = 82
+THUMB_LONG_SIDE = 360
+THUMB_QUALITY = 72
 
 
 def now():
@@ -106,7 +114,7 @@ def sync():
 
 def publish(message, *paths):
     """Commits only these paths and pushes. Answers can land at any moment, so a rejected push pulls and tries once more."""
-    names = [str(p) for p in paths]
+    names = [os.path.relpath(p, DATA) for p in paths]  # relative, as a big board can list a lot of them
     git('add', '--', *names)
     if not git('diff', '--cached', '--name-only', '--', *names).stdout.strip():
         print('Nothing changed, so nothing was pushed.')
@@ -204,6 +212,8 @@ def face_height(c, st):
                 one += lines(o['text'], 13.5, inner) * 13.5 * 1.22 + 1
             h += max(st['optmin'], one + st['optpad']) + 7
         h += 3
+    elif kind == 'board' and not handled:
+        h += 70 + st['line'] * 1.3 + st['linem']  # at least a row of small pictures, and the line under them
     elif c.get('pick') and not handled:
         h += lines(c['pick'], st['pick'], width - 29) * st['pick'] * st['picklh'] + st['pickpad'] + 18 + 10
     if rarity in ('epic', 'legendary'):
@@ -274,18 +284,43 @@ def check_cards(cards, base=None, pack=None):
             for o in opts:
                 for extra in sorted(set(o) - OPTION_FIELDS):
                     warnings.append(f'{name}: the app ignores "{extra}" on an option. Is it a typo?')
-        wording = {f: c.get(f) for f in ('text', 'why', 'pick', 'details') if c.get(f)}
+        if kind == 'board':
+            items = c.get('items') or []
+            if len(items) < 2:
+                errors.append(f'{name}: a board needs at least 2 items')
+            ids = [it.get('id') for it in items]
+            if len(set(ids)) != len(ids) or not all(ids):
+                errors.append(f'{name}: each item needs its own id')
+            if not all(it.get('label') for it in items):
+                errors.append(f'{name}: each item needs a short label')
+            if not all(it.get('image') for it in items):
+                errors.append(f'{name}: each item needs a picture, in image')
+            picks = c.get('pick') or []
+            picks = [picks] if isinstance(picks, str) else picks
+            for p in picks:
+                if p not in ids:
+                    errors.append(f'{name}: pick {p} is not one of its item ids')
+            if not picks and not handled:
+                warnings.append(f'{name}: no item is marked as your pick, so going with nothing ticked does nothing')
+            for it in items:
+                for extra in sorted(set(it) - ITEM_FIELDS):
+                    warnings.append(f'{name}: the app ignores "{extra}" on an item. Is it a typo?')
+                if len(str(it.get('label') or '')) > ITEM_LABEL_LIMIT:
+                    warnings.append(f'{name}: item {it.get("id")}\'s label is {len(it["label"])} characters, over {ITEM_LABEL_LIMIT}. It sits under a small tile, and the item\'s text can say more')
+        wording = {f: c.get(f) for f in ('text', 'why', 'pick', 'details') if c.get(f) and not (f == 'pick' and kind in ('options', 'board'))}
         if handled:
             wording['handled.how'] = handled.get('how')
         for o in c.get('options') or []:
             wording[f'option {o.get("id")}'] = ' '.join(str(o.get(f) or '') for f in ('label', 'text'))
+        for it in c.get('items') or []:
+            wording[f'item {it.get("id")}'] = ' '.join(str(it.get(f) or '') for f in ('label', 'text'))
         for field, words in wording.items():
             if NAMED_DIRECTION.search(str(words)):
                 errors.append(f'{name}: {field} names a swipe direction. People can swap those, so say "add a comment" or nothing')
             if field != 'details' and LOOKS_LIKE_CODE.search(str(words)):
                 warnings.append(f'{name}: {field} looks like it has code in it ("{LOOKS_LIKE_CODE.search(str(words)).group(0)}"). Say it in everyday words')
         for field, most in LIMITS.items():
-            if len(str(c.get(field) or '')) > most and not (field == 'pick' and kind == 'options'):
+            if len(str(c.get(field) or '')) > most and not (field == 'pick' and kind in ('options', 'board')):
                 warnings.append(f'{name}: {field} is {len(c[field])} characters, over {most}. A card reads at a glance, and the rest can go in details')
         step = estimate(c)
         if step == 3:
@@ -294,13 +329,12 @@ def check_cards(cards, base=None, pack=None):
             warnings.append(f'{name}: may only fit a small iPhone in its smallest type. Shorter would read better')
         if not (c.get('why') or handled):
             warnings.append(f'{name}: nothing says what this changes. Technical cards with no context get sent back')
-        for image in [*(c.get('images') or []), *[o.get('image') for o in c.get('options') or [] if o.get('image')]]:
-            found = None
-            if image.startswith('img/') and pack:
-                found = DATA / 'packs' / pack / image
-            elif base is not None:
-                found = base / image
-            if found is not None and not found.exists():
+        items = c.get('items') or []
+        wanted = [*(c.get('images') or []), *[o.get('image') for o in [*(c.get('options') or []), *items]], *[it.get('thumb') for it in items]]
+        for image in filter(None, wanted):
+            if image.startswith('img/') and not pack and not (base is not None and (base / image).exists()):
+                continue  # it may well be in the pack, but no pack was named
+            if base is not None and picture_source(image, base, pack)[0] is None:
                 errors.append(f'{name}: can\'t find the picture {image}')
     return errors, warnings
 
@@ -336,38 +370,95 @@ def report_check(errors, warnings):
     return not errors
 
 
-def shrink_image(source, target):
+def picture_source(rel, base, pack):
+    """Where a picture path in a deck file points: beside the deck file first, then already in the pack.
+    Says which, and gives None if it's in neither."""
+    if base is not None and (base / rel).exists():
+        return base / rel, False
+    if rel.startswith('img/') and pack and DATA and (DATA / 'packs' / pack / rel).exists():
+        return DATA / 'packs' / pack / rel, True
+    return None, False
+
+
+def shrink_image(source, target, long_side=IMAGE_LONG_SIDE, quality=IMAGE_QUALITY, must=True):
+    """Shrinks a picture to at most long_side, as a JPEG. Returns the file made. Without Pillow it copies
+    the picture as it is, or gives None if a copy wouldn't be worth having (must=False)."""
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
         from PIL import Image
     except ImportError:
+        if not must:
+            return None
         out = target.with_suffix(pathlib.Path(source).suffix)
         shutil.copyfile(source, out)
         print('  warning: Pillow is not installed, so the picture went up full size.')
         return out
     with Image.open(source) as im:
+        if im.format == 'JPEG' and max(im.size) <= long_side:
+            im.close()
+            shutil.copyfile(source, target)  # small enough already, and a second squeeze only loses detail
+            return target
         im = im.convert('RGB')
-        im.thumbnail((IMAGE_LONG_SIDE, IMAGE_LONG_SIDE))
-        im.save(target, 'JPEG', quality=82, optimize=True)
+        im.thumbnail((long_side, long_side))
+        im.save(target, 'JPEG', quality=quality, optimize=True)
     return target
 
 
-def bring_images(cards, base, pack):
-    """Shrinks pictures for bus data and copies them in. Returns the files made."""
+def bring_images(cards, base, pack, deck_id):
+    """Shrinks pictures for bus data and copies them in, and keeps or makes a board's thumbnails. Returns the files made."""
     made = []
+    pictures, thumbs = {}, {}
+    folder = DATA / 'packs' / pack / 'img'
+
+    def free_name(stem, source, taken):
+        stem = re.sub(r'[^\w.-]', '-', stem)
+        name, n = stem, 2
+        while taken.get(name, source) != source:
+            name, n = f'{stem}-{n}', n + 1
+        taken[name] = source
+        return name
 
     def bring(rel):
-        if rel.startswith('img/'):
+        source, in_pack = picture_source(rel, base, pack)
+        if in_pack:
             return rel
-        out = shrink_image(base / rel, DATA / 'packs' / pack / 'img' / (re.sub(r'[^\w.-]', '-', pathlib.Path(rel).stem) + '.jpg'))
+        out = shrink_image(source, folder / f'{free_name(f"{deck_id}-{source.stem}", source, pictures)}.jpg')
         made.append(out)
         return f'img/{out.name}'
+
+    def thumb_of(item):
+        """Its own thumbnail if it was given one, shrunk and kept. Otherwise one made from the whole picture."""
+        given = item.get('thumb')
+        if given:
+            source, in_pack = picture_source(given, base, pack)
+            if in_pack:
+                return given
+            stem = f'{deck_id}-{source.stem}'
+        else:
+            source = DATA / 'packs' / pack / item['image']
+            stem = source.stem
+        out = shrink_image(source, folder / 'thumb' / f'{free_name(stem, source, thumbs)}.jpg', THUMB_LONG_SIDE, THUMB_QUALITY, must=bool(given))
+        if out is None:
+            print('  warning: Pillow is not installed, so this board has no thumbnails, and will be slow to load.')
+            return None
+        made.append(out)
+        return f'img/thumb/{out.name}'
+
     for c in cards:
         if c.get('images'):
             c['images'] = [bring(i) for i in c['images']]
         for o in c.get('options') or []:
             if o.get('image'):
                 o['image'] = bring(o['image'])
+        items = c.get('items') or []
+        for it in items:
+            it['image'] = bring(it['image'])
+            thumb = thumb_of(it)
+            if thumb:
+                it['thumb'] = thumb
+        if items:
+            size = lambda key: sum((DATA / 'packs' / pack / it[key]).stat().st_size for it in items if it.get(key))
+            print(f'  {c.get("id")}: {len(items)} pictures, {size("thumb") / 1e6:.1f} MB of thumbnails up front, and {size("image") / len(items) / 1e6:.2f} MB for each one looked at')
     return made
 
 
@@ -475,7 +566,7 @@ def cmd_deck(a):
     deck_id = a.id or file.stem
     if not report_check(*check_deck(d, file.parent, pack)):
         die('Not sent. Fix the errors above.')
-    made = bring_images(d['cards'], file.parent, pack)
+    made = bring_images(d['cards'], file.parent, pack, deck_id)
     target = DATA / 'packs' / pack / 'decks' / f'{deck_id}.json'
     if made or file.resolve() != target.resolve():
         save_json(target, d)
@@ -500,7 +591,7 @@ def cmd_misc(a):
         die(f'These ids are already in Misc: {", ".join(clash)}')
     if not report_check(*check_cards(new, file.parent, pack)):
         die('Not sent. Fix the errors above.')
-    made = bring_images(new, file.parent, pack)
+    made = bring_images(new, file.parent, pack, 'misc')
     deck['cards'].extend(new)
     save_json(target, deck)
     publish(f'Misc in {pack}: {len(new)} more', target, *made)
@@ -570,7 +661,7 @@ def summarise(events):
             thought_drafts[e.get('pack')] = e
         elif t == 'draft':
             d = deck(e)
-            if e.get('text') or e.get('images'):
+            if e.get('text') or e.get('images') or e.get('selected'):
                 d['drafts'][e['card']] = e
             else:
                 d['drafts'].pop(e['card'], None)
@@ -607,12 +698,16 @@ def pictures(event):
     return ', '.join(f'{p}{"" if (DATA / p).exists() else " (still uploading)"}' for p in event.get('images') or [])
 
 
+def names_of(card, ids):
+    labels = {o['id']: o.get('label', o['id']) for o in [*((card or {}).get('options') or []), *((card or {}).get('items') or [])]}
+    return ', '.join(labels.get(i, i) for i in ids)
+
+
 def answer_line(a, card):
     title = a.get('title') or (card or {}).get('title') or a['card']
     parts = [word_for(a, card)]
     if a.get('selected') is not None:
-        labels = {o['id']: o.get('label', o['id']) for o in (card or {}).get('options', [])}
-        chosen = ', '.join(labels.get(i, i) for i in a['selected'])
+        chosen = names_of(card, a['selected'])
         parts.append(f'picked: {chosen}' if chosen else 'none of them')
         if a.get('byPick'):
             parts.append('(your pick, nothing tapped)')
@@ -652,7 +747,10 @@ def cmd_answers(a):
                     print(answer_line(d['answers'][card_id], card_in(pack, deck_id, card_id)))
                 elif card_id in d['drafts']:
                     dr = d['drafts'][card_id]
-                    print(f'  {card_id}: still writing: "{dr.get("text", "")}"')
+                    if dr.get('text'):
+                        print(f'  {card_id}: still writing: "{dr["text"]}"')
+                    if dr.get('selected'):
+                        print(f'  {card_id}: still choosing: {names_of(card_in(pack, deck_id, card_id), dr["selected"])}')
                     if dr.get('images'):
                         print(f'      pictures: {pictures(dr)}')
             if d['notes'] and d['notes'] in shown:
@@ -765,7 +863,13 @@ def cmd_second_try(a):
     def change(card):
         card['version'] = card.get('version', 1) + 1
         if a.file:
-            card.update({k: v for k, v in load_json(a.file).items() if k != 'id'})
+            for k, v in load_json(a.file).items():
+                if k == 'id':
+                    continue
+                if v is None:
+                    card.pop(k, None)  # null means take it off the card
+                else:
+                    card[k] = v
         for field in ('text', 'why', 'pick', 'details'):
             value = getattr(a, field)
             if value is not None:

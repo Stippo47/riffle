@@ -4,7 +4,8 @@
 import { TUNE, decide, dominant, progress, track } from './gesture.js';
 import { clamp, dragToClose, esc, fillDirs, icon, kindOf, logicalOf, MARK_ICON, padBlur, padFocus, padHTML, padReady, padSet, paintNotices, paras, physicalOf, plainSlot, RARITY, stampWord, tick } from './ui.js';
 import * as store from './store.js';
-import { enqueue, newId, photoPath } from './sync.js';
+import { eachAtOnce, enqueue, newId, photoPath, pictureUrl } from './sync.js';
+import { openViewer } from './viewer.js';
 import { countWords, discardPhoto, drawStrip, photoButton, savePhoto, stripError } from './photos.js';
 
 const DIRS = ['right', 'left', 'down', 'up'];
@@ -14,6 +15,10 @@ export const deckKey = (pack, deck) => `deck:${pack.id}/${deck.id}`;
 export const thoughtsKey = pack => `thoughts:${pack.id}`;
 const DEMO_ID = 'feel-test';
 const DRAFT_SEND_AFTER = 5000;
+// Cards where things get ticked. A board can hold any number, an option card a few.
+const picksFrom = card => (card.kind === 'board' ? card.items : card.options) || [];
+const isPicking = card => card.kind === 'options' || card.kind === 'board';
+const BOARD_PREVIEW_ACROSS = 5;
 // What a word was when it went, pictures included, so a change means it hasn't.
 const mark = (text, pics) => ((pics || []).length ? `${text || ''}|${pics.join()}` : text || '');
 const withPictures = pics => ((pics || []).length ? { images: pics.map(photoPath) } : {});
@@ -66,7 +71,7 @@ export function deckSummary(deck, s) {
 }
 
 function fresh(deck) {
-  return { order: deck.cards.map(c => c.id), answers: {}, log: [], notes: '', drafts: {}, draftsSent: {}, wordsSent: {}, draftPhotos: {}, notesPhotos: [], notesPhotosSent: [], selections: {}, handledSkipped: {}, reviewing: null, verdict: null, startedAt: Date.now() };
+  return { order: deck.cards.map(c => c.id), answers: {}, log: [], notes: '', drafts: {}, draftsSent: {}, wordsSent: {}, draftPhotos: {}, notesPhotos: [], notesPhotosSent: [], selections: {}, picksDirty: {}, handledSkipped: {}, reviewing: null, verdict: null, startedAt: Date.now() };
 }
 
 // Owed cards first, handled ones after, each keeping its order. A card being looked at stays on top.
@@ -122,11 +127,15 @@ export async function queueUnsentWords(topicOf = () => null) {
       s.wordsSent.n = s.notesSent;
       changed = true;
     }
-    for (const [card, text] of Object.entries(s.drafts || {})) {
-      if ((text || '') === (s.draftsSent[card] || '')) continue;
-      enqueue({ ...base, type: 'draft', card, text: text || '' });
-      s.draftsSent[card] = text || '';
-      s.wordsSent[`d:${card}`] = text || '';
+    const dirty = s.picksDirty || {};
+    for (const card of new Set([...Object.keys(s.drafts || {}), ...Object.keys(dirty)])) {
+      const text = (s.drafts || {})[card] || '';
+      if (!dirty[card] && text === (s.draftsSent[card] || '')) continue;
+      // Ticks alone in the Feel test are like plain swipes, and stay on the phone.
+      if (text || pack !== DEMO_ID) enqueue({ ...base, type: 'draft', card, text, ...(dirty[card] ? { selected: (s.selections || {})[card] || [] } : {}) });
+      s.draftsSent[card] = text;
+      s.wordsSent[`d:${card}`] = text;
+      delete dirty[card];
       changed = true;
     }
     if (changed) store.set(key, s);
@@ -204,9 +213,10 @@ export function cardHTML(card, images = () => null, fill = t => t) {
   const breaks = RARITY[rarity] && RARITY[rarity].breaks;
   const label = RARITY[rarity] && RARITY[rarity].label;
   const pics = (card.images || []).map(p => images(p)).filter(Boolean);
-  const hasMore = card.details || pics.length;
+  const board = card.kind === 'board' ? (card.items || []) : null;
+  const hasMore = !board && (card.details || pics.length);
   const moreText = [card.details ? 'details' : '', pics.length ? `${pics.length} picture${pics.length > 1 ? 's' : ''}` : ''].filter(Boolean).join(' and ');
-  const text = fill(card.text || ''), why = fill(card.why || ''), pick = fill(card.pick || '');
+  const text = fill(card.text || ''), why = fill(card.why || ''), pick = board ? '' : fill(card.pick || '');
   const long = text.length > 70;
   const options = card.kind === 'options' ? (card.options || []) : null;
   const body = card.handled
@@ -228,21 +238,26 @@ export function cardHTML(card, images = () => null, fill = t => t) {
             <i class="opt-tick">${icon('check')}</i>
           </div>`;
         }).join('')}</div><div class="opt-chosen" hidden></div>` : ''}
+        ${board ? '<div class="board-preview"></div><div class="opt-chosen" hidden></div>' : ''}
         <div class="prev" hidden></div>
         ${pick && !options && !card.handled ? `<div class="pick"><b>${esc(kind.pickLabel || 'My pick')}</b>${esc(pick)}</div>` : '<div class="pickgap"></div>'}
         <button class="attached" data-act="opencomment" hidden>${icon('message-square-text')}<span></span></button>
         ${breaks ? `<div class="holdline">Hold ${esc(physicalOf('right'))} to break through</div>` : ''}
-        <div class="more"${hasMore ? '' : ' hidden'}>${hasMore ? `Tap for ${esc(moreText)}` : ''}</div>
+        <div class="more"${hasMore || board ? '' : ' hidden'}>${board ? `Tap to choose from ${board.length}` : hasMore ? `Tap for ${esc(moreText)}` : ''}</div>
+        ${board && (card.details || pics.length) ? `<button class="more-link" data-act="flipfront">Details</button>` : ''}
         <div class="stamp"></div>
       </div>
       <div class="back">
         <div class="back-scroll">
           <h3>${esc(card.title || text)}</h3>
           <p class="back-why" hidden>${esc(card.handled ? fill(card.handled.how || '') : why)}</p>
-          ${pics.map(src => `<img src="${esc(src)}" alt="">`).join('')}
+          ${pics.map(src => `<img src="${esc(src)}" alt="" draggable="false">`).join('')}
           ${paras(fill(card.details || ''))}
         </div>
-        <button class="back-hint" data-act="flipback">Tap to flip back</button>
+        <div class="back-foot">
+          <button class="back-hint" data-act="flipback">Tap to flip back</button>
+          <button class="back-comment" data-act="opencomment">${icon('message-square-text')}<span>Comment</span></button>
+        </div>
       </div>
     </div>`;
 }
@@ -269,6 +284,7 @@ export class DeckView {
     this.s.draftPhotos = this.s.draftPhotos || {};
     this.s.notesPhotos = this.s.notesPhotos || [];
     this.s.notesPhotosSent = this.s.notesPhotosSent || [];
+    this.s.picksDirty = this.s.picksDirty || {};
     reconcile(this.s, this.deck);
     this.render();
     this.deal();
@@ -309,12 +325,16 @@ export class DeckView {
   sendDrafts() {
     clearTimeout(this.draftTimer);
     let changed = false;
-    for (const [card, text] of Object.entries(this.s.drafts)) {
-      if ((text || '') === (this.s.draftsSent[card] || '')) continue;
+    for (const card of new Set([...Object.keys(this.s.drafts), ...Object.keys(this.s.picksDirty)])) {
+      const text = this.s.drafts[card] || '';
+      const dirty = this.s.picksDirty[card];
+      if (!dirty && text === (this.s.draftsSent[card] || '')) continue;
       const c = this.cards.get(card);
-      this.send({ type: 'draft', card, title: c ? c.title || '' : '', text: text || '' }, true);
-      this.s.draftsSent[card] = text || '';
-      this.s.wordsSent[`d:${card}`] = text || '';
+      // Ticks alone in the Feel test are like plain swipes: they stay on the phone.
+      this.send({ type: 'draft', card, title: c ? c.title || '' : '', text, ...(c && c.kind === 'board' ? { selected: this.chosen(card) } : {}) }, !!text);
+      this.s.draftsSent[card] = text;
+      this.s.wordsSent[`d:${card}`] = text;
+      delete this.s.picksDirty[card];
       changed = true;
     }
     if (changed) this.saveNow();
@@ -345,21 +365,24 @@ export class DeckView {
           <div class="padwrap">${padHTML('notestext', "Anything that doesn't fit a card. Drag down to close.")}<div class="photostrip" id="notesphotos" hidden></div>${photoButton('notes')}</div>
         </div>
       </div>
-      <div class="overview" id="overview" hidden></div>`;
+      <div class="overview" id="overview" hidden></div>
+      <div class="overview boardview" id="boardview" hidden></div>`;
     const $ = id => this.host.querySelector('#' + id);
     Object.assign(this, {
       root: $('deck'), table: $('table'), glow: $('glow'), mark: $('mark'), composer: $('composer'), comment: $('comment'),
-      notesSheet: $('notes'), notesText: $('notestext'), endBox: $('end'), overview: $('overview'),
+      notesSheet: $('notes'), notesText: $('notestext'), endBox: $('end'), overview: $('overview'), boardEl: $('boardview'),
       countEl: $('count'), barEl: $('bar'), undoBtn: $('undo'), skipBtn: $('skip'), notesBtn: $('notesbtn'),
     });
     padSet(this.notesText, this.s.notes || '');
 
     this.host.onchange = e => { if (e.target.matches('[data-photo]')) this.addPhoto(e.target); };
     this.host.onclick = e => {
+      const l = this.lift; // something already acted on this same tap, and its click lands on whatever just opened
+      if (l && e.detail !== 0 && performance.now() - l.t < 600 && Math.hypot(e.clientX - l.x, e.clientY - l.y) < 14) return;
+      const pic = e.target.closest('.back-scroll img');
+      if (pic) { this.viewCardPictures(pic); return; }
       const b = e.target.closest('[data-act]');
       if (!b || b.disabled) return;
-      const l = this.lift; // the lift below already acted on this same tap
-      if (l && e.detail !== 0 && performance.now() - l.t < 600 && Math.hypot(e.clientX - l.x, e.clientY - l.y) < 14) return;
       this.act(b.dataset.act, b);
     };
     // The top row answers as the finger lifts, not on the click after it. A browser can swallow
@@ -421,6 +444,10 @@ export class DeckView {
       overkeep: () => this.startOver(true),
       overclear: () => this.startOver(false),
       flipback: () => this.flip(false),
+      flipfront: () => this.flip(true),
+      closeboard: () => this.closeBoard(),
+      boardtick: () => this.toggleBoard(btn.dataset.id),
+      boardview: () => this.viewBoard(btn.dataset.id),
       done: () => this.verdict('done'),
       replan: () => this.verdict('replan'),
       opencomment: () => this.openComposer(),
@@ -467,7 +494,10 @@ export class DeckView {
       }
       n.dataset.pos = i;
       n.style.zIndex = 10 - i;
-      if (i < 2) fit(n);
+      if (i < 2) {
+        fit(n);
+        this.drawPreview(n, this.cards.get(id));
+      }
     });
     this.table.style.setProperty('--rise', 0);
     this.glow.style.opacity = 0;
@@ -537,7 +567,8 @@ export class DeckView {
   // ---------- option cards
 
   optionNames(card, ids) {
-    return ids.map(id => (card.options || []).find(o => o.id === id)).filter(Boolean).map(o => o.label).join(', ');
+    const names = ids.map(id => picksFrom(card).find(o => o.id === id)).filter(Boolean).map(o => o.label);
+    return names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ');
   }
 
   chosen(id = this.topId()) { return (this.s.selections[id] || []).slice(); }
@@ -545,8 +576,9 @@ export class DeckView {
   syncOptions() {
     const top = this.topNode();
     const card = this.topCard();
-    if (!top || !card || card.kind !== 'options') return;
+    if (!top || !card || !isPicking(card)) return;
     const picked = this.chosen();
+    if (card.kind === 'board') this.drawPreview(top, card);
     top.querySelectorAll('.option').forEach(o => o.classList.toggle('on', picked.includes(o.dataset.opt)));
     const line = top.querySelector('.opt-chosen');
     if (line) {
@@ -558,7 +590,151 @@ export class DeckView {
   // Right on an option card needs something to go with: what's tapped, or my marked pick.
   cannotGo(logical) {
     const card = this.topCard();
-    return logical === 'right' && card && card.kind === 'options' && !this.chosen().length && !card.pick;
+    return logical === 'right' && card && isPicking(card) && !this.chosen().length && !(card.pick && card.pick.length);
+  }
+
+  // ---------- boards: a screen of their own, because a card's vertical drags are swipes
+
+  // A few small pictures on the card itself, the ticked ones first.
+  drawPreview(node, card) {
+    const box = node.querySelector('.board-preview');
+    if (!box || !box.clientWidth || !box.clientHeight) return;
+    const gap = 4;
+    const cell = (box.clientWidth - gap * (BOARD_PREVIEW_ACROSS - 1)) / BOARD_PREVIEW_ACROSS;
+    const rows = Math.max(1, Math.floor((box.clientHeight + gap) / (cell + gap)));
+    const picked = this.chosen(card.id);
+    const items = card.items || [];
+    const order = [...items.filter(it => picked.includes(it.id)), ...items.filter(it => !picked.includes(it.id))];
+    const room = rows * BOARD_PREVIEW_ACROSS;
+    const shown = order.slice(0, room);
+    const extra = items.length - shown.length;
+    box.innerHTML = shown.map((it, i) => `<span class="bp${picked.includes(it.id) ? ' on' : ''}"><img alt="" draggable="false">${extra && i === shown.length - 1 ? `<b class="bp-more">+${extra + 1}</b>` : ''}</span>`).join('');
+    const imgs = box.querySelectorAll('img');
+    eachAtOnce(shown.map((it, i) => [it, imgs[i]]), 6, async ([it, img]) => {
+      const url = await pictureUrl(this.pack.id, it.thumb || it.image);
+      if (url) img.src = url;
+    });
+  }
+
+  openBoard() {
+    const card = this.topCard();
+    if (!card || card.kind !== 'board') return;
+    this.typingBeforeBoard = this.composing;
+    if (this.composing) padBlur(this.comment);
+    const items = card.items || [];
+    const mine = [].concat(card.pick || []);
+    this.boardEl.innerHTML = `
+      <div class="ov-head">
+        <button class="iconbtn" data-act="closeboard" aria-label="Back to the card">${icon('chevron-left')}</button>
+        <div class="t">${esc(card.title || card.text)}</div>
+        <div class="n" id="boardcount"></div>
+      </div>
+      <div class="board-grid scroll">
+        ${items.map(it => `<div class="bt" data-item="${esc(it.id)}">
+          <button class="bt-pic" data-act="boardview" data-id="${esc(it.id)}" aria-label="Look at ${esc(it.label)}"><img alt="" draggable="false"></button>
+          ${mine.includes(it.id) ? `<em class="bt-mine">${esc(kindOf(card).pickLabel)}</em>` : ''}
+          <button class="bt-tick" data-act="boardtick" data-id="${esc(it.id)}" aria-label="Select ${esc(it.label)}"><i>${icon('check')}</i></button>
+          <button class="bt-label" data-act="boardtick" data-id="${esc(it.id)}">${esc(it.label)}</button>
+        </div>`).join('')}
+      </div>
+      <div class="board-bar"><button class="primary" data-act="closeboard">Back to the card</button></div>`;
+    this.boardEl.hidden = false;
+    this.syncBoard();
+    const tiles = [...this.boardEl.querySelectorAll('.bt')];
+    // Small pictures only, so a big board is quick. The full ones come when one is looked at.
+    eachAtOnce(items.map((it, i) => [it, tiles[i]]), 8, async ([it, tile]) => {
+      const url = await pictureUrl(this.pack.id, it.thumb || it.image);
+      if (url) tile.querySelector('img').src = url;
+      else tile.classList.add('missing');
+    });
+  }
+
+  syncBoard() {
+    const picked = this.chosen();
+    this.boardEl.querySelectorAll('.bt').forEach(t => t.classList.toggle('on', picked.includes(t.dataset.item)));
+    const count = this.boardEl.querySelector('#boardcount');
+    if (count) count.textContent = `${picked.length} selected`;
+  }
+
+  closeBoard() {
+    this.boardEl.hidden = true;
+    this.boardEl.innerHTML = '';
+    this.syncOptions();
+    if (this.typingBeforeBoard && this.composing) padFocus(this.comment);
+    this.typingBeforeBoard = false;
+  }
+
+  // Ticks or unticks one, and keeps it at once: a half-finished selection survives being closed.
+  togglePick(id, itemId) {
+    const card = this.cards.get(id);
+    const picked = this.chosen(id);
+    const at = picked.indexOf(itemId);
+    if (at >= 0) picked.splice(at, 1); else picked.push(itemId);
+    const inOrder = picksFrom(card).map(o => o.id);
+    this.s.selections[id] = picked.sort((a, b) => inOrder.indexOf(a) - inOrder.indexOf(b));
+    if (card.kind === 'board') {
+      this.s.picksDirty[id] = true;
+      clearTimeout(this.draftTimer);
+      this.draftTimer = setTimeout(() => this.sendDrafts(), DRAFT_SEND_AFTER);
+    }
+    this.saveNow();
+    tick();
+  }
+
+  toggleBoard(itemId) {
+    this.togglePick(this.topId(), itemId);
+    this.syncBoard();
+  }
+
+  viewBoard(itemId) {
+    const card = this.topCard();
+    const items = card.items || [];
+    openViewer({
+      items: items.map(it => ({
+        label: it.label,
+        text: it.text,
+        thumb: () => pictureUrl(this.pack.id, it.thumb),
+        full: () => pictureUrl(this.pack.id, it.image),
+      })),
+      at: Math.max(0, items.findIndex(it => it.id === itemId)),
+      picks: {
+        isOn: i => this.chosen().includes(items[i].id),
+        toggle: i => this.toggleBoard(items[i].id),
+        count: () => this.chosen().length,
+      },
+    });
+  }
+
+  // ---------- pictures elsewhere on a card
+
+  viewCardPictures(img) {
+    const all = [...this.topNode().querySelectorAll('.back-scroll img')];
+    this.openViewerKeepingWords({
+      items: all.map(p => ({ full: () => p.src })),
+      at: Math.max(0, all.indexOf(img)),
+    });
+  }
+
+  viewOptionPictures(optionId) {
+    const card = this.topCard();
+    const withPics = (card.options || []).filter(o => o.image);
+    this.openViewerKeepingWords({
+      items: withPics.map(o => ({ label: o.label, text: o.text, full: () => pictureUrl(this.pack.id, o.image) })),
+      at: Math.max(0, withPics.findIndex(o => o.id === optionId)),
+      opener: this.lift,
+      picks: {
+        isOn: i => this.chosen().includes(withPics[i].id),
+        toggle: i => { this.togglePick(this.topId(), withPics[i].id); this.syncOptions(); },
+        count: () => this.chosen().length,
+      },
+    });
+  }
+
+  // The keyboard drops while a picture is open, and comes back after. The words are saved as typed.
+  openViewerKeepingWords(options) {
+    const typing = this.composing;
+    if (typing) padBlur(this.comment);
+    openViewer({ ...options, onClose: () => { if (typing && this.composing) padFocus(this.comment); } });
   }
 
   // Epic and legendary cards: a go has to break through. See pushAgainst.
@@ -738,7 +914,7 @@ export class DeckView {
   }
 
   nudgeOptions() {
-    const box = this.topNode() && this.topNode().querySelector('.options');
+    const box = this.topNode() && this.topNode().querySelector('.options, .board-preview');
     if (box && box.animate) box.animate([{ transform: 'translateX(0)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(5px)' }, { transform: 'translateX(0)' }], { duration: 220 });
   }
 
@@ -767,24 +943,22 @@ export class DeckView {
   }
 
   onTap(e) {
+    this.lift = { t: performance.now(), x: e.clientX, y: e.clientY };
     const t = this.dragFrom || e.target; // the lift's own target is the table, which holds the finger
     if (t && t.closest && t.closest('.attached')) { this.openComposer(); return; }
-    if (this.composing) return;
     const id = this.topId();
     if (!id) return;
+    const c = this.cards.get(id);
+    if (c.kind === 'board') { this.openBoard(); return; } // even mid-comment, to look while writing
+    if (this.composing) return;
+    const optPic = t && t.closest && t.closest('.option img');
+    if (optPic) { this.viewOptionPictures(optPic.closest('.option').dataset.opt); return; }
     const opt = t && t.closest && t.closest('.option');
     if (opt) {
-      const picked = this.chosen();
-      const at = picked.indexOf(opt.dataset.opt);
-      if (at >= 0) picked.splice(at, 1); else picked.push(opt.dataset.opt);
-      const inOrder = (this.cards.get(id).options || []).map(o => o.id);
-      this.s.selections[id] = picked.sort((a, b) => inOrder.indexOf(a) - inOrder.indexOf(b));
+      this.togglePick(id, opt.dataset.opt);
       this.syncOptions();
-      this.save();
-      tick();
       return;
     }
-    const c = this.cards.get(id);
     if (c.details || (c.images || []).length || this.topNode().classList.contains('clipped')) this.flip(true);
     else {
       const top = this.topNode();
@@ -816,10 +990,10 @@ export class DeckView {
     const event = { type: 'answer', eid, card: id, cardVersion: version, title: card.title || '', kind: card.kind || 'question', swipe: logical, stamp: stampWord(card, logical), comment, ...withPictures(photos) };
     const answer = { swipe: logical, comment, at: Date.now(), eid, version, ...(photos.length ? { photos } : {}) };
     if (card.handled) event.handledAt = answer.handledAt = card.handled.at;
-    const tapped = card.kind === 'options' ? this.chosen() : [];
-    if (card.kind === 'options') {
+    const tapped = isPicking(card) ? this.chosen().filter(x => picksFrom(card).some(o => o.id === x)) : [];
+    if (isPicking(card)) {
       let selected = tapped;
-      if (logical === 'right' && !tapped.length) { selected = [card.pick]; event.byPick = true; }
+      if (logical === 'right' && !tapped.length) { selected = [].concat(card.pick); event.byPick = true; }
       if (logical === 'right' || logical === 'left') event.selected = answer.selected = selected;
     }
     this.s.answers[id] = answer;
@@ -829,6 +1003,7 @@ export class DeckView {
     delete this.s.drafts[id];
     delete this.s.draftsSent[id];
     delete this.s.draftPhotos[id];
+    delete this.s.picksDirty[id];
     if (comment || photos.length) this.s.wordsSent[`c:${id}`] = mark(comment, photos);
     this.send(event, !!comment || photos.length > 0);
     if (this.composing) this.closeComposer(true);
@@ -1228,6 +1403,7 @@ export class DeckView {
       next.drafts = { ...this.s.drafts };
       next.draftsSent = { ...this.s.draftsSent };
       next.draftPhotos = { ...this.s.draftPhotos };
+      for (const c of this.deck.cards) if (c.kind === 'board' && this.s.selections[c.id]) next.selections[c.id] = this.s.selections[c.id];
       next.notesPhotos = this.s.notesPhotos;
       next.notesPhotosSent = this.s.notesPhotosSent;
       for (const [id, a] of Object.entries(this.s.answers)) {

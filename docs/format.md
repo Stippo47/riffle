@@ -63,7 +63,7 @@ read.json
 
 - **id:** stays the same for the card's whole life.
 - **version:** raise it to deal the card back as a second try. It then counts as unanswered again.
-- **kind:** `question`, `report`, `design` or `options`.
+- **kind:** `question`, `report`, `design`, `options` or `board`.
 - **rarity:** `common`, `uncommon`, `rare`, `epic` or `legendary`.
 - **title:** short, for the overview grid.
 
@@ -88,6 +88,36 @@ A card's face reads at a glance, so as a guide: `title` 26 characters, `text` 11
 ```
 
 `pick` is the id of the writer's marked option, and can be left out. Up to four options.
+
+### Boards
+
+Picking from many pictures, with any number of items.
+
+```json
+{
+  "id": "gates",
+  "kind": "board",
+  "title": "Gate styles",
+  "text": "Which of these gates would you keep?",
+  "why": "They'd all cost about the same to build.",
+  "pick": ["g3"],
+  "items": [
+    { "id": "g1", "label": "Plain", "image": "pictures/plain.png" },
+    { "id": "g2", "label": "Arched", "image": "pictures/arched.png", "text": "A longer note, shown when it's looked at." },
+    { "id": "g3", "label": "Stacked views", "image": "pictures/stacked.png", "thumb": "pictures/stacked-square.png" }
+  ]
+}
+```
+
+- **pick** lists the writer's marked items, and can be left out. With nothing ticked, going takes these. If there are none, it just bounces.
+- **image** is the picture.
+- **thumb** is the small one the grid loads first, and can be left out. Give your own when the whole picture won't read at that size, like two views stacked in one tall image: a square of the part that matters. `riffle deck` shrinks yours to 360 pixels if it's over, and keeps it. If there's none, it makes one from the whole picture. A deck file put in the repo by hand with no `thumb` loads the full pictures in the grid, slowly.
+- Tiles are square and never crop. A thumbnail that isn't square shows whole, with space beside it. So a square one fills its tile.
+- The phone brings down a board's thumbnails ahead of time. Its full pictures come one at a time, when they're looked at.
+
+### Pictures
+
+Paths are relative to the deck file. A path starting `img/` that isn't beside the deck file means a picture already in the pack, under `packs/<pack>/`. `riffle deck` keeps up to 2000 pixels on the long side, as a JPEG, so a picture can be zoomed into. That's about half a megabyte for a detailed one. It leaves a JPEG already that small untouched. A board's thumbnails are 360 pixels, a few tens of kilobytes each.
 
 ### Handled cards
 
@@ -133,7 +163,7 @@ Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typ
 | `answer` | `card`, `cardVersion`, `title`, `kind`, `swipe`, `stamp`, `comment`, and sometimes `handledAt`, `selected`, `byPick` | A card was answered |
 | `undo` | `card`, `of` (the `eid` it takes back) | That answer no longer stands |
 | `notes` | `text` | The deck's scratchpad, whole. The latest one wins |
-| `draft` | `text`, `card`, `title` | Unfinished words on a card not answered yet. The latest wins, and an answer on that card replaces it. The card may no longer be in the deck |
+| `draft` | `text`, `card`, `title`, and on a board `selected` | Unfinished words or ticks on a card not answered yet. The latest wins, and an answer on that card replaces it. The card may no longer be in the deck |
 | `draft` with `thought: true` | `text`, with `deck` and `card` null | A thought being typed, not filed yet. The latest wins, and filing replaces it |
 | `thought` | `id`, `text`, with `deck` null | A general thought about the pack |
 | `deck` | `verdict` (`done`, `replan`), `tally`, `answered`, `total` | The deck as a whole. `replan` means rethink it from the base; the answers still stand |
@@ -143,7 +173,7 @@ Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typ
 
 **`swipe` is the meaning, not the direction.** `right` is go, good, yes or fine. `left` is workshop, problem, rethink or redo. `down` is idk. `up` is a comment on its own. Someone may have swapped which way of swiping does which, and that never shows here.
 
-**On option cards,** `selected` lists option ids. With `swipe: right` it means only those. `byPick: true` means nothing was tapped, so it's the writer's pick. With `swipe: left` it means even those weren't good, redo in their direction, and an empty list means all of them are bad.
+**On option cards and boards,** `selected` lists option or item ids. With `swipe: right` it means only those. `byPick: true` means nothing was tapped, so it's the writer's pick. With `swipe: left` it means even those weren't good, redo in their direction, and an empty list means all of them are bad.
 
 **`handledAt`** on an answer says which conclusion it was about.
 

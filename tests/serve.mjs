@@ -74,11 +74,18 @@ const startFiles = [
   })],
 ];
 const files = new Map(startFiles);
-const shaOf = path => createHash('sha1').update(path + files.get(path)).digest('hex');
+const shas = new Map(); // big pictures are slow to hash again on every request
+const shaOf = path => {
+  const value = files.get(path);
+  if (shas.get(path)?.value !== value) shas.set(path, { value, sha: createHash('sha1').update(path).update(value).digest('hex') });
+  return shas.get(path).sha;
+};
 let down = false;
 let fail = null;
 let failImg = 0;
 let slowImg = 0;
+let slowBlob = 0;
+let served = [];
 let writes = 0;
 
 createServer(async (req, res) => {
@@ -102,6 +109,8 @@ createServer(async (req, res) => {
   if (url.pathname === '/__file') { send(200, files.get(url.searchParams.get('path')) ?? 'null'); return; }
   if (url.pathname === '/__writes') { send(200, { writes }); return; }
   if (url.pathname === '/__down') { down = url.searchParams.get('on') === '1'; send(200, { down }); return; }
+  if (url.pathname === '/__served') { const out = served; if (url.searchParams.get('clear')) served = []; send(200, out); return; }
+  if (url.pathname === '/__slowblob') { slowBlob = +url.searchParams.get('ms'); send(200, { slowBlob }); return; }
   if (url.pathname === '/__failimg') { failImg = +url.searchParams.get('code'); send(200, { failImg }); return; }
   if (url.pathname === '/__slowimg') { slowImg = +url.searchParams.get('ms'); send(200, { slowImg }); return; }
   if (url.pathname === '/__fail') { // makes every write refused with this status and message
@@ -113,7 +122,7 @@ createServer(async (req, res) => {
   if (url.pathname === '/__reset') { // back to how it started
     files.clear();
     for (const [k, v] of startFiles) files.set(k, v);
-    down = false; fail = null; writes = 0; failImg = 0; slowImg = 0;
+    down = false; fail = null; writes = 0; failImg = 0; slowImg = 0; slowBlob = 0; served = [];
     send(200, { files: files.size });
     return;
   }
@@ -180,6 +189,8 @@ createServer(async (req, res) => {
     const sha = url.pathname.split('/').pop();
     const path = [...files.keys()].find(p => shaOf(p) === sha);
     if (!path) { send(404, { message: 'Not Found' }); return; }
+    served.push(path);
+    if (slowBlob && /\/img\/(?!thumb\/)/.test(path)) await new Promise(r => setTimeout(r, slowBlob)); // a big picture on a slow connection
     send(200, files.get(path), { 'Content-Type': 'application/vnd.github.raw+json' });
     return;
   }

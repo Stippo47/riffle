@@ -2,6 +2,13 @@
 // Anything typed in it gets sent, tagged as a test. Plain swipes stay on the phone.
 // Words in braces become the way the finger goes for that meaning: see fillDirs in ui.js.
 
+// A made-up picture with detail worth zooming in on, so the Feel test needs nothing downloaded.
+const picture = (n, hue) => {
+  const rings = Array.from({ length: 9 }, (_, i) => `<circle cx="800" cy="800" r="${90 + i * 75}" fill="none" stroke="hsl(${(hue + i * 14) % 360} 70% ${40 + i * 4}%)" stroke-width="${6 + (i % 3) * 7}"/>`).join('');
+  const dots = Array.from({ length: 36 }, (_, i) => `<circle cx="${60 + (i % 6) * 18}" cy="${1370 + Math.floor(i / 6) * 18}" r="5" fill="hsl(${hue} 80% 75%)"/>`).join('');
+  return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1600" viewBox="0 0 1600 1600"><rect width="1600" height="1600" fill="hsl(${hue} 40% 22%)"/>${rings}${dots}<text x="800" y="830" text-anchor="middle" font-family="sans-serif" font-size="96" font-weight="700" fill="#fff">${n}</text><text x="800" y="1540" text-anchor="middle" font-family="sans-serif" font-size="22" fill="#fff">Zoom in to read this: you found the small words on picture ${n}.</text></svg>`)}`;
+};
+
 export const DEMO_PACK = {
   id: 'feel-test',
   title: 'Feel test',
@@ -11,6 +18,7 @@ export const DEMO_PACK = {
   topics: [
     { id: 'basics', title: 'The basics', icon: 'card-pickup', color: '#2f8fe0', order: 1 },
     { id: 'big-calls', title: 'Big calls', icon: 'card-random', color: '#d98a1c', order: 2 },
+    { id: 'pictures', title: 'Pictures', icon: 'card-pickup', color: '#2fa56f', order: 3 },
   ],
   decks: [
     {
@@ -149,6 +157,28 @@ export const DEMO_PACK = {
           text: 'Gold is legendary: it shapes everything after it.',
           why: 'The biggest calls of all, and the rarest. Same hold as epic.',
           pick: 'Only for calls the whole project rests on.',
+        },
+      ],
+    },
+    {
+      id: 'looking-closely',
+      topic: 'pictures',
+      order: 1,
+      title: 'Looking closely',
+      cards: [
+        {
+          id: 'zoom', kind: 'report', rarity: 'common', title: 'Zooming in',
+          text: 'Tap this card, then tap the picture.',
+          why: 'Pinch to zoom, drag to move around, and double tap to zoom in and out. Drag down or tap the X to come back.',
+          details: 'Try reading the small words at the bottom of the picture.\n\nThis side has a Comment button too, so you can look and write at once. Open it, type something, then tap the picture again. Your words stay put.',
+          images: [picture(1, 200)],
+        },
+        {
+          id: 'pick-many', kind: 'board', rarity: 'common', title: 'Picking from many',
+          text: 'Which of these would you keep?',
+          why: 'Tap the card to see them all. Tap a picture to look closer, or tick the ones you like, then come back and swipe.',
+          pick: ['p3'],
+          items: Array.from({ length: 12 }, (_, i) => ({ id: `p${i + 1}`, label: `Picture ${i + 1}`, image: picture(i + 1, (i * 30) % 360) })),
         },
       ],
     },

@@ -61,7 +61,7 @@ The file format is in `format.md`, next to this file. A deck looks like this:
 }
 ```
 
-Add `"stack": "some-name"` to decks in a topic that should be dealt one after another, a report first. `order` sets which comes first. Picture paths are relative to the deck file, and `riffle deck` shrinks and copies them.
+Add `"stack": "some-name"` to decks in a topic that should be dealt one after another, a report first. `order` sets which comes first. Picture paths are relative to the deck file, and `riffle deck` shrinks and copies them, keeping up to 2000 pixels so they can be zoomed into. A path starting `img/` that isn't beside the deck file means a picture already in the pack.
 
 ### Writing cards
 
@@ -88,13 +88,14 @@ If a card is technical with no context, they'll send it back. So:
 - `report`: "this is what happened", with no pick. They say good, problem, or that they don't follow. A "don't follow" mostly needs nothing back: it just tells you where they are.
 - `design`: your design for something, to approve, send back, or add to.
 - `options`: 2 to 4 options, each with an `id` and `label`, and `pick` naming your choice. They tap some and swipe.
+- `board`: any number of pictures to pick from, 60 or more is fine. `items` is a list, each with an `id`, a short `label`, an `image`, and optionally `text`. `pick` lists your choices. They tap the card to open the grid, tap a picture to zoom into it, tick the ones they like, then swipe. Use this instead of one big picture of many things, which can't be seen well enough. `riffle deck` makes the thumbnails from the whole picture, and says what the board costs to download. Tiles are square and never crop, so where the whole picture won't read small, like two views stacked in one tall image, give the item its own `thumb`: a square of the part that matters. `riffle deck` keeps it.
 
 ## Reading what comes back
 
 `swipe` in the data is what they meant, not which way they swiped.
 
 - **go, good, yes, fine:** do it.
-- **workshop, problem, rethink, redo:** don't go with that. Work on it, then deal it back. On option cards, what they tapped is the direction to redo in.
+- **workshop, problem, rethink, redo:** don't go with that. Work on it, then deal it back. On option cards and boards, what they ticked is the direction to redo in.
 - **idk, huh:** they need more context. Add it and deal it back, or decide it yourself if it's technical. If they say idk twice on the same card, decide it yourself and say so.
 - **comment on its own:** their own suggestion. Read it.
 - **Comments and notes** are often the most useful part. Read every one. Pictures are listed with their path in the clone: open them.

@@ -8,7 +8,7 @@ const FULL = `${OWNER}/${REPO}`;
 const SEND_EVERY = 15000, MAX_BATCH = 200, KEEPALIVE_LIMIT = 40000, PULL_EVERY = 30000;
 const PICTURE_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
 const CALL_TIMEOUT = 25000, STUCK_AFTER = 40000, STREAK_LIMIT = 3;
-const PHOTO_TIMEOUT = 120000, PHOTO_KEEP_DAYS = 30;
+const PHOTO_TIMEOUT = 120000, PHOTO_KEEP_DAYS = 30, PICTURE_TIMEOUT = 60000;
 
 // A local test server can stand in for GitHub, but only on this computer.
 const isLocal = ['localhost', '127.0.0.1'].includes(location.hostname);
@@ -319,8 +319,82 @@ async function deviceId() {
   return id;
 }
 
-// Brings down whatever changed under packs/, pictures included, so the whole library works offline.
-export async function pull() {
+export async function eachAtOnce(list, n, fn) {
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, list.length) }, async () => {
+    while (i < list.length) await fn(list[i++]);
+  }));
+}
+
+// A picture's name in the repo, where it was last seen. A board's full pictures come down one at a
+// time, when they're looked at, so this is how they're found.
+let fileIndex = null;
+async function shaOf(path) {
+  if (!fileIndex) fileIndex = (await store.get('file-index').catch(() => null)) || {};
+  return fileIndex[path];
+}
+
+// Brings one file down and keeps it. Two asking for the same file share one download.
+const fetching = new Map();
+const pictureUrls = new Map();
+function fetchFile(path, sha, key) {
+  if (fetching.has(path)) return fetching.get(path);
+  const job = (async () => {
+    const blob = await call(`/repos/${FULL}/git/blobs/${sha}`, key, { accept: 'application/vnd.github.raw+json', timeout: PICTURE_TIMEOUT });
+    if (!blob.ok) throw new Error(String(blob.status));
+    // GitHub labels raw files as its own type, so a picture gets its real one back.
+    const data = path.endsWith('.json') ? await blob.text() : new Blob([await blob.arrayBuffer()], { type: PICTURE_TYPES[path.split('.').pop().toLowerCase()] || 'application/octet-stream' });
+    const rec = { path, sha, data };
+    await store.files.set(path, rec);
+    pictureUrls.delete(path);
+    return rec;
+  })().finally(() => fetching.delete(path));
+  fetching.set(path, job);
+  return job;
+}
+
+// A picture's address on this phone, from a path in a pack. With `get` false it won't use the network.
+// Null if it isn't here and can't be fetched just now.
+export async function pictureUrl(packId, rel, { get = true } = {}) {
+  if (!rel) return null;
+  if (rel.startsWith('data:')) return rel;
+  const path = `packs/${packId}/${rel}`;
+  if (pictureUrls.has(path)) return pictureUrls.get(path);
+  let rec = await store.files.get(path).catch(() => null);
+  if (!rec && get) {
+    try {
+      const [key, sha] = [await getKey(), await shaOf(path)];
+      if (key && sha) rec = await fetchFile(path, sha, key);
+    } catch { /* no signal: the caller says so */ }
+  }
+  if (!rec || !(rec.data instanceof Blob)) return null;
+  const url = URL.createObjectURL(rec.data);
+  pictureUrls.set(path, url);
+  return url;
+}
+
+// The full pictures of every board. These wait until they're looked at, unless a plain card uses one too.
+async function boardPictures() {
+  const out = new Set(), onCards = new Set();
+  for (const f of await store.files.words()) {
+    const m = f.path.match(/^packs\/([^/]+)\/decks\/[^/]+\.json$/);
+    if (!m) continue;
+    try {
+      for (const c of JSON.parse(f.data).cards || []) {
+        for (const it of c.items || []) if (it.image) out.add(`packs/${m[1]}/${it.image}`);
+        for (const p of [...(c.images || []), ...(c.options || []).map(o => o.image)]) if (p) onCards.add(`packs/${m[1]}/${p}`);
+      }
+    } catch { /* a broken file is the deck's own problem */ }
+  }
+  for (const p of onCards) out.delete(p);
+  return out;
+}
+
+// Brings down whatever changed under packs/: the words first, so new decks show straight away, then
+// small pictures, then big ones, so a big board never holds anything up. Card pictures all come down,
+// so they work offline. A board's full pictures don't, because they could be a lot of data.
+// Says whether any words changed, and tells `onWords` as soon as they have.
+export async function pull(onWords = () => {}) {
   let key;
   try { key = await getKey(); } catch { return false; }
   if (!key) return false;
@@ -333,29 +407,33 @@ export async function pull() {
   }
   if (!r.ok) return fail(`Couldn't check for new decks. ${(await refusal(r)).text}`);
   const tree = (await r.json()).tree.filter(t => t.type === 'blob' && (t.path.startsWith('packs/') || t.path === 'read.json'));
+  fileIndex = Object.fromEntries(tree.map(t => [t.path, t.sha]));
+  store.set('file-index', fileIndex);
   const have = new Map((await store.files.all()).map(f => [f.path, f.sha]));
+  const todo = tree.filter(t => have.get(t.path) !== t.sha);
   let changed = false, missed = 0;
-  for (const t of tree) {
-    if (have.get(t.path) === t.sha) continue;
-    try {
-      const blob = await call(`/repos/${FULL}/git/blobs/${t.sha}`, key, { accept: 'application/vnd.github.raw+json' });
-      if (!blob.ok) { missed++; continue; }
-      const isJson = t.path.endsWith('.json');
-      // GitHub labels raw files as its own type, so a picture gets its real one back.
-      const data = isJson ? await blob.text() : new Blob([await blob.arrayBuffer()], { type: PICTURE_TYPES[t.path.split('.').pop().toLowerCase()] || 'application/octet-stream' });
-      await store.files.set(t.path, { path: t.path, sha: t.sha, data });
-      changed = true;
-    } catch { missed++; }
-  }
+  const bring = async t => {
+    try { await fetchFile(t.path, t.sha, key); changed = true; } catch { missed++; }
+  };
+  await eachAtOnce(todo.filter(t => t.path.endsWith('.json')), 6, bring);
   const live = new Set(tree.map(t => t.path));
   for (const path of have.keys()) {
     if (!live.has(path)) { await store.files.del(path); changed = true; }
   }
+  const words = changed;
+  if (words) onWords();
+  const pictures = todo.filter(t => !t.path.endsWith('.json'));
+  await eachAtOnce(pictures.filter(t => t.path.includes('/img/thumb/')), 6, bring);
+  const later = await boardPictures();
+  for (const t of pictures) {
+    if (later.has(t.path) && have.has(t.path)) { await store.files.del(t.path); pictureUrls.delete(t.path); } // it changed, so it comes again when looked at
+  }
+  await eachAtOnce(pictures.filter(t => !t.path.includes('/img/thumb/') && !later.has(t.path)), 3, bring);
   await readWhen();
   state.pulledAt = Date.now();
   state.pullProblem = missed ? `${missed} file${missed === 1 ? '' : 's'} didn't come down. It will try again.` : null;
   emit();
-  return changed;
+  return words;
 }
 
 // When the writer last read the answers, from the note they leave in the repo.
@@ -379,7 +457,7 @@ export async function start(onLibraryChange) {
   await readWhen();
   purgeOldPhotos().catch(() => {});
   emit();
-  const tryPull = () => pull().then(changed => { if (changed) onLibraryChange(); }).catch(() => {});
+  const tryPull = () => pull(onLibraryChange).catch(() => {});
   setInterval(() => {
     if (document.visibilityState !== 'visible' || !state.connected) return;
     if (state.waiting && Date.now() - lastAttempt >= SEND_EVERY) flush();

@@ -7,6 +7,7 @@ export const KINDS = {
   report: { label: 'Report', right: 'GOOD', left: 'PROBLEM', down: 'HUH?', up: 'NOTE' },
   design: { label: 'Design', pickLabel: 'My design', right: 'YES', left: 'RETHINK', down: 'IDK', up: 'NOTE' },
   options: { label: 'Options', pickLabel: 'My pick', right: 'GO', left: 'REDO', down: 'IDK', up: 'NOTE' },
+  board: { label: 'Board', pickLabel: 'My pick', right: 'GO', left: 'REDO', down: 'IDK', up: 'NOTE' },
 };
 const HANDLED_WORDS = { right: 'FINE', left: 'WORKSHOP', down: 'IDK', up: 'NOTE' };
 export const kindOf = card => KINDS[card.kind] || KINDS.question;

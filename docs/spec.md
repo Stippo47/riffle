@@ -18,6 +18,7 @@ Riffle is a phone web app for answering questions and reading reports one card a
 | report | What happened, with nothing asked | GOOD | PROBLEM: something's wrong with where this is going | HUH?: not following. Mostly so the writer knows; it doesn't need much back |
 | design | The writer's design for something, to approve, deny or add to | YES | RETHINK | IDK |
 | options | Several options and a question: tap the ones wanted, then swipe | GO: only those. With nothing tapped, the writer's marked pick. With no pick either, it just bounces | REDO: even those weren't good, redo in their direction. With nothing tapped, all of them are bad | IDK |
+| board | Any number of pictures to pick from, 60 or more. See Boards below | As for options | As for options | IDK |
 
 Comment always opens the comment box. These words live in `js/ui.js`. The table names the default directions; see Swipe directions below.
 
@@ -130,9 +131,28 @@ Pinching a card, or Grid, lays out every card in the deck on a grid: its short t
 
 A row at the top of every pack's page, always there, needing no deck file. It isn't a deck, because decks end and this doesn't. It opens a screen with a pad on top and earlier thoughts below, newest first, each with its time. Filing one sends it. What's being typed has the same protection as a comment. The writer can answer a thought through a file, and the answer shows on it with the handled look.
 
+## Looking at pictures
+
+Tapping a picture opens it full screen: on a card's back, on an option, or on a board. Pinching zooms in and out around the fingers, dragging moves around a zoomed picture, and a double tap zooms in at that spot or back out. The X, or dragging down when it isn't zoomed, goes back. Where there are several pictures, next and previous buttons or a sideways drag move between them. This screen sits over everything, so a pinch here never reaches the card underneath. A pinch on a card's back does nothing, and a pinch on its front still opens the overview.
+
+A tap on an option's picture opens it, and a tap anywhere else on the option ticks it, as before. The picture is drawn at its true size and scaled down to fit, so zooming shows real detail. If a board's full picture hasn't come down, its thumbnail shows until it does, and without signal it says so.
+
+## Boards
+
+For picking from many pictures, where one big picture of them all can't be seen well enough. Up and down are swipes, so a long grid can't scroll on the card itself. So the card shows a few small pictures, with the ticked ones first, and a tap opens the board's own screen: a scrolling grid, three across, with each tile's picture, label and tick. The count of selected ones shows at the top.
+
+- A tile shows its thumbnail whole and never crops it, on the card too. An item can bring its own thumbnail, for pictures that don't read when shrunk whole. Looking at it still opens the whole picture.
+- Tapping a tile's picture looks at it, with next, previous and a tick there too.
+- Tapping its tick or label selects it. Any number can be selected.
+- A swipe on the card means done with these picks. It works as on an option card, and the answer carries `selected`.
+- Ticks are saved as they're made, so a half-finished selection survives the app being closed. They also go out as a draft a few seconds later, like comments. Plain ticks in the Feel test stay on the phone.
+- Opening the board from the comment box keeps what's typed, so they can look while writing.
+
+The phone brings words down first, then thumbnails, then card pictures. A board's full pictures come one at a time as they're looked at, with the next and previous ones fetched ahead, because all of them could be a lot of data on a phone connection. So thumbnails work offline, and full pictures only once seen.
+
 ## Details
 
-Up and down are swipes, so a card can't scroll. The face has a size limit, and tapping flips the card to its back: longer explanation, numbers and pictures, scrolling, with swipes off. If a card doesn't fit its face on a small phone, the type steps down. If it still doesn't fit, the end of its description is cut with a fade and "Tap to read the rest", and the whole of it is on the back, so no words are lost.
+Up and down are swipes, so a card can't scroll. The face has a size limit, and tapping flips the card to its back: longer explanation, numbers and pictures, scrolling, with swipes off. The back has its own Comment button, which opens the comment box with the back still showing above it. So they can read, scroll and open pictures while they write, and flip back to swipe. Going to a picture and back keeps what's typed. If a card doesn't fit its face on a small phone, the type steps down. If it still doesn't fit, the end of its description is cut with a fade and "Tap to read the rest", and the whole of it is on the back, so no words are lost.
 
 ## Endings and rewards
 

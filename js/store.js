@@ -204,6 +204,16 @@ export const files = {
   set: (key, val) => run('files', 'readwrite', s => s.put(val, key)).then(v => { if (v === NO_DB) memoryFiles.set(key, val); }),
   del: key => run('files', 'readwrite', s => s.delete(key)).then(v => { if (v === NO_DB) memoryFiles.delete(key); }),
   all: () => run('files', 'readonly', s => s.getAll()).then(v => (v === NO_DB ? [...memoryFiles.values()] : v), () => []),
+  // Just the words. There can be hundreds of pictures, and a page of tiles has no use for them.
+  words: async () => {
+    try {
+      const keys = await run('files', 'readonly', s => s.getAllKeys());
+      if (keys === NO_DB) return [...memoryFiles.values()].filter(f => f.path.endsWith('.json'));
+      return (await Promise.all(keys.filter(k => k.endsWith('.json')).map(files.get))).filter(Boolean);
+    } catch {
+      return [];
+    }
+  },
 };
 
 // ---------- photos. Too big for the backup list, so a failed save tells the person straight away.

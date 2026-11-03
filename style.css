@@ -301,7 +301,7 @@ svg{display:block}
 [data-layout=story] .deck:not(.composing):not(.ended) .face,[data-layout=story] .deck:not(.composing):not(.ended) .back{border-radius:0;box-shadow:inset 0 0 0 3px var(--rim,transparent)}
 [data-layout=story] .deck:not(.composing):not(.ended) .face{padding:calc(var(--sat) + 62px) 22px calc(var(--sab) + 16px)}
 [data-layout=story] .deck:not(.composing):not(.ended) .back-scroll{padding-top:calc(var(--sat) + 62px)}
-[data-layout=story] .deck:not(.composing):not(.ended) .back-hint{min-height:calc(var(--sab) + 46px);padding-bottom:var(--sab)}
+[data-layout=story] .deck:not(.composing):not(.ended) .back-foot{padding-bottom:var(--sab)}
 [data-layout=story] .deck:not(.composing):not(.ended) .card[data-pos="1"]{transform:none}
 [data-layout=story] .deck:not(.composing):not(.ended) .card[data-pos="2"]{display:none}
 /* The big type gives way when a long card has to shrink to fit. */
@@ -410,8 +410,67 @@ svg{display:block}
 .back-scroll{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;padding:18px 20px 8px;font-size:17px;line-height:1.42;-webkit-user-select:text;user-select:text}
 .back-scroll h3{font-family:var(--card-display);font-size:21px;margin-bottom:10px}
 .back-scroll p{margin-bottom:12px;color:#2c2b33}
-.back-scroll img{display:block;width:100%;border-radius:10px;margin-bottom:12px}
-.back-hint{flex:none;min-height:46px;font-size:14px;font-weight:600;color:var(--card-dim);border-top:1px solid rgba(23,22,28,.1)}
+.back-scroll img{display:block;width:100%;border-radius:10px;margin-bottom:12px;cursor:zoom-in;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.back-foot{flex:none;display:flex;border-top:1px solid rgba(23,22,28,.1)}
+.back-hint{flex:1;min-height:46px;font-size:14px;font-weight:600;color:var(--card-dim)}
+.back-comment{flex:none;display:flex;align-items:center;gap:6px;padding:0 14px;font-size:14px;font-weight:600;color:var(--card-ink);border-left:1px solid rgba(23,22,28,.1)}
+.back-comment svg{width:18px;height:18px;fill:none;stroke:currentColor}
+.deck.composing .back-comment{display:none}
+.deck.composing .back-scroll{padding:12px 16px 6px;font-size:15.5px}
+.deck.composing .back-hint{min-height:38px}
+.more-link{align-self:center;margin-top:2px;min-height:30px;padding:0 12px;font-size:13.5px;font-weight:600;color:var(--card-ink);text-decoration:underline}
+.deck.composing .more-link{display:none}
+
+/* A board on its card: a few small pictures, and a tap opens them all. */
+.board-preview{flex:1 1 0;min-height:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;align-content:start;margin-top:10px;overflow:hidden}
+.bp{position:relative;display:block;aspect-ratio:1;border-radius:5px;overflow:hidden;background:rgba(23,22,28,.08)}
+.bp img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;-webkit-touch-callout:none}
+.bp.on::after,.bt.on::after{content:'';position:absolute;inset:0;border-radius:inherit;box-shadow:inset 0 0 0 3px #15803f;pointer-events:none}
+.bp.on img{opacity:.82}
+.bp-more{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(23,22,28,.66);color:#fff;font-size:14px;font-weight:800}
+.deck.composing .board-preview{display:none}
+.clipped .board-preview{flex-shrink:1}
+
+/* A board's own screen */
+.boardview{padding-bottom:0}
+.board-grid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-auto-rows:max-content;gap:8px;align-content:start;padding:2px 0 10px;touch-action:pan-y}
+.bt{position:relative;display:flex;flex-direction:column;overflow:hidden;background:var(--tile-bg);color:var(--tile-ink);border-radius:var(--tile-radius);box-shadow:var(--tile-shadow)}
+.bt-pic{position:relative;display:block;flex:none;width:100%;aspect-ratio:1;background:rgba(127,127,127,.18)}
+.bt-pic img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;-webkit-touch-callout:none}
+.bt-tick{position:absolute;right:0;top:0;width:46px;height:46px;display:flex;align-items:flex-start;justify-content:flex-end;padding:6px}
+.bt-tick i{display:flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:rgba(0,0,0,.45);box-shadow:inset 0 0 0 2px #fff;color:transparent}
+.bt-tick svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:3.4}
+.bt-label{flex:1;min-height:38px;padding:4px 6px;font-size:12.5px;font-weight:600;line-height:1.15;text-align:center;overflow-wrap:anywhere}
+.bt-mine{position:absolute;left:4px;top:4px;padding:1px 5px;border-radius:4px;background:rgba(0,0,0,.6);color:#fff;font-size:10px;font-style:normal;font-weight:700;pointer-events:none}
+.bt.on .bt-tick i{background:#15803f;box-shadow:inset 0 0 0 2px #fff;color:#fff}
+.bt.missing .bt-pic{opacity:.5}
+.board-bar{flex:none;padding:8px 0 calc(var(--sab) + 10px)}
+.board-bar .primary{width:100%}
+
+/* Looking at a picture */
+.viewer{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;background:#000;color:#fff;font-family:var(--font);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.viewer-stage{position:relative;flex:1 1 0;min-height:0;overflow:hidden;touch-action:none}
+.viewer-stage img{position:absolute;left:0;top:0;max-width:none;transform-origin:0 0;will-change:transform;pointer-events:none;-webkit-user-drag:none;opacity:0}
+.viewer-stage img.ready{opacity:1}
+.viewer-stage img.anim{transition:transform .18s ease-out}
+.viewer-x{position:absolute;right:10px;top:calc(var(--sat) + 8px);width:46px;height:46px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(40,40,44,.78);color:#fff}
+.viewer-x svg{width:24px;height:24px;fill:none;stroke:currentColor}
+.viewer-note{position:absolute;left:14px;right:66px;top:calc(var(--sat) + 12px);padding:7px 10px;border-radius:8px;background:rgba(40,40,44,.84);font-size:13.5px;line-height:1.25;pointer-events:none}
+.viewer-foot{flex:none;display:grid;gap:6px;padding:8px 12px calc(var(--sab) + 10px);background:#17181b}
+.viewer-words{display:grid;gap:1px;min-height:20px;text-align:center}
+.viewer-words b{font-size:15.5px;line-height:1.2}
+.viewer-words small{font-size:13px;line-height:1.25;color:#c3c5cb}
+.viewer-words small:empty{display:none}
+.viewer-words span{font-size:12.5px;color:#a3a5ac}
+.viewer-row{display:flex;align-items:center;gap:8px}
+.viewer-prev,.viewer-next{flex:none;width:56px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:rgba(255,255,255,.1);color:#fff}
+.viewer-prev svg,.viewer-next svg{width:26px;height:26px;fill:none;stroke:currentColor}
+.viewer-next svg{transform:scaleX(-1)}
+.viewer-prev:disabled,.viewer-next:disabled{opacity:.3}
+.viewer-tick{flex:1;display:flex;align-items:center;justify-content:center;gap:7px;min-height:48px;border-radius:12px;background:rgba(255,255,255,.14);color:#fff;font-size:16px;font-weight:700}
+.viewer-tick svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:3}
+.viewer-tick.on{background:#15803f}
+.viewer-gap{flex:1}
 
 /* Notes: a full sheet with a slim head. Tap the head or drag it down to go back. */
 .notes-sheet{position:absolute;inset:0;z-index:40;display:flex;flex-direction:column;gap:6px;background-color:var(--bg);background-image:var(--bg-art);padding:calc(var(--sat) + 2px) 12px 8px;transition:transform .16s ease-out}
@@ -584,7 +643,7 @@ canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:
 /* Option cards */
 .options{display:grid;gap:7px;margin-top:10px;flex:none}
 .option{position:relative;display:flex;align-items:center;gap:10px;min-height:54px;padding:8px 40px 8px 12px;border-radius:min(var(--radius),12px);background:rgba(23,22,28,.055);box-shadow:inset 0 0 0 1.5px rgba(23,22,28,.12);line-height:1.22}
-.option img{width:46px;height:46px;object-fit:cover;border-radius:7px;flex:none}
+.option img{width:46px;height:46px;object-fit:cover;border-radius:7px;flex:none;-webkit-touch-callout:none}
 .opt-text{min-width:0;display:block}
 .opt-text b{display:block;font-size:16.5px}
 .opt-text small{display:block;font-size:13.5px;color:var(--card-dim);margin-top:1px}

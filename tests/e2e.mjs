@@ -2,9 +2,9 @@
 // Run the server, then: node tests/e2e.mjs [folder for screenshots]
 // Runs at device scale 1: at scale 2 a screenshot re-sends a held touch at half its coordinates.
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
@@ -508,6 +508,7 @@ await shot('17c-handled');
 await throwCard('right');
 await sleep(250);
 ok((await deck()).ended, 'that deck ends too');
+await sleep(400); // a tap right after a throw can get swallowed
 await tap('[data-act=done]');
 await sleep(150);
 const pop = await ev(`(()=>{const c=document.querySelector('canvas.confetti');return !!c})()`);
@@ -579,9 +580,45 @@ ok((await text()).includes('Big calls cleared'), 'the second topic gets its rewa
 await sleep(600);
 await tap('[data-go=pack]');
 await sleep(300);
+await openDeckRow('Looking closely');
+await shot('23a-feel-picture-card');
+const feelTable = await rect('#table');
+await tapAt(feelTable.x, feelTable.top + feelTable.h * 0.5);
+await sleep(500);
+await tap('.card[data-pos="0"] .back-scroll img');
+await sleep(500);
+ok((await ev(`document.querySelector('.viewer-stage img').naturalWidth`)) === 1600, 'the Feel test has a picture to zoom into');
+await shot('23b-feel-viewer');
+await tap('.viewer-x');
+await sleep(200);
+await tap('.card[data-pos="0"] .back-hint');
+await sleep(450);
+await throwCard('right');
+await sleep(800);
+await shot('23c-feel-board-card');
+await tapAt(feelTable.x, feelTable.top + feelTable.h * 0.5);
+await sleep(600);
+ok((await ev(`document.querySelectorAll('.bt img').length`)) === 12 && (await ev(`[...document.querySelectorAll('.bt img')].every(i => i.naturalWidth === 1600)`)), 'and a board of pictures, needing nothing downloaded');
+await tap('.bt[data-item=p1] .bt-tick');
+await sleep(120);
+await shot('23d-feel-board');
+await ev('__riffle.current.sendDrafts()');
+await sleep(100);
+ok(!(await everyEvent()).some(e => e.pack === 'feel-test' && e.type === 'draft' && e.selected), 'plain ticks in the Feel test stay on the phone');
+await tap('.bt[data-item=p1] .bt-tick');
+await sleep(120);
+await tap('.boardview [data-act=closeboard]');
+await sleep(250);
+await throwCard('right'); // with nothing ticked, this takes my marked pick
+await sleep(250);
+ok((await deck()).answers['pick-many']?.selected?.join() === 'p3' && (await deck()).answers['pick-many']?.swipe === 'right', 'the Feel test has a board to try');
+await tap('[data-act=done]');
+await sleep(1200);
+await tap('[data-go=pack]');
+await sleep(300);
 await openDeckRow('Misc');
 await throwCard('right');
-await sleep(200);
+await sleep(600);
 await tap('[data-act=done]');
 await sleep(120);
 ok(await ev(`!!document.querySelector('canvas.confetti')`), 'clearing the pack gives one modest burst');
@@ -1286,6 +1323,444 @@ await ev(`__riffle.showPack('test-pack')`);
 await sleep(200);
 await openDeckRow('Pulled deck');
 
+console.log('Looking at pictures');
+await ev('__riffle.current&&__riffle.current.close&&__riffle.current.close()');
+const boardWork = mkdtempSync(join(tmpdir(), 'riffle-board-test-'));
+const madeBoard = JSON.parse(execFileSync('python', [fileURLToPath(new URL('./make_board.py', import.meta.url)), boardWork, '60'], { maxBuffer: 1 << 24 }).toString());
+console.log(`  (riffle deck said: ${madeBoard.said.trim().split('\n').filter(l => l.includes('thumbnails')).join(' | ')})`);
+const walk = d => readdirSync(d).flatMap(n => { const p = join(d, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
+const packRoot = join(madeBoard.clone, 'packs');
+for (const f of walk(packRoot)) {
+  const rel = `packs/${relative(packRoot, f).replace(/\\/g, '/')}`;
+  await fetch(`${API}/__put?path=${encodeURIComponent(rel)}${f.endsWith('.json') ? '' : '&bin=1'}`, { method: 'POST', body: readFileSync(f) });
+}
+await api('/__served?clear=1');
+await ev('__riffle.sync.pull()');
+const pulled = (await api('/__served')).filter(p => p.startsWith('packs/bp/'));
+const firstPic = pulled.findIndex(p => !p.endsWith('.json'));
+const lastJson = pulled.map(p => p.endsWith('.json')).lastIndexOf(true);
+ok(lastJson < firstPic, 'the words come down before any picture', JSON.stringify(pulled.slice(0, 5)));
+const thumbsPulled = pulled.filter(p => p.includes('/img/thumb/'));
+ok(thumbsPulled.length === 60, 'all 60 thumbnails come down', String(thumbsPulled.length));
+const fullsPulled = pulled.filter(p => /\/img\/(?!thumb\/)/.test(p));
+ok(fullsPulled.length === 4 && fullsPulled.every(p => /boards-(wide|item-0[123])/.test(p)), "a card's own pictures come down, but a board's full ones wait", JSON.stringify(fullsPulled));
+ok(pulled.findIndex(p => /\/img\/(?!thumb\/)/.test(p)) > pulled.findLastIndex(p => p.includes('/img/thumb/')), 'and thumbnails come before big pictures');
+
+await ev(`__riffle.showPack('bp')`);
+await sleep(250);
+await openDeckRow('Boards');
+ok((await deck()).top === 'pic', 'a card with pictures is up');
+const v0 = await rect('#table');
+await tapAt(v0.x, v0.top + v0.h * 0.5);
+await sleep(500);
+ok((await deck()).flipped, 'tapping flips it');
+await shot('60-back-with-picture');
+
+// A real pinch on the back does nothing, and never opens the overview.
+const backBox = await rect('.card[data-pos="0"] .back-scroll');
+await touch('touchStart', [[backBox.x, backBox.y - 60]]);
+await sleep(30);
+await touch('touchStart', [[backBox.x, backBox.y - 60], [backBox.x, backBox.y + 60]]);
+for (let i = 1; i <= 6; i++) { await sleep(25); await touch('touchMove', [[backBox.x, backBox.y - 60 + i * 7], [backBox.x, backBox.y + 60 - i * 7]]); }
+await touch('touchEnd', []);
+await sleep(200);
+ok(!(await deck()).overview && (await deck()).flipped, 'a pinch on the back of a card does nothing');
+
+const openPic = async () => {
+  await tap('.card[data-pos="0"] .back-scroll img');
+  for (let i = 0; i < 40 && !(await ev(`!!document.querySelector('.viewer img.ready')`)); i++) await sleep(100);
+  await sleep(100);
+};
+await openPic();
+const vImg = () => rect('.viewer-stage img');
+const vStage = () => rect('.viewer-stage');
+ok(await ev(`!!document.querySelector('.viewer')`), 'tapping the picture opens it full screen');
+const nat = await ev(`(()=>{const i=document.querySelector('.viewer-stage img');return {w:i.naturalWidth,h:i.naturalHeight}})()`);
+ok(nat.w === 2000 && nat.h === 1000, 'at the full resolution riffle deck keeps', JSON.stringify(nat));
+let fitBox = await vImg();
+const st0 = await vStage();
+ok(Math.abs(fitBox.w - st0.w) < 2 && Math.abs(fitBox.x - st0.x) < 2 && Math.abs(fitBox.y - st0.y) < 2, 'it fits the screen, centred', JSON.stringify([fitBox, st0]));
+await shot('61-viewer-fit');
+
+// A real two-finger pinch, through the touch pipeline.
+const realPinch = async (cx, cy, from, to) => {
+  await touch('touchStart', [[cx - from, cy]]);
+  await sleep(30);
+  await touch('touchStart', [[cx - from, cy], [cx + from, cy]]);
+  for (let i = 1; i <= 10; i++) {
+    await sleep(25);
+    const d = from + ((to - from) * i) / 10;
+    await touch('touchMove', [[cx - d, cy], [cx + d, cy]]);
+  }
+  await touch('touchEnd', []);
+  await sleep(320);
+};
+const px = st0.x + 60, py = st0.y + 20;
+const markerX = (px - fitBox.left) / fitBox.w, markerY = (py - fitBox.top) / fitBox.h;
+await realPinch(px, py, 40, 100);
+let zoomed = await vImg();
+ok(Math.abs(zoomed.w / fitBox.w - 2.5) < 0.25, 'a real pinch zooms in', `${zoomed.w / fitBox.w}`);
+ok(Math.abs(zoomed.left + zoomed.w * markerX - px) < 40 && Math.abs(zoomed.top + zoomed.h * markerY - py) < 40, 'around the fingers', JSON.stringify([zoomed, px, py]));
+ok(!(await deck()).overview && !(await deck()).answers.pic, 'and never reaches the card: no overview, nothing answered');
+await shot('62-viewer-zoomed');
+
+await dragFrom(st0.x, st0.y, -70, -30, { ms: 150 });
+await sleep(280);
+const panned = await vImg();
+ok(Math.abs(panned.left - zoomed.left + 70) < 12 && Math.abs(panned.top - zoomed.top + 30) < 40, 'dragging moves around the zoomed picture', JSON.stringify([panned.left, zoomed.left]));
+await dragFrom(st0.x, st0.y, 390, 300, { ms: 150 });
+await sleep(280);
+const edge = await vImg();
+ok(edge.left <= 1 && edge.right >= W - 1, 'but no further than its edges', JSON.stringify(edge));
+const doubleTap = async (x, y) => { await tapAt(x, y); await sleep(60); await tapAt(x, y); await sleep(320); };
+await doubleTap(st0.x, st0.y);
+ok(Math.abs((await vImg()).w - fitBox.w) < 2, 'a double tap zooms back out');
+await doubleTap(st0.x + 50, st0.y);
+const dbl = await vImg();
+ok(Math.abs(dbl.w / fitBox.w - 2.5) < 0.1, 'and in again', `${dbl.w / fitBox.w}`);
+await doubleTap(st0.x, st0.y);
+await realPinch(st0.x, st0.y, 100, 30);
+ok(Math.abs((await vImg()).w - fitBox.w) < 2, 'pinching in stops at fitting the screen');
+ok((await ev(`document.querySelector('.viewer-next').disabled`)) === false, 'a card with several pictures has a next button');
+await tap('.viewer-next');
+for (let i = 0; i < 30 && (await ev(`document.querySelector('.viewer-stage img').naturalHeight`)) !== 2000; i++) await sleep(100);
+ok((await ev(`document.querySelector('.viewer-words span').textContent`)) === '2 of 2', 'next goes to the next picture');
+await dragFrom(st0.x, st0.y, 120, 2, { ms: 120 });
+await sleep(400);
+ok((await ev(`document.querySelector('.viewer-words span').textContent`)) === '1 of 2', 'so does dragging sideways');
+await tap('.viewer-x');
+await sleep(200);
+ok(!(await ev(`!!document.querySelector('.viewer')`)) && (await deck()).flipped, 'the X goes back, to the same place');
+await openPic();
+await dragFrom(st0.x, st0.y, 3, 130, { ms: 150 });
+await sleep(250);
+ok(!(await ev(`!!document.querySelector('.viewer')`)), 'and so does dragging down');
+
+console.log('Commenting with the back showing');
+ok(await seenBox('.card[data-pos="0"] .back-comment'), 'the back has a Comment button');
+await tap('.card[data-pos="0"] .back-comment');
+await sleep(300);
+let dc = await deck();
+ok(dc.composing && dc.flipped, 'it opens the box with the card still flipped');
+ok(await ev(`document.activeElement.id==='comment'`), 'ready to type');
+await typeText('The left side looks off');
+await sleep(120);
+await ev(`document.documentElement.style.setProperty('--vvh','464px')`);
+await sleep(200);
+const readable = await ev(`(()=>{const b=document.querySelector('.card[data-pos="0"] .back-scroll').getBoundingClientRect();const p=document.getElementById('comment').getBoundingClientRect();const v=getComputedStyle(document.querySelector('.card[data-pos="0"] .back')).visibility;return {backH:b.height,backBottom:b.bottom,padTop:p.top,padBottom:p.bottom,v}})()`);
+ok(readable.v === 'visible' && readable.backH >= 120 && readable.backBottom <= readable.padTop && readable.padBottom <= 464, 'the back stays readable above the box, keyboard and all', JSON.stringify(readable));
+await shot('63-comment-on-back');
+const sc2 = await rect('.card[data-pos="0"] .back-scroll');
+await touch('touchStart', [[sc2.x, sc2.y + 40]]);
+for (let i = 1; i <= 8; i++) { await sleep(20); await touch('touchMove', [[sc2.x, sc2.y + 40 - i * 12]]); }
+await touch('touchEnd', []);
+await sleep(400);
+ok((await ev(`document.querySelector('.card[data-pos="0"] .back-scroll').scrollTop`)) > 20 && (await deck()).composing, 'it scrolls while the box is open');
+await ev(`document.querySelector('.card[data-pos="0"] .back-scroll').scrollTop=0`);
+await sleep(100);
+await openPic();
+ok(await ev(`document.activeElement.id!=='comment'`), 'a picture opens from there too, and the keyboard drops');
+await tap('.viewer-x');
+await sleep(250);
+dc = await deck();
+ok(dc.composing && dc.flipped && dc.drafts.pic === 'The left side looks off' && (await ev(`document.getElementById('comment').innerText`)) === 'The left side looks off', 'coming back keeps every word');
+ok(await ev(`document.activeElement.id==='comment'`), 'and the box is ready again');
+await typeText(', and the roof too');
+await sleep(120);
+await ev(`document.documentElement.style.setProperty('--vvh',innerHeight+'px')`);
+await sleep(120);
+await tap('.card[data-pos="0"] .back-hint');
+await sleep(450);
+dc = await deck();
+ok(dc.composing && !dc.flipped, 'flipping back keeps the box open');
+await drag(190, 3);
+await sleep(300);
+dc = await deck();
+ok(dc.answers.pic?.swipe === 'right' && dc.answers.pic?.comment === 'The left side looks off, and the roof too', 'a swipe then sends it all', JSON.stringify(dc.answers.pic));
+await tap('#undo');
+await sleep(300);
+const v1 = await rect('#table');
+await tapAt(v1.x, v1.top + v1.h * 0.5);
+await sleep(500);
+await tap('.card[data-pos="0"] .back-comment');
+await sleep(300);
+const padB = await rect('#comment');
+await dragFrom(padB.x, padB.top + 25, 2, 110);
+await sleep(250);
+dc = await deck();
+ok(!dc.composing && dc.flipped && dc.drafts.pic, 'dragging the box down keeps the words, and stays on the back');
+await tap('.card[data-pos="0"] .back-hint');
+await sleep(450);
+await ev(`__riffle.current.s.drafts={}`);
+await ev('__riffle.current.syncAttached()');
+await throwCard('right');
+await sleep(300);
+
+console.log('Boards');
+ok((await deck()).top === 'board', 'a board is up');
+await sleep(500);
+await shot('64-board-card');
+const previews = await ev(`[...document.querySelectorAll('.card[data-pos="0"] .bp img')].filter(i=>i.complete&&i.naturalWidth>0).length`);
+ok(previews >= 5, 'the card shows some small pictures', String(previews));
+ok((await ev(`document.querySelector('.card[data-pos="0"] .more').textContent`)) === 'Tap to choose from 60', 'and says what a tap does');
+await throwCard('right');
+await sleep(250);
+ok((await deck()).top === 'board' && !(await deck()).answers.board, 'going with nothing ticked and no pick marked just bounces');
+await api('/__served?clear=1');
+const v2 = await rect('#table');
+await tapAt(v2.x, v2.top + v2.h * 0.5);
+await sleep(300);
+ok(await seenBox('.boardview .board-grid'), 'a tap opens its screen');
+for (let i = 0; i < 40 && (await ev(`[...document.querySelectorAll('.bt img')].filter(i=>i.complete&&i.naturalWidth>0).length`)) < 60; i++) await sleep(100);
+const tilesB = await ev(`(()=>{const imgs=[...document.querySelectorAll('.bt img')];const g=document.querySelector('.board-grid');const t=[...document.querySelectorAll('.bt')].map(x=>x.getBoundingClientRect());return {n:imgs.length,loaded:imgs.filter(i=>i.complete&&i.naturalWidth>0).length,maxNat:Math.max(...imgs.map(i=>i.naturalWidth)),across:new Set(t.slice(0,3).map(r=>Math.round(r.top))).size,w:Math.round(t[0].width),scrolls:g.scrollHeight>g.clientHeight,overflow:g.scrollWidth>g.clientWidth+1}})()`);
+ok(tilesB.n === 60 && tilesB.loaded === 60, 'all 60 show', JSON.stringify(tilesB));
+ok(tilesB.maxNat === 360, 'from thumbnails', JSON.stringify(tilesB));
+ok(tilesB.across === 1 && tilesB.w >= 105 && tilesB.scrolls && !tilesB.overflow, 'three across, and it scrolls', JSON.stringify(tilesB));
+ok((await api('/__served')).filter(p => /\/img\/(?!thumb\/)/.test(p)).length === 0, 'with no full picture fetched yet');
+await shot('65-board-grid');
+const tile = id => ev(`(()=>{const i=document.querySelector('.bt[data-item=${id}] img');const r=i.getBoundingClientRect();const c=document.createElement('canvas');c.width=c.height=8;const x=c.getContext('2d');x.drawImage(i,0,0,8,8);const d=x.getImageData(4,4,1,1).data;return {nw:i.naturalWidth,nh:i.naturalHeight,fit:getComputedStyle(i).objectFit,w:r.width,h:r.height,red:d[0]>180&&d[1]<70}})()`);
+const [tallTile, ownTile, wideTile] = [await tile('i58'), await tile('i59'), await tile('i60')];
+ok(tallTile.nh === 360 && tallTile.nw < 200 && tallTile.fit === 'contain' && Math.abs(tallTile.w - tallTile.h) < 2, 'a tall picture with no thumbnail of its own shows whole in a square tile', JSON.stringify(tallTile));
+ok(wideTile.nw === 360 && wideTile.nh < 200 && wideTile.fit === 'contain', 'so does a wide one', JSON.stringify(wideTile));
+ok(ownTile.nw === 360 && ownTile.nh === 360 && ownTile.red, "an item's own thumbnail is the one that shows", JSON.stringify(ownTile));
+await ev(`document.querySelector('.bt[data-item=i58]').scrollIntoView()`);
+await sleep(150);
+await shot('65b-board-shapes');
+await tap('.bt[data-item=i58] .bt-tick');
+await sleep(120);
+await tap('.boardview [data-act=closeboard]');
+await sleep(250);
+const onCard = await ev(`(()=>{const b=document.querySelector('.card[data-pos="0"] .bp.on').getBoundingClientRect();const i=document.querySelector('.card[data-pos="0"] .bp.on img');const r=i.getBoundingClientRect();return {bw:b.width,bh:b.height,iw:r.width,ih:r.height,fit:getComputedStyle(i).objectFit,nh:i.naturalHeight}})()`);
+ok(Math.abs(onCard.bw - onCard.bh) < 2 && Math.abs(onCard.ih - onCard.bh) < 2 && onCard.fit === 'contain', 'and whole in the small pictures on the card', JSON.stringify(onCard));
+await shot('65c-board-card-tall');
+const vTall = await rect('#table');
+await tapAt(vTall.x, vTall.top + vTall.h * 0.5);
+await sleep(500);
+await tap('.bt[data-item=i58] .bt-tick');
+await sleep(120);
+await ev(`document.querySelector('.board-grid').scrollTop=0`);
+await sleep(100);
+const boardScroll = () => ev(`document.querySelector('.board-grid').scrollTop`);
+const bgBox = await rect('.board-grid');
+await touch('touchStart', [[bgBox.x, bgBox.y + 150]]);
+for (let i = 1; i <= 10; i++) { await sleep(20); await touch('touchMove', [[bgBox.x, bgBox.y + 150 - i * 30]]); }
+await touch('touchEnd', []);
+await sleep(500);
+ok((await boardScroll()) > 100 && !(await deck()).answers.board, 'a real drag scrolls the grid, and answers nothing');
+await ev(`document.querySelector('.board-grid').scrollTop=0`);
+await sleep(100);
+await tap('.bt[data-item=i2] .bt-tick');
+await sleep(120);
+await tap('.bt[data-item=i5] .bt-label');
+await sleep(120);
+ok((await ev(`document.getElementById('boardcount').textContent`)) === '2 selected', 'ticks and labels select, and the count shows');
+ok((await ev(`document.querySelectorAll('.bt.on').length`)) === 2, 'the tiles show it');
+await shot('66-board-picked');
+
+// A slow connection: the small picture shows at once, and the full one replaces it.
+await api('/__slowblob?ms=1200');
+await tap('.bt[data-item=i9] .bt-pic');
+await sleep(350);
+const quick = await ev(`(()=>{const i=document.querySelector('.viewer-stage img');return {nat:i.naturalWidth,ready:i.classList.contains('ready')}})()`);
+ok(quick.ready && quick.nat === 360, 'looking at one shows its small picture straight away', JSON.stringify(quick));
+await shot('67-viewer-thumb-first');
+for (let i = 0; i < 40 && (await ev(`document.querySelector('.viewer-stage img').naturalWidth`)) !== 2000; i++) await sleep(100);
+ok((await ev(`document.querySelector('.viewer-stage img').naturalWidth`)) === 2000, 'then the full one, at full resolution');
+await api('/__slowblob?ms=0');
+await sleep(500);
+const fetchedNow = (await api('/__served')).filter(p => /\/img\/(?!thumb\/)/.test(p));
+ok(fetchedNow.some(p => p.endsWith('item-09.jpg')) && fetchedNow.some(p => p.endsWith('item-10.jpg')) && fetchedNow.some(p => p.endsWith('item-08.jpg')) && fetchedNow.length === 3, 'only that one and its neighbours are fetched', JSON.stringify(fetchedNow));
+ok((await ev(`document.querySelector('.viewer-words b').textContent`)) === 'Item 9' && (await ev(`document.querySelector('.viewer-words span').textContent`)) === '9 of 60 · 2 selected', 'it says which one, and the count');
+await shot('68-viewer-board');
+const st1 = await vStage();
+await realPinch(st1.x, st1.y, 40, 100);
+ok(Math.abs((await vImg()).w / (await ev(`document.querySelector('.viewer-stage').clientWidth`)) - 2.5) < 0.3 && !(await deck()).overview, 'a real pinch zooms a board picture too');
+await doubleTap(st1.x, st1.y);
+await tap('.viewer-tick');
+await sleep(120);
+ok((await ev(`document.querySelector('.viewer-words span').textContent`)) === '9 of 60 · 3 selected' && (await ev(`document.querySelector('.viewer-tick span').textContent`)) === 'Selected', 'it can be ticked from here');
+await tap('.viewer-next');
+await sleep(400);
+ok((await ev(`document.querySelector('.viewer-words b').textContent`)) === 'Item 10', 'next goes along the board');
+await api('/__down?on=1');
+await tap('.viewer-next');
+await tap('.viewer-next');
+await sleep(600);
+ok(await ev(`!document.querySelector('.viewer-note').hidden&&document.querySelector('.viewer-note').textContent.includes('signal')`), 'with no signal it shows the small one and says so', await ev(`document.querySelector('.viewer-note').textContent`));
+await ev(`document.querySelector('.viewer-stage img').naturalWidth`);
+await api('/__down?on=0');
+await tap('.viewer-x');
+await sleep(200);
+ok((await ev(`document.getElementById('boardcount').textContent`)) === '3 selected' && (await ev(`document.querySelector('.bt[data-item=i9]').classList.contains('on')`)), 'back on the grid it shows');
+await tap('.bt[data-item=i59] .bt-pic');
+for (let i = 0; i < 40 && (await ev(`document.querySelector('.viewer-stage img').naturalHeight`)) !== 1406; i++) await sleep(100);
+ok((await ev(`document.querySelector('.viewer-stage img').naturalWidth`)) === 736, 'looking at one with its own thumbnail opens the whole picture');
+await shot('68b-viewer-tall');
+await tap('.viewer-x');
+await sleep(200);
+await tap('.boardview [data-act=closeboard]');
+await sleep(250);
+ok((await ev(`document.querySelector('.card[data-pos="0"] .opt-chosen').textContent`)).includes('Item 2, Item 5, Item 9'), 'and the card says what is picked');
+ok((await ev(`document.querySelectorAll('.card[data-pos="0"] .bp.on').length`)) === 3, 'with those first in its small pictures');
+await shot('69-board-card-picked');
+
+// Killed mid-selection, then opened again.
+const v3 = await rect('#table');
+await tapAt(v3.x, v3.top + v3.h * 0.5);
+await sleep(300);
+await tap('.bt[data-item=i1] .bt-tick');
+await crash();
+await go(APP);
+await sleep(400);
+const kept = await stateOf('deck:bp/boards');
+ok(kept.selections.board.join() === 'i1,i2,i5,i9', 'a selection survives the app being killed straight after a tick', JSON.stringify(kept.selections));
+await ev(`__riffle.showPack('bp')`);
+await sleep(200);
+await openDeckRow('Boards');
+ok((await deck()).top === 'board', 'and the deck is where it was');
+const v4 = await rect('#table');
+await tapAt(v4.x, v4.top + v4.h * 0.5);
+await sleep(400);
+ok((await ev(`document.querySelectorAll('.bt.on').length`)) === 4 && (await ev(`document.getElementById('boardcount').textContent`)) === '4 selected', 'its ticks are all still there');
+await tap('.bt[data-item=i1] .bt-tick');
+await sleep(120);
+ok((await ev(`document.querySelectorAll('.bt.on').length`)) === 3, 'and a tick comes off again');
+await tap('.boardview [data-act=closeboard]');
+await sleep(200);
+await ev('__riffle.current.sendDrafts()');
+await sleep(150);
+const dr = (await everyEvent()).filter(e => e.type === 'draft' && e.card === 'board').pop();
+ok(dr && dr.selected?.join() === 'i2,i5,i9', 'a half-finished selection goes out as a draft, like a comment', JSON.stringify(dr));
+
+// Writing while looking.
+await throwCard('up');
+await typeText('The fifth is too tall');
+await sleep(100);
+ok(await seenBox('.card[data-pos="0"] .opt-chosen'), 'the comment box shows what is picked');
+const small = await rect('.card[data-pos="0"] h2');
+await tapAt(small.x, small.y);
+await sleep(300);
+ok(await seenBox('.boardview .board-grid') && (await deck()).composing, 'tapping the small card opens the board, to look while writing');
+await tap('.boardview [data-act=closeboard]');
+await sleep(250);
+ok((await ev(`document.getElementById('comment').innerText`)) === 'The fifth is too tall' && await ev(`document.activeElement.id==='comment'`), 'and coming back keeps the words');
+await drag(190, 3);
+await sleep(300);
+let ansB = (await everyEvent()).filter(e => e.type === 'answer' && e.card === 'board').pop();
+ok(ansB.swipe === 'right' && ansB.selected.join() === 'i2,i5,i9' && ansB.comment === 'The fifth is too tall' && ansB.kind === 'board' && !ansB.byPick, 'a swipe sends the picks, in board order, with the comment', JSON.stringify(ansB));
+await tap('#undo');
+await sleep(300);
+ok((await deck()).top === 'board' && (await ev(`document.querySelectorAll('.card[data-pos="0"] .bp.on').length`)) === 3, 'Undo brings the picks back');
+await ev(`__riffle.current.s.drafts={}`);
+await throwCard('left');
+await sleep(300);
+ansB = (await everyEvent()).filter(e => e.type === 'answer' && e.card === 'board').pop();
+ok(ansB.swipe === 'left' && ansB.selected.join() === 'i2,i5,i9', 'workshop carries them too, as the direction to redo in', JSON.stringify(ansB));
+ok((await deck()).top === 'withpick', 'next, a board with my picks marked');
+const v5 = await rect('#table');
+await tapAt(v5.x, v5.top + v5.h * 0.5);
+await sleep(300);
+ok((await ev(`document.querySelectorAll('.bt-mine').length`)) === 2, 'they show on their tiles');
+await tap('.boardview [data-act=closeboard]');
+await sleep(200);
+ok(await seenBox('.card[data-pos="0"] .more-link'), 'a board with more to read has a link to it, as a tap opens the board');
+await tap('.card[data-pos="0"] .more-link');
+await sleep(450);
+ok((await deck()).flipped && (await ev(`document.querySelector('.card[data-pos="0"] .back-scroll').textContent`)).includes('A longer note'), 'and it flips the card');
+await tap('.card[data-pos="0"] .back-hint');
+await sleep(450);
+await throwCard('right');
+await sleep(300);
+ansB = (await everyEvent()).filter(e => e.type === 'answer' && e.card === 'withpick').pop();
+ok(ansB.selected.join() === 'i2,i3' && ansB.byPick === true, 'going with nothing ticked takes those', JSON.stringify(ansB));
+const plain = await deck();
+ok(plain.top === 'after', 'and a plain card after it works as ever');
+await throwCard('right');
+await sleep(300);
+ok((await deck()).answers.after?.swipe === 'right' && !('selected' in (await everyEvent()).filter(e => e.card === 'after').pop()), 'with nothing about picks on its answer');
+await sleep(600);
+console.log('Pictures on options');
+ok((await deck()).top === 'optpics', 'an option card with pictures is up');
+await tap('.card[data-pos="0"] .option[data-opt=b] img');
+await sleep(300);
+ok(await ev(`!!document.querySelector('.viewer')`) && (await ev(`document.querySelector('.viewer-words b').textContent`)) === 'Second', "tapping an option's picture opens it");
+ok((await ev(`document.querySelector('.viewer-tick span').textContent`)) === 'Select', 'and that tap selects nothing, on the card or here');
+ok((await ev(`document.querySelectorAll('.card[data-pos="0"] .option.on').length`)) === 0, 'not even the option under the finger');
+await tap('.viewer-tick');
+await sleep(120);
+await tap('.viewer-x');
+await sleep(200);
+ok((await ev(`document.querySelector('.card[data-pos="0"] .option[data-opt=b]').classList.contains('on')`)), 'it can be ticked from there');
+await tap('.card[data-pos="0"] .option[data-opt=a] .opt-text');
+await sleep(150);
+ok((await ev(`document.querySelectorAll('.card[data-pos="0"] .option.on').length`)) === 2, 'and the rest of an option ticks it, as ever');
+await throwCard('right');
+await sleep(300);
+ansB = (await everyEvent()).filter(e => e.type === 'answer' && e.card === 'optpics').pop();
+ok(ansB.selected.join() === 'a,b' && !ansB.byPick, 'a swipe sends them', JSON.stringify(ansB));
+await ev('__riffle.current.close()');
+for (const layout of LAYOUTS) {
+  await setStyle({ layout, look: 'plain' });
+  await ev(`__riffle.store.del('deck:bp/boards')`);
+  await ev(`__riffle.showPack('bp')`);
+  await sleep(200);
+  await openDeckRow('Boards');
+  await ev(`__riffle.current.jump('board')`);
+  await sleep(400);
+  await shot(`70-board-${layout}`);
+  const vL = await rect('#table');
+  await tapAt(vL.x, vL.top + vL.h * 0.5);
+  await sleep(350);
+  const grid = await ev(`(()=>{const g=document.querySelector('.board-grid').getBoundingClientRect();const b=document.querySelector('.board-bar .primary').getBoundingClientRect();const h=document.querySelector('.boardview .ov-head').getBoundingClientRect();return {n:document.querySelectorAll('.bt').length,gTop:g.top,bBottom:b.bottom,hTop:h.top}})()`);
+  ok(grid.n === 60 && grid.bBottom <= H - SAB && grid.hTop >= SAT - 2, `${layout}: the board's screen sits between the safe areas`, JSON.stringify(grid));
+  await tap('.bt[data-item=i1] .bt-pic');
+  await sleep(500);
+  const xb = await rect('.viewer-x');
+  ok(xb.top >= SAT && (await ev(`document.querySelector('.viewer-foot').getBoundingClientRect().bottom`)) === H, `${layout}: the picture opens, with the X clear of the clock`, JSON.stringify(xb));
+  await tap('.viewer-x');
+  await sleep(150);
+  await tap('.boardview [data-act=closeboard]');
+  await sleep(150);
+  await ev('__riffle.current.close()');
+}
+await setStyle({ layout: 'rows', look: 'plain' });
+
+console.log('A big pack stays quick');
+// 8 boards of 24 at realistic sizes, with every full picture already looked at, on a CPU 4 times slower.
+await ev(`(async()=>{
+  const F = __riffle.store.files;
+  const put = (path, data) => F.set(path, { path, sha: 'x', data });
+  await put('packs/big/pack.json', JSON.stringify({ title: 'Big pack', color: '#2f8fe0', topics: [{ id: 't', title: 'Boards' }] }));
+  for (let d = 0; d < 8; d++) {
+    const items = [];
+    for (let i = 0; i < 24; i++) {
+      const [image, thumb] = [\`img/d\${d}-\${i}.jpg\`, \`img/thumb/d\${d}-\${i}.jpg\`];
+      await put(\`packs/big/\${image}\`, new Blob([new Uint8Array(180000)], { type: 'image/jpeg' }));
+      await put(\`packs/big/\${thumb}\`, new Blob([new Uint8Array(30000)], { type: 'image/jpeg' }));
+      items.push({ id: \`i\${i}\`, label: \`Item \${i}\`, image, thumb });
+    }
+    await put(\`packs/big/decks/d\${d}.json\`, JSON.stringify({ topic: 't', title: \`Board \${d}\`, order: d, cards: [{ id: 'b', kind: 'board', title: 'Pick', text: 'Which?', items }] }));
+  }
+})()`);
+await send('Emulation.setCPUThrottlingRate', { rate: 4 });
+const timed = async code => ev(`(async()=>{const t=performance.now();await ${code};await new Promise(r=>requestAnimationFrame(()=>setTimeout(r)));return Math.round(performance.now()-t)})()`);
+const packMs = await timed(`__riffle.showPack('big')`);
+const everyMs = await timed(`__riffle.store.files.all()`);
+const wordsMs = await timed(`__riffle.store.files.words()`);
+console.log(`  (8 boards of 24 at a quarter speed: pack page ${packMs} ms. Reading words ${wordsMs} ms, against ${everyMs} ms for reading every file.)`);
+ok(packMs < 500, 'a pack with 8 boards of 24 opens quickly, on a slow phone too', String(packMs));
+await send('Emulation.setCPUThrottlingRate', { rate: 1 });
+await openDeckRow('Board 3');
+await sleep(400);
+ok((await deck()).top === 'b' && (await ev(`document.querySelectorAll('.card[data-pos="0"] .bp').length`)) >= 5, 'and a board in it opens');
+await ev('__riffle.current.close()');
+await sleep(100);
+await ev('__riffle.sync.pull()'); // the stand-in has never heard of that pack, so this clears it out
+ok(!(await ev(`__riffle.store.files.all()`)).some(f => f.path.startsWith('packs/big/')), 'and files a pack no longer has get cleared');
+await ev(`__riffle.showPack('test-pack')`);
+await sleep(200);
+await openDeckRow('Pulled deck');
+
 console.log('When sending fails, it says why');
 const failThen = async (code, message, expect) => {
   await api(`/__fail?code=${code}&message=${encodeURIComponent(message)}`);
@@ -1583,6 +2058,10 @@ const limitCards = [
   { id: 'o3', kind: 'options', rarity: 'legendary', title: 'Three', text: say(90), why: say(180), pick: 'a', details: 'More.', options: opts(3, 24, 80) },
   { id: 'o2', kind: 'options', title: 'Two', text: say(60), why: say(250), pick: 'a', options: opts(2, 30, 90) },
   { id: 'h', kind: 'question', rarity: 'epic', title: 'Handled', text: say(lim.text), handled: { how: say(300), at: '2026-01-01T00:00:00.000Z' } },
+  { id: 'nulls', kind: 'question', title: 'Nulls', text: say(60), why: say(60), pick: say(20), options: null, images: null, items: null, details: null, handled: null },
+  { id: 'nullopts', kind: 'options', title: 'Null options', text: say(60), why: say(60), pick: null, options: null, images: null },
+  { id: 'nullboard', kind: 'board', title: 'Null board', text: say(60), why: say(60), pick: null, items: null },
+  { id: 'b60', kind: 'board', title: 'Board', text: say(lim.text), why: say(lim.why), pick: ['x1'], items: Array.from({ length: 60 }, (_, i) => ({ id: `x${i + 1}`, label: `Item ${i + 1}`, image: `img/none-${i}.jpg` })) },
   { id: 'q-long', kind: 'question', rarity: 'rare', title: 'Long', text: say(160), why: say(480), pick: say(220), details: 'More.' },
   { id: 'long', kind: 'report', rarity: 'epic', title: 'Too long', text: say(lim.text), why: say(1400), details: 'The rest of it.' },
   { id: 'longo', kind: 'options', title: 'Too long', text: say(lim.text), why: say(900), pick: 'a', options: opts(4, 30, 60) },
