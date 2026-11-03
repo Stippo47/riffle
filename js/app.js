@@ -6,7 +6,7 @@ import { DEFAULT_DIRS, MEANING, confetti, esc, getDirs, icon, paintNotices, safe
 import * as store from './store.js';
 import * as sync from './sync.js';
 
-const VERSION = '0.3.1';
+const VERSION = '0.3.2';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -390,8 +390,8 @@ async function showPack(id, message = '') {
     const main = s.finished ? (s.verdict === 'replan' ? 'Sent back' : 'Done') : s.left ? `${s.left} left` : 'At the end';
     return `<button class="deckrow ${s.finished ? 'finished' : ''} ${inStack ? 'instack' : ''}" data-deck="${esc(d.id)}">
       <span class="art">${art}</span>
-      <span class="deckrow-title">${d.stack && !inStack ? '<small class="readfirst">Read first</small>' : ''}${esc(d.title)}</span>
-      <span class="deckrow-left">${main}${s.handled ? `<small class="handledcount"> · ${s.handled} handled</small>` : ''}</span>
+      <span class="deckrow-title">${d.stack && !inStack && !s.finished ? '<small class="readfirst">Read first</small>' : ''}${esc(d.title)}</span>
+      <span class="deckrow-left">${main}${s.handled ? `<small class="handledcount"><i> · </i>${s.handled} handled</small>` : ''}</span>
     </button>`;
   };
   const topicBlock = t => {

@@ -59,7 +59,7 @@ The word and icon sit at the edge of the card's area rather than the true edge o
 | Full screen | The card is the whole screen, so its importance colour fills the phone. Thin progress at the very top, and the row floats on the card's top edge | Big banners | Tall rows with a coloured edge |
 | Row under the card | Title line, the card, then the labelled buttons under it. The alternative to a top row, for thumb reach | List rows | One row per deck, under topic headings with icons |
 
-The Thoughts row sits at the top of a pack's page in all of them. A deck tile shows its topic's icon, and a Misc deck its pack's.
+The Thoughts row sits at the top of a pack's page in all of them. A deck tile shows its topic's icon, and a Misc deck its pack's. The first deck of a stack has a small "Read first" label, until it's done.
 
 In Full screen, a black band sits behind the phone's clock, because iPhones draw the clock in white and the card is light.
 
@@ -120,7 +120,7 @@ A row at the top of every pack's page, always there, needing no deck file. It is
 
 ## Details
 
-Up and down are swipes, so a card can't scroll. The face has a size limit, and tapping flips the card to its back: longer explanation, numbers and pictures, scrolling, with swipes off. If a card doesn't fit its face on a small phone, the type steps down.
+Up and down are swipes, so a card can't scroll. The face has a size limit, and tapping flips the card to its back: longer explanation, numbers and pictures, scrolling, with swipes off. If a card doesn't fit its face on a small phone, the type steps down. If it still doesn't fit, the end of its description is cut with a fade and "Tap to read the rest", and the whole of it is on the back, so no words are lost.
 
 ## Endings and rewards
 
@@ -162,4 +162,8 @@ On a local test server only: `?api=` points the app at a stand-in for GitHub, an
 
 ## Still to build
 
-Photos on comments, notes and thoughts; notifications; the writer's side (commands to make decks, shrink pictures, pick icons, read answers, mark cards handled, answer thoughts, deal cards back as second tries).
+Photos on comments, notes and thoughts; notifications.
+
+## The writer's side
+
+`skill/` holds a Claude Code skill, installed with `python skill/install.py`. It makes decks from files, with checks first; shrinks pictures; finds icons; reads answers; deals cards back; marks cards handled; answers thoughts; and lists what needs a second look. `skill/SKILL.md` has the commands. Its estimate of what fits the smallest iPhone is checked against real rendering in the app's tests, and must never be the optimist.

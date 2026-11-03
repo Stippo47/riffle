@@ -189,14 +189,20 @@ svg{display:block}
 [data-decks=tiles] .topic-head{margin-bottom:6px}
 [data-decks=tiles] .topic-title{font-size:18px}
 [data-decks=tiles] .topic:not(.cleared) .topic-count{display:none}
-[data-decks=tiles] .readfirst{display:none}
+/* Small, and out of the tile's flow, so it doesn't move anything. */
+[data-decks=tiles] .readfirst{position:absolute;left:2px;right:2px;top:4px;margin:0;font-family:var(--font);font-size:9.5px;font-weight:700;line-height:1.1;letter-spacing:.05em;color:var(--dim)}
+[data-look=inventory][data-decks=tiles] .readfirst{top:6px;color:#efefef}
+[data-look=table][data-decks=tiles] .readfirst{top:4px;color:#fff}
+[data-look=foil][data-decks=tiles] .readfirst{top:17px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.7)}
 [data-decks=tiles] .deckrows{grid-template-columns:repeat(3,minmax(0,1fr))}
 [data-decks=tiles] .deckrow{position:relative;flex-direction:column;align-items:center;justify-content:center;gap:0;text-align:center;min-height:118px;margin:0;padding:12px 6px;background:var(--tile-bg);color:var(--tile-ink);border-radius:var(--tile-radius);box-shadow:var(--tile-shadow)}
 [data-decks=tiles] .deckrow.instack{margin:0;width:100%}
 [data-decks=tiles] .deckrow .art{display:block;flex:none;width:40px;height:40px;color:var(--tile-art,var(--pc))}
 [data-decks=tiles] .deckrow-title{display:block;width:100%;font-family:var(--display);font-size:14px;font-weight:700;line-height:1.1;margin-top:8px;overflow-wrap:anywhere}
 [data-decks=tiles] .deckrow-left{font-size:12.5px;line-height:1.2;white-space:normal;color:inherit;opacity:.75;margin-top:3px}
-[data-decks=tiles] .handledcount{display:block}
+[data-decks=tiles] .handledcount{display:block;color:#2fd07c}
+[data-decks=tiles] .handledcount i{display:none}
+[data-look=paper][data-decks=tiles] .handledcount{color:#0d8146}
 [data-look=inventory][data-decks=tiles] .deckrow .art{filter:drop-shadow(2px 2px 0 #373737)}
 [data-look=inventory][data-decks=tiles] .deckrow-title{font-size:15px;font-weight:400}
 [data-look=inventory][data-decks=tiles] .deckrow-left{opacity:1;font-family:var(--font)}
@@ -298,8 +304,9 @@ svg{display:block}
 [data-layout=story] .deck:not(.composing):not(.ended) .back-hint{min-height:calc(var(--sab) + 46px);padding-bottom:var(--sab)}
 [data-layout=story] .deck:not(.composing):not(.ended) .card[data-pos="1"]{transform:none}
 [data-layout=story] .deck:not(.composing):not(.ended) .card[data-pos="2"]{display:none}
-[data-layout=story] .deck:not(.composing):not(.ended) .face h2{font-size:clamp(27px,8.4vw,34px);margin-top:18px}
-[data-layout=story] .deck:not(.composing):not(.ended) .why{font-size:clamp(17px,5vw,19px)}
+/* The big type gives way when a long card has to shrink to fit. */
+[data-layout=story] .deck:not(.composing):not(.ended) .card:not(.tight) .face h2:not(.q-small){font-size:clamp(27px,8.4vw,34px);margin-top:18px}
+[data-layout=story] .deck:not(.composing):not(.ended) .card:not(.tight) .why:not(.how){font-size:clamp(17px,5vw,19px)}
 
 /* The glow: at the edge the card is heading for, in the colour of what that means. */
 .glow{position:absolute;inset:0;opacity:0;pointer-events:none;z-index:31;--gc:var(--go);overflow:hidden;border-radius:var(--radius)}
@@ -553,6 +560,7 @@ canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:
 .tile-tick{display:inline-flex;width:15px;height:15px;margin-right:4px;vertical-align:-2px;color:#15803f}
 .tile-tick svg{width:100%;height:100%;fill:none;stroke:currentColor;stroke-width:3.2}
 .handledcount{font-size:12.5px;color:var(--go);font-weight:600}
+.handledcount i{font-style:normal}
 .bigcount{color:#b48cff;font-weight:600}
 [data-look=paper] .bigcount,[data-look=inventory] .bigcount{color:#6a2bd6}
 .readfirst{display:block;font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);margin-bottom:1px}
@@ -571,7 +579,6 @@ canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:
 .option.on .opt-tick{background:#15803f;box-shadow:none;color:#fff}
 .opt-chosen{font-size:14px;font-weight:600;margin-top:8px;color:var(--card-ink)}
 .tight .option{min-height:44px;padding-top:5px;padding-bottom:5px}
-.tighter .opt-text small{display:none}
 
 /* Thoughts */
 .thoughtsrow{display:flex;align-items:center;gap:12px;width:100%;min-height:58px;padding:9px 14px;margin:4px 0 2px;background:var(--row-bg);box-shadow:inset 0 0 0 1px var(--row-line);border-radius:var(--row-radius);text-align:left}
@@ -621,9 +628,13 @@ canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:
 .tighter .face h2{font-size:18px;margin:6px 0 5px}
 .tighter .why,.tighter .pick{font-size:13px}
 .tighter .face{padding:11px 14px 9px}
+/* Too long even so: the description gives way, and the whole of it is on the back. */
+.clipped .face>*{flex-shrink:0}
+.clipped .why{flex:0 1 auto;min-height:0;overflow:hidden;-webkit-mask-image:linear-gradient(#000 calc(100% - 22px),transparent);mask-image:linear-gradient(#000 calc(100% - 22px),transparent)}
+.deck.composing .clipped .why{flex:1 1 0;-webkit-mask-image:none;mask-image:none}
 
 @media (max-height:690px){
-  .face h2{font-size:21px;margin:10px 0 8px}
+  .face h2,.face h2.long{font-size:21px;margin:10px 0 8px}
   .why{font-size:14.5px}
   .pick{font-size:14.5px}
   .tools button{min-height:44px;font-size:11px}

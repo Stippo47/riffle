@@ -1,10 +1,11 @@
 // Drives the app in headless Edge with real touch input, against tests/serve.mjs and its stand-in for GitHub.
 // Run the server, then: node tests/e2e.mjs [folder for screenshots]
 // Runs at device scale 1: at scale 2 a screenshot re-sends a held touch at half its coordinates.
-import { spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = 9333, W = 390, H = 844, SAT = 59, SAB = 34;
@@ -174,6 +175,10 @@ ok(packB.art !== 'none' && packB.artW === 40, 'each with a big icon', JSON.strin
 ok(packB.topicArt === 'none' && packB.count === 'none', 'under plain topic headings', JSON.stringify(packB));
 ok(packB.thoughtsAbove, 'with the Thoughts row on top');
 ok(!packB.overflow, 'and no tile overflows');
+const readFirst = await ev(`(()=>{const t=[...document.querySelector('.deckrows').querySelectorAll('.deckrow')];const l=t[0].querySelector('.readfirst');const art=t.map(x=>Math.round(x.querySelector('.art').getBoundingClientRect().top));const r=l?l.getBoundingClientRect():null;const a=t[0].querySelector('.art').getBoundingClientRect();return {shown:!!l&&getComputedStyle(l).display!=='none',size:l?parseFloat(getComputedStyle(l).fontSize):0,clear:r?r.bottom<=a.top:false,inside:r?r.top>=t[0].getBoundingClientRect().top:false,text:l?l.textContent:'',art,others:t.slice(1).filter(x=>x.querySelector('.readfirst')).length}})()`);
+ok(readFirst.shown && readFirst.text === 'Read first' && readFirst.others === 0, 'the first deck of a stack says Read first', JSON.stringify(readFirst));
+ok(readFirst.size <= 11 && readFirst.clear && readFirst.inside, 'small, and clear of its icon', JSON.stringify(readFirst));
+ok(new Set(readFirst.art).size === 1 || Math.abs(readFirst.art[0] - readFirst.art[1]) <= 12, 'and it does not move the tile', JSON.stringify(readFirst));
 await shot('01b-decks');
 await ev('__riffle.showHome()');
 await sleep(150);
@@ -1370,6 +1375,65 @@ for (const layout of LAYOUTS) {
   })()`);
   ok(cutOff.length === 0, `${layout}: every card fits on a small iPhone`, JSON.stringify(cutOff));
 }
+console.log('Cards at the guide lengths, and past them');
+const skillPath = fileURLToPath(new URL('../skill/riffle.py', import.meta.url));
+const lim = Object.fromEntries([...readFileSync(skillPath, 'utf8').match(/^LIMITS = \{(.*)\}$/m)[1].matchAll(/'(\w+)': (\d+)/g)].map(m => [m[1], +m[2]]));
+const WORDS = 'the water in this cave would run out through every open edge and then rest until a player opens it again which keeps the game fast but makes old worlds behave a little differently for anyone who already built near the sea'.split(' ');
+const say = n => { let t = '', i = 0; while (t.length < n) t += (t ? ' ' : '') + WORDS[i++ % WORDS.length]; return t.slice(0, n).trim(); };
+const opts = (n, l, d) => 'abcd'.split('').slice(0, n).map(id => ({ id, label: say(l), ...(d ? { text: say(d) } : {}) }));
+const limitCards = [
+  ...['common', 'uncommon', 'rare', 'epic', 'legendary'].map(rarity => ({ id: `q-${rarity}`, kind: 'question', rarity, title: say(lim.title), text: say(lim.text), why: say(lim.why), pick: say(lim.pick), details: 'More.' })),
+  { id: 'r', kind: 'report', title: say(lim.title), text: say(lim.text), why: say(lim.why), details: 'More.' },
+  { id: 'o4', kind: 'options', title: 'Four', text: say(80), why: say(120), pick: 'a', options: opts(4, 30, 60) },
+  { id: 'o4b', kind: 'options', title: 'Four, long', text: say(lim.text), why: say(200), pick: 'a', options: opts(4, 30, 70) },
+  { id: 'o3', kind: 'options', rarity: 'legendary', title: 'Three', text: say(90), why: say(180), pick: 'a', details: 'More.', options: opts(3, 24, 80) },
+  { id: 'o2', kind: 'options', title: 'Two', text: say(60), why: say(250), pick: 'a', options: opts(2, 30, 90) },
+  { id: 'h', kind: 'question', rarity: 'epic', title: 'Handled', text: say(lim.text), handled: { how: say(300), at: '2026-01-01T00:00:00.000Z' } },
+  { id: 'q-long', kind: 'question', rarity: 'rare', title: 'Long', text: say(160), why: say(480), pick: say(220), details: 'More.' },
+  { id: 'long', kind: 'report', rarity: 'epic', title: 'Too long', text: say(lim.text), why: say(1400), details: 'The rest of it.' },
+  { id: 'longo', kind: 'options', title: 'Too long', text: say(lim.text), why: say(900), pick: 'a', options: opts(4, 30, 60) },
+];
+await fetch(`${API}/__put?path=${encodeURIComponent('packs/test-pack/decks/limits.json')}`, { method: 'POST', body: JSON.stringify({ topic: 't1', title: 'Limits', cards: limitCards }) });
+await ev('__riffle.sync.pull()');
+await sleep(300);
+const limitFile = join(mkdtempSync(join(tmpdir(), 'riffle-limits-')), 'limits.json');
+writeFileSync(limitFile, JSON.stringify({ title: 'Limits', cards: limitCards }));
+const said = JSON.parse(execFileSync('python', [skillPath, 'fit', limitFile, '--json']).toString());
+for (const layout of LAYOUTS) {
+  await setStyle({ layout, look: 'plain' });
+  await ev(`__riffle.store.del('deck:test-pack/limits')`);
+  await ev(`__riffle.showPack('test-pack')`);
+  await sleep(200);
+  await openDeckRow('Limits');
+  // Dealt the normal way, one card after another, so a card hidden in the stack gets fitted too.
+  const seen = await ev(`(async()=>{const c=__riffle.current;const out={};for(let i=0;i<c.deck.cards.length;i++){await new Promise(r=>setTimeout(r,30));const n=c.topNode();const f=n.querySelector('.face');const box=f.getBoundingClientRect();const fade=n.classList.contains('clipped');const pick=f.querySelector('.pick');const more=f.querySelector('.more');out[c.topId()]={over:f.scrollHeight-f.clientHeight,step:fade?3:n.classList.contains('tighter')?2:n.classList.contains('tight')?1:0,more:more.hidden?'':more.textContent,pickInside:!pick||pick.getBoundingClientRect().bottom<=box.bottom+1,optInside:[...f.querySelectorAll('.option')].every(o=>o.getBoundingClientRect().bottom<=box.bottom+1),small:[...f.querySelectorAll('.opt-text small')].every(x=>getComputedStyle(x).display!=='none')};c.commit('down')}c.close();return out})()`);
+  const cut = Object.entries(seen).filter(([, v]) => v.over > 1).map(([k, v]) => `${k} +${v.over}`);
+  ok(cut.length === 0, `${layout}: no card is cut off at its bottom edge`, JSON.stringify(cut));
+  const atGuide = ['q-common', 'q-uncommon', 'q-rare', 'q-epic', 'q-legendary', 'r', 'o4', 'o2', 'h'].filter(k => seen[k].step === 3);
+  ok(atGuide.length === 0, `${layout}: cards at the guide lengths keep all their words on the face`, JSON.stringify(atGuide));
+  ok(Object.values(seen).every(v => v.small), `${layout}: no option ever loses its description`);
+  ok(seen.long.step === 3 && seen.long.more === 'Tap to read the rest', `${layout}: a card far too long fades its description and says so`, JSON.stringify(seen.long));
+  ok(Object.values(seen).every(v => v.pickInside && v.optInside), `${layout}: the pick and the options always stay on the card`, JSON.stringify(seen));
+  // Only the steps it warns about matter. Full screen's larger type can step down once more, harmlessly.
+  const optimist = Object.entries(seen).filter(([k, v]) => Math.max(v.step, 1) > Math.max(said[k], 1)).map(([k, v]) => `${k} really ${v.step}, said ${said[k]}`);
+  ok(optimist.length === 0, `${layout}: the skill's estimate is never the optimist`, JSON.stringify(optimist));
+}
+await ev(`__riffle.store.del('deck:test-pack/limits')`);
+await ev(`__riffle.showPack('test-pack')`);
+await sleep(200);
+await openDeckRow('Limits');
+await ev(`__riffle.current.jump('long')`);
+await sleep(200);
+const lng = await rect('#table');
+await tapAt(lng.x, lng.top + lng.h * 0.4);
+await sleep(500);
+ok((await deck()).flipped && (await ev(`document.querySelector('.card[data-pos="0"] .back-why').textContent`)).length > 1300 && await seenBox('.card[data-pos="0"] .back-why'), 'tapping it shows the whole description on the back');
+await shot('49-clipped-back');
+await tap('.card[data-pos="0"] .back-hint');
+await sleep(400);
+await shot('50-clipped-front');
+await ev('__riffle.current.close()');
+
 await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: true });
 await setStyle({ layout: 'rows', look: 'plain' });
 

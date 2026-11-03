@@ -111,7 +111,7 @@ createServer(async (req, res) => {
     return;
   }
   if (url.pathname === '/__put') { // adds or changes one file
-    files.set(url.searchParams.get('path'), body);
+    files.set(url.searchParams.get('path'), url.searchParams.get('bin') ? Buffer.concat(chunks) : body);
     send(200, { files: files.size });
     return;
   }

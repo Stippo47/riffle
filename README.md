@@ -7,6 +7,7 @@ This repo is only the app. Packs, decks and answers live in a separate private r
 - [docs/spec.md](docs/spec.md): how it behaves
 - [docs/format.md](docs/format.md): the file format for decks and answers
 - [CREDITS.md](CREDITS.md): icons
+- [skill/SKILL.md](skill/SKILL.md): the writer's side, as a Claude Code skill. Install it with `python skill/install.py`
 
 ## Running it locally
 
@@ -21,6 +22,8 @@ The app is then at `http://localhost:8787/?api=http://localhost:8788`. With that
 ```
 node tests/e2e.mjs
 ```
+
+These need nothing running: `python tests/skill_test.py` tries the writer's commands on a throwaway git repo, and `node tests/push.mjs` checks the notification sending.
 
 ## Changing it
 

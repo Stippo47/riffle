@@ -64,6 +64,8 @@ answers/<time>-<random>.json
 - **rarity:** `common`, `uncommon`, `rare`, `epic` or `legendary`.
 - **title:** short, for the overview grid.
 
+A card's face reads at a glance, so as a guide: `title` 26 characters, `text` 110, `why` 300, `pick` 150, and a handled card's `how` 300. Anything longer goes in `details`, which has no limit. What fits depends on the whole card: `riffle check` estimates it on the smallest iPhone and warns. If a card still doesn't fit, the app cuts the end of its description, with a fade, and puts the whole of it on the back.
+
 **Never name a direction on a card.** People can swap what each way of swiping does, so "swipe right" may be wrong for them. Say "add a comment", or say nothing.
 
 ### Option cards
@@ -82,7 +84,7 @@ answers/<time>-<random>.json
 }
 ```
 
-`pick` is the id of the writer's marked option, and can be left out. Keep to four options or fewer with short labels, so they fit the card.
+`pick` is the id of the writer's marked option, and can be left out. Up to four options.
 
 ### Handled cards
 

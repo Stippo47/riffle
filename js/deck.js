@@ -14,13 +14,22 @@ export const thoughtsKey = pack => `thoughts:${pack.id}`;
 const DEMO_ID = 'feel-test';
 const DRAFT_SEND_AFTER = 5000;
 
-// Steps the type down if a card doesn't fit its face, so nothing gets cut off on a small phone.
+// Steps the type down if a card doesn't fit its face on a small phone. If it still doesn't, the
+// description is cut with a fade and the whole of it moves to the back, so no words are ever lost.
+// It can run again: a card hidden in the stack measures nothing until it comes into view.
 function fit(node) {
   const face = node.querySelector('.face');
+  const fits = () => face.scrollHeight <= face.clientHeight;
   for (const step of ['tight', 'tighter']) {
-    if (face.scrollHeight <= face.clientHeight) return;
+    if (fits()) return;
     node.classList.add(step);
   }
+  if (fits()) return;
+  node.classList.add('clipped');
+  const more = node.querySelector('.more');
+  more.hidden = false;
+  more.textContent = 'Tap to read the rest';
+  node.querySelector('.back-why').hidden = false;
 }
 
 // Which cards at which versions a verdict was given on. If that changes, the verdict no longer holds.
@@ -215,12 +224,13 @@ export function cardHTML(card, images = () => null, fill = t => t) {
         ${pick && !options && !card.handled ? `<div class="pick"><b>${esc(kind.pickLabel || 'My pick')}</b>${esc(pick)}</div>` : '<div class="pickgap"></div>'}
         <button class="attached" data-act="opencomment" hidden>${icon('message-square-text')}<span></span></button>
         ${breaks ? `<div class="holdline">Hold ${esc(physicalOf('right'))} to break through</div>` : ''}
-        ${hasMore ? `<div class="more">Tap for ${esc(moreText)}</div>` : ''}
+        <div class="more"${hasMore ? '' : ' hidden'}>${hasMore ? `Tap for ${esc(moreText)}` : ''}</div>
         <div class="stamp"></div>
       </div>
       <div class="back">
         <div class="back-scroll">
           <h3>${esc(card.title || text)}</h3>
+          <p class="back-why" hidden>${esc(card.handled ? fill(card.handled.how || '') : why)}</p>
           ${pics.map(src => `<img src="${esc(src)}" alt="">`).join('')}
           ${paras(fill(card.details || ''))}
         </div>
@@ -443,6 +453,7 @@ export class DeckView {
       }
       n.dataset.pos = i;
       n.style.zIndex = 10 - i;
+      if (i < 2) fit(n);
     });
     this.table.style.setProperty('--rise', 0);
     this.glow.style.opacity = 0;
@@ -758,7 +769,7 @@ export class DeckView {
       return;
     }
     const c = this.cards.get(id);
-    if (c.details || (c.images || []).length) this.flip(true);
+    if (c.details || (c.images || []).length || this.topNode().classList.contains('clipped')) this.flip(true);
     else {
       const top = this.topNode();
       top.animate && top.animate(
