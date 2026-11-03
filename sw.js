@@ -1,6 +1,6 @@
 // Keeps the whole app on the phone, so it opens with no signal. Each release gets its own cache:
 // change VERSION when anything here changes, and the phone moves to the new set in one step.
-const VERSION = '0.4.0';
+const VERSION = '0.4.1';
 const CACHE = `riffle-${VERSION}`;
 const FILES = [
   './',

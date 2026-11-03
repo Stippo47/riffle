@@ -8,7 +8,7 @@ import * as sync from './sync.js';
 import * as push from './push.js';
 import { countWords } from './photos.js';
 
-const VERSION = '0.4.0';
+const VERSION = '0.4.1';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -218,6 +218,10 @@ function registerWorker() {
         if (w.state === 'activated' && hadOne) markUpdate();
       });
     });
+    // Ask outright, on every open and every return. Phones can otherwise be slow to notice a new release.
+    const check = () => reg.update().catch(() => {});
+    check();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
   }).catch(() => {});
 }
 
