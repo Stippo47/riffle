@@ -5,8 +5,10 @@ import { ThoughtsView, thoughtCount } from './thoughts.js';
 import { DEFAULT_DIRS, MEANING, confetti, esc, getDirs, icon, paintNotices, safeIcon, setDirs, setNotice, tick } from './ui.js';
 import * as store from './store.js';
 import * as sync from './sync.js';
+import * as push from './push.js';
+import { countWords } from './photos.js';
 
-const VERSION = '0.3.2';
+const VERSION = '0.4.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -307,7 +309,9 @@ function statusLine(st, left) {
   if (st.problem) return st.problem;
   if (updateReady) return 'New version ready. Tap here to load it.';
   if (!st.connected) return st.waiting ? `${st.waiting} answer${st.waiting === 1 ? '' : 's'} kept on this phone. Connect to send them.` : 'Not connected yet. The Feel test works without it.';
+  if (st.photoProblem) return st.photoProblem;
   if (st.waiting) return `${st.waiting} waiting to send${st.noSignal ? ', when there is signal' : ''}.`;
+  if (st.photosWaiting) return `${countWords(st.photosWaiting)} waiting to send.`;
   return left ? `Everything sent. ${left} card${left === 1 ? '' : 's'} waiting.` : 'Everything sent. Nothing waiting.';
 }
 
@@ -320,7 +324,7 @@ async function refreshStatusLine() {
   if (!again) return;
   const st = sync.status();
   again.textContent = statusLine(st, left);
-  const bad = st.problem || store.troubleNow();
+  const bad = st.problem || st.photoProblem || store.troubleNow();
   again.classList.toggle('is-problem', !!bad);
   again.onclick = bad ? showSettings : updateReady ? () => location.reload() : null;
 }
@@ -330,9 +334,11 @@ async function showHome() {
   render = showHome;
   const packs = await library();
   const rows = [];
+  let owed = 0;
   for (const p of packs) {
     const sums = await summaries(p);
     const all = [...sums.values()];
+    if (!p.demo) owed += packLeft(sums);
     rows.push({
       p, left: packLeft(sums),
       count: all.reduce((n, s) => n + s.total, 0),
@@ -362,6 +368,7 @@ async function showHome() {
     </div>`;
   app.querySelectorAll('[data-pack]').forEach(b => { b.onclick = () => showPack(b.dataset.pack); });
   app.querySelector('[data-go=settings]').onclick = showSettings;
+  push.setBadge(owed).catch(() => {});
   await refreshStatusLine();
 }
 
@@ -444,7 +451,7 @@ async function feelWords(pack) {
   return { live, old, states };
 }
 
-const wordsAsText = ({ live, old }) => [...live, ...old].map(w => `${w.where}\n${w.text}`).join('\n\n');
+const wordsAsText = ({ live, old }) => [...live, ...old].map(w => `${w.where}\n${[w.text, (w.pics || []).length ? `(${countWords(w.pics.length)})` : ''].filter(Boolean).join(' ')}`).join('\n\n');
 
 function sendUnsent(pack, { live, states }) {
   for (const d of pack.decks) {
@@ -475,7 +482,7 @@ async function drawFeelWords(pack, confirming = false) {
   const words = await feelWords(pack);
   const unsent = words.live.filter(w => !w.sent);
   const swipes = [...words.states.values()].reduce((n, s) => n + Object.keys(s.answers || {}).length, 0);
-  const row = w => `<div class="word"><small>${esc(w.where)}</small><span>${esc(w.text)}</span><em class="${w.sent ? 'sent' : ''}">${w.sent ? 'Sent' : 'Not sent yet'}</em></div>`;
+  const row = w => `<div class="word"><small>${esc(w.where)}</small><span>${esc([w.text, (w.pics || []).length ? `(${countWords(w.pics.length)})` : ''].filter(Boolean).join(' '))}</span><em class="${w.sent ? 'sent' : ''}">${w.sent ? 'Sent' : 'Not sent yet'}</em></div>`;
   const count = words.live.length;
   host.innerHTML = `
     <div class="demo-note">Anything you type here gets sent, tagged as a test. Swipes with no words stay on this phone.</div>
@@ -593,7 +600,9 @@ function sendingText(st) {
   else parts.push('Not connected yet.');
   if (st.waiting) parts.push(`${st.waiting} waiting to send.`);
   if (st.connected && !st.waiting) parts.push('Nothing waiting.');
-  if (st.sentAt) parts.push(`${st.sentCount} sent so far (last at ${new Date(st.sentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })})`);
+  if (st.photosWaiting) parts.push(`${countWords(st.photosWaiting)} waiting to send.`);
+  if (st.sentAt) parts.push(`${st.sentCount} sent so far (last at ${new Date(st.sentAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}).`);
+  if (st.readAt) parts.push(`Last read by the writer (${new Date(st.readAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}).`);
   return parts.join(' ');
 }
 
@@ -614,6 +623,7 @@ async function showSettings() {
       <div class="set-text" id="sendtext">${esc(sendingText(st))}</div>
       ${store.troubleNow() ? `<div class="set-text problem" id="saveproblem">${esc(troubleWords(store.troubleNow()))}</div>` : ''}
       ${st.problem ? `<div class="set-text problem" id="sendproblem">${esc(st.problem)}</div>` : ''}
+      ${st.photoProblem ? `<div class="set-text problem" id="photoproblem">${esc(st.photoProblem)}</div>` : ''}
       ${!st.problem && st.lastTry ? `<div class="set-text small" id="lasttry">${esc(st.lastTry)}</div>` : ''}
       ${st.pullProblem ? `<div class="set-text problem">${esc(st.pullProblem)}</div>` : ''}
       ${st.connected
@@ -624,6 +634,9 @@ async function showSettings() {
            <div class="set-text small" id="sendresult"></div>
            <button class="ghostbtn" data-go="disconnect">Disconnect</button>`
         : `<button class="primary" data-go="connect">${icon('link')}Connect</button>`}
+      <div class="set-title">Notifications</div>
+      <div class="set-text" id="notifytext"></div>
+      <button class="secondary" id="notifybtn" hidden></button>
       <div class="set-title">On this phone</div>
       <div class="set-text small" id="storageline"></div>
       <div class="set-title">Credits</div>
@@ -637,6 +650,7 @@ async function showSettings() {
       : yes ? 'This browser has promised to keep what Riffle saves here.'
       : "This browser hasn't promised to keep what Riffle saves here. It can clear it if space runs low. Adding Riffle to the Home Screen helps.";
   });
+  drawNotify();
   app.querySelector('[data-go=home]').onclick = showHome;
   app.querySelector('[data-go=style]').onclick = showStyle;
   app.querySelector('[data-go=dirs]').onclick = showDirections;
@@ -661,6 +675,26 @@ async function showSettings() {
     if (again && !sync.status().pullProblem) again.textContent = 'Checked. You have the latest decks.';
   });
   on('disconnect', async () => { await sync.disconnect(); showSettings(); });
+}
+
+// Permission is asked only from this button, and it's also the off switch.
+async function drawNotify(message = '') {
+  const text = document.getElementById('notifytext'), btn = document.getElementById('notifybtn');
+  if (!text) return;
+  if (!push.supported()) {
+    text.textContent = isIOS ? 'These only work from the Home Screen icon, on iOS 16.4 or newer.' : "This browser can't do these.";
+    return;
+  }
+  const on = await push.isOn();
+  text.textContent = message || (on ? 'On. You get one when a new deck is ready.' : 'Off. Turn them on to hear when a new deck is ready.');
+  btn.hidden = false;
+  btn.disabled = false;
+  btn.textContent = on ? 'Turn off' : 'Turn on';
+  btn.onclick = async () => {
+    btn.disabled = true;
+    const r = await (on ? push.turnOff() : push.turnOn()).catch(e => ({ message: `That didn't work: ${e.message}` }));
+    drawNotify(r.message);
+  };
 }
 
 function showConnect() {
@@ -704,7 +738,7 @@ function showConnect() {
 // The one thing that runs when the app is hidden or closing: save and queue everything, then send.
 function onHide() {
   const saved = current ? current.secure() : Promise.resolve();
-  Promise.resolve(saved).catch(() => {}).finally(() => sync.flush({ hide: true }));
+  Promise.resolve(saved).catch(() => {}).finally(() => { sync.flush({ hide: true }); sync.flushPhotos(); });
 }
 
 async function start() {
@@ -731,6 +765,7 @@ async function start() {
   pullNow = await sync.start(() => render());
   refreshNotice();
   registerWorker();
+  push.refresh().catch(() => {});
 }
 
 start();

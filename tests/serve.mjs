@@ -62,6 +62,9 @@ const startFiles = [
       { id: 'o3', kind: 'options', title: 'No pick', text: 'No pick marked here.', options: [{ id: 'a', label: 'First' }, { id: 'b', label: 'Second' }] },
     ],
   })],
+  ['packs/test-pack/decks/p1.json', JSON.stringify({
+    topic: 't1', title: 'Photo deck', cards: ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map(id => ({ id, kind: 'question', title: id.toUpperCase(), text: `Card ${id}.`, pick: 'Yes.' })),
+  })],
   ['packs/test-pack/decks/s1.json', JSON.stringify({
     topic: 't1', title: 'Start over deck', cards: [
       { id: 's0', kind: 'question', title: 'One', text: 'First card.', pick: 'Yes.' },
@@ -74,6 +77,8 @@ const files = new Map(startFiles);
 const shaOf = path => createHash('sha1').update(path + files.get(path)).digest('hex');
 let down = false;
 let fail = null;
+let failImg = 0;
+let slowImg = 0;
 let writes = 0;
 
 createServer(async (req, res) => {
@@ -97,6 +102,8 @@ createServer(async (req, res) => {
   if (url.pathname === '/__file') { send(200, files.get(url.searchParams.get('path')) ?? 'null'); return; }
   if (url.pathname === '/__writes') { send(200, { writes }); return; }
   if (url.pathname === '/__down') { down = url.searchParams.get('on') === '1'; send(200, { down }); return; }
+  if (url.pathname === '/__failimg') { failImg = +url.searchParams.get('code'); send(200, { failImg }); return; }
+  if (url.pathname === '/__slowimg') { slowImg = +url.searchParams.get('ms'); send(200, { slowImg }); return; }
   if (url.pathname === '/__fail') { // makes every write refused with this status and message
     const code = +url.searchParams.get('code');
     fail = code ? { code, message: url.searchParams.get('message') || 'Refused' } : null;
@@ -106,7 +113,7 @@ createServer(async (req, res) => {
   if (url.pathname === '/__reset') { // back to how it started
     files.clear();
     for (const [k, v] of startFiles) files.set(k, v);
-    down = false; fail = null; writes = 0;
+    down = false; fail = null; writes = 0; failImg = 0; slowImg = 0;
     send(200, { files: files.size });
     return;
   }
@@ -151,6 +158,15 @@ createServer(async (req, res) => {
     if (fail) { send(fail.code, { message: fail.message }); return; }
     const path = decodeURIComponent(url.pathname.slice(`${REPO}/contents/`.length));
     const { content } = JSON.parse(body);
+    if (files.has(path)) { send(422, { message: '"sha" wasn\'t supplied.' }); return; } // as GitHub does
+    if (path.startsWith('answers/img/')) {
+      if (slowImg) await new Promise(r => setTimeout(r, slowImg));
+      if (failImg) { send(failImg, { message: 'Refused the picture' }); return; }
+      files.set(path, Buffer.from(content, 'base64'));
+      writes++;
+      send(201, { content: { path } });
+      return;
+    }
     files.set(path, Buffer.from(content, 'base64').toString());
     writes++;
     send(201, { content: { path } });

@@ -201,6 +201,10 @@ ok('REPLAN FROM THE BASE' in out and 'c (A title): IDK' in out, 'new ones show a
 ok('still writing' not in out, 'an answer replaces its draft', out)
 code, out = run('status', '--pack', 'proj')
 ok('first / first: 1 of 3 owed' in out and 'replan' in out, 'status counts what is owed', out)
+phone_sends('2026-11-02T12-01-30-000Z-pic.json',
+            {'eid': 'p1', 'at': '2026-11-02T12:01:30.000Z', 'type': 'notes', 'text': 'With a picture', 'images': ['answers/img/nope.jpg']})
+code, out = run('answers', '--pack', 'proj')
+ok('answers/img/nope.jpg (still uploading)' in out, 'pictures are listed, and one not arrived yet says so', out)
 
 print('Dealing back')
 code, out = run('redeal', '--pack', 'proj')

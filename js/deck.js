@@ -4,7 +4,8 @@
 import { TUNE, decide, dominant, progress, track } from './gesture.js';
 import { clamp, dragToClose, esc, fillDirs, icon, kindOf, logicalOf, MARK_ICON, padBlur, padFocus, padHTML, padReady, padSet, paintNotices, paras, physicalOf, plainSlot, RARITY, stampWord, tick } from './ui.js';
 import * as store from './store.js';
-import { enqueue, newId } from './sync.js';
+import { enqueue, newId, photoPath } from './sync.js';
+import { countWords, discardPhoto, drawStrip, photoButton, savePhoto, stripError } from './photos.js';
 
 const DIRS = ['right', 'left', 'down', 'up'];
 const UNIT = { right: [1, 0], left: [-1, 0], up: [0, -1], down: [0, 1] };
@@ -13,6 +14,9 @@ export const deckKey = (pack, deck) => `deck:${pack.id}/${deck.id}`;
 export const thoughtsKey = pack => `thoughts:${pack.id}`;
 const DEMO_ID = 'feel-test';
 const DRAFT_SEND_AFTER = 5000;
+// What a word was when it went, pictures included, so a change means it hasn't.
+const mark = (text, pics) => ((pics || []).length ? `${text || ''}|${pics.join()}` : text || '');
+const withPictures = pics => ((pics || []).length ? { images: pics.map(photoPath) } : {});
 
 // Steps the type down if a card doesn't fit its face on a small phone. If it still doesn't, the
 // description is cut with a fade and the whole of it moves to the back, so no words are ever lost.
@@ -62,7 +66,7 @@ export function deckSummary(deck, s) {
 }
 
 function fresh(deck) {
-  return { order: deck.cards.map(c => c.id), answers: {}, log: [], notes: '', drafts: {}, draftsSent: {}, wordsSent: {}, selections: {}, handledSkipped: {}, reviewing: null, verdict: null, startedAt: Date.now() };
+  return { order: deck.cards.map(c => c.id), answers: {}, log: [], notes: '', drafts: {}, draftsSent: {}, wordsSent: {}, draftPhotos: {}, notesPhotos: [], notesPhotosSent: [], selections: {}, handledSkipped: {}, reviewing: null, verdict: null, startedAt: Date.now() };
 }
 
 // Owed cards first, handled ones after, each keeping its order. A card being looked at stays on top.
@@ -138,13 +142,16 @@ export function wordsIn(deck, s) {
     return c ? c.title || c.text : id;
   };
   const out = [];
+  const photos = s.draftPhotos || {};
   for (const [card, a] of Object.entries(s.answers || {})) {
-    if (a.comment) out.push({ kind: 'comment', key: `c:${card}`, card, where: `${deck.title}: ${titleOf(card)}`, text: a.comment, sent: sent[`c:${card}`] === a.comment, answer: a });
+    if (a.comment || (a.photos || []).length) out.push({ kind: 'comment', key: `c:${card}`, card, where: `${deck.title}: ${titleOf(card)}`, text: a.comment || '', pics: a.photos || [], sent: sent[`c:${card}`] === mark(a.comment, a.photos), answer: a });
   }
-  for (const [card, text] of Object.entries(s.drafts || {})) {
-    if (text) out.push({ kind: 'draft', key: `d:${card}`, card, where: `${deck.title}: ${titleOf(card)} (not swiped yet)`, text, sent: sent[`d:${card}`] === text });
+  for (const card of new Set([...Object.keys(s.drafts || {}), ...Object.keys(photos)])) {
+    const text = (s.drafts || {})[card] || '', pics = photos[card] || [];
+    if (text || pics.length) out.push({ kind: 'draft', key: `d:${card}`, card, where: `${deck.title}: ${titleOf(card)} (not swiped yet)`, text, pics, sent: sent[`d:${card}`] === mark(text, pics) });
   }
-  if (s.notes) out.push({ kind: 'notes', key: 'n', where: `${deck.title}: notes`, text: s.notes, sent: sent.n === s.notes });
+  const notePics = s.notesPhotos || [];
+  if (s.notes || notePics.length) out.push({ kind: 'notes', key: 'n', where: `${deck.title}: notes`, text: s.notes || '', pics: notePics, sent: sent.n === mark(s.notes, notePics) });
   return out;
 }
 
@@ -155,17 +162,18 @@ export function sendWords(pack, deck, s, words) {
   for (const w of words) {
     if (w.sent) continue;
     if (w.kind === 'notes') {
-      enqueue({ ...base, type: 'notes', text: w.text });
+      enqueue({ ...base, type: 'notes', text: w.text, ...withPictures(w.pics) });
       s.notesSent = w.text;
+      s.notesPhotosSent = w.pics;
     } else if (w.kind === 'draft') {
-      enqueue({ ...base, type: 'draft', card: w.card, text: w.text });
+      enqueue({ ...base, type: 'draft', card: w.card, text: w.text, ...withPictures(w.pics) });
       s.draftsSent = s.draftsSent || {};
       s.draftsSent[w.card] = w.text;
     } else {
       const c = deck.cards.find(x => x.id === w.card) || { id: w.card };
-      enqueue({ ...base, type: 'answer', card: w.card, cardVersion: c.version || 1, title: c.title || '', kind: c.kind || 'question', swipe: w.answer.swipe, stamp: stampWord(c, w.answer.swipe), comment: w.text });
+      enqueue({ ...base, type: 'answer', card: w.card, cardVersion: c.version || 1, title: c.title || '', kind: c.kind || 'question', swipe: w.answer.swipe, stamp: stampWord(c, w.answer.swipe), comment: w.text, ...withPictures(w.pics) });
     }
-    s.wordsSent[w.key] = w.text;
+    s.wordsSent[w.key] = mark(w.text, w.pics);
   }
 }
 
@@ -173,7 +181,7 @@ export function sendWords(pack, deck, s, words) {
 export async function archiveWords(words) {
   if (!words.length) return;
   const old = (await store.get('feel-archive').catch(() => null)) || [];
-  await store.set('feel-archive', [...words.map(w => ({ where: w.where, text: w.text })), ...old]);
+  await store.set('feel-archive', [...words.map(w => ({ where: w.where, text: w.text, pics: w.pics })), ...old]);
 }
 
 // The parts of the screen that every layout rearranges. The Style screen's preview uses them too.
@@ -258,6 +266,9 @@ export class DeckView {
     this.s = (await store.get(this.key)) || fresh(this.deck);
     this.s.draftsSent = this.s.draftsSent || {};
     this.s.wordsSent = this.s.wordsSent || {};
+    this.s.draftPhotos = this.s.draftPhotos || {};
+    this.s.notesPhotos = this.s.notesPhotos || [];
+    this.s.notesPhotosSent = this.s.notesPhotosSent || [];
     reconcile(this.s, this.deck);
     this.render();
     this.deal();
@@ -266,13 +277,14 @@ export class DeckView {
 
   close() {
     this.untrack && this.untrack();
+    this.sendNotes(true);
     this.secure();
   }
 
   // Everything goes safe: notes and drafts into the queue, the deck's state saved. Runs when the
   // app is hidden, and on leaving a deck.
   secure() {
-    this.sendNotes();
+    this.sendNotes(false);
     this.sendDrafts();
     return this.saveNow();
   }
@@ -327,10 +339,10 @@ export class DeckView {
           ${markHTML()}
           <div class="endbox" id="end" hidden></div>
         </div>
-        <div class="composer" id="composer" hidden>${padHTML('comment', 'Your comment. Drag down to close.')}</div>
+        <div class="composer" id="composer" hidden><div class="padwrap">${padHTML('comment', 'Your comment. Drag down to close.')}<div class="photostrip" id="commentphotos" hidden></div>${photoButton('comment')}</div></div>
         <div class="notes-sheet" id="notes" hidden>
           <button class="sheet-head" data-act="closenotes"><i class="grabber"></i><span>Notes on this deck</span></button>
-          ${padHTML('notestext', "Anything that doesn't fit a card. Drag down to close.")}
+          <div class="padwrap">${padHTML('notestext', "Anything that doesn't fit a card. Drag down to close.")}<div class="photostrip" id="notesphotos" hidden></div>${photoButton('notes')}</div>
         </div>
       </div>
       <div class="overview" id="overview" hidden></div>`;
@@ -342,6 +354,7 @@ export class DeckView {
     });
     padSet(this.notesText, this.s.notes || '');
 
+    this.host.onchange = e => { if (e.target.matches('[data-photo]')) this.addPhoto(e.target); };
     this.host.onclick = e => {
       const b = e.target.closest('[data-act]');
       if (!b || b.disabled) return;
@@ -411,6 +424,7 @@ export class DeckView {
       done: () => this.verdict('done'),
       replan: () => this.verdict('replan'),
       opencomment: () => this.openComposer(),
+      rmphoto: () => this.dropPhoto(btn.dataset.photoId, btn.dataset.where),
       keepgoing: () => this.deal(),
     }[name];
     go && go();
@@ -494,14 +508,16 @@ export class DeckView {
   }
 
   draft(id = this.topId()) { return (id && this.s.drafts[id]) || ''; }
+  draftPics(id = this.topId()) { return (id && this.s.draftPhotos[id]) || []; }
+  hasDraft() { return !!this.draft().trim() || this.draftPics().length > 0; }
 
   syncAttached() {
     const top = this.topNode();
     if (!top) return;
     const chip = top.querySelector('.attached');
-    const text = this.draft().trim();
-    chip.hidden = !text || this.composing;
-    chip.querySelector('span').textContent = text;
+    const text = this.draft().trim(), n = this.draftPics().length;
+    chip.hidden = (!text && !n) || this.composing;
+    chip.querySelector('span').textContent = [text, n ? countWords(n) : ''].filter(Boolean).join(' · ');
   }
 
   syncPrev() {
@@ -601,7 +617,7 @@ export class DeckView {
     top.style.transform = `translate3d(${dx}px,${dy}px,0) rotate(${clamp(dx * 0.055, -16, 16)}deg)`;
     const { w, h } = this.size();
     const p = progress(dx, dy, w, h, this.composing);
-    const closes = this.composing && (logical === 'down' || (logical === 'up' && !this.draft().trim()));
+    const closes = this.composing && (logical === 'down' || (logical === 'up' && !this.hasDraft()));
     const word = closes ? 'CLOSE' : stampWord(this.topCard(), logical);
     const st = top.querySelector('.stamp');
     st.dataset.dir = phys;
@@ -708,7 +724,7 @@ export class DeckView {
     if (this.composing && logical === 'down') { this.spring(); this.closeComposer(); return; }
     if (logical === 'up') {
       if (!this.composing) { this.spring(); this.openComposer(); return; }
-      if (!this.draft().trim()) { this.spring(); this.closeComposer(); return; }
+      if (!this.hasDraft()) { this.spring(); this.closeComposer(); return; }
     }
     if (this.cannotGo(logical)) { this.spring(); this.nudgeOptions(); return; }
     this.commit(logical, phys, d);
@@ -796,8 +812,9 @@ export class DeckView {
     const eid = newId();
     const prev = this.s.answers[id] || null;
     const version = card.version || 1;
-    const event = { type: 'answer', eid, card: id, cardVersion: version, title: card.title || '', kind: card.kind || 'question', swipe: logical, stamp: stampWord(card, logical), comment };
-    const answer = { swipe: logical, comment, at: Date.now(), eid, version };
+    const photos = this.draftPics(id);
+    const event = { type: 'answer', eid, card: id, cardVersion: version, title: card.title || '', kind: card.kind || 'question', swipe: logical, stamp: stampWord(card, logical), comment, ...withPictures(photos) };
+    const answer = { swipe: logical, comment, at: Date.now(), eid, version, ...(photos.length ? { photos } : {}) };
     if (card.handled) event.handledAt = answer.handledAt = card.handled.at;
     const tapped = card.kind === 'options' ? this.chosen() : [];
     if (card.kind === 'options') {
@@ -806,13 +823,14 @@ export class DeckView {
       if (logical === 'right' || logical === 'left') event.selected = answer.selected = selected;
     }
     this.s.answers[id] = answer;
-    this.s.log.push({ t: 'answer', id, eid, dir: logical, phys, comment, prev, tapped });
+    this.s.log.push({ t: 'answer', id, eid, dir: logical, phys, comment, prev, tapped, photos });
     this.s.order.shift();
     this.s.reviewing = null;
     delete this.s.drafts[id];
     delete this.s.draftsSent[id];
-    if (comment) this.s.wordsSent[`c:${id}`] = comment;
-    this.send(event, !!comment);
+    delete this.s.draftPhotos[id];
+    if (comment || photos.length) this.s.wordsSent[`c:${id}`] = mark(comment, photos);
+    this.send(event, !!comment || photos.length > 0);
     if (this.composing) this.closeComposer(true);
     if (punched) this.punch(id, card.rarity, phys);
     else this.fly(id, phys, d);
@@ -882,7 +900,8 @@ export class DeckView {
       else delete this.s.answers[e.id];
       if (e.comment) this.s.drafts[e.id] = e.comment;
       if (e.tapped && e.tapped.length) this.s.selections[e.id] = e.tapped;
-      this.send({ type: 'undo', card: e.id, of: e.eid }, !!e.comment);
+      if (e.photos && e.photos.length) this.s.draftPhotos[e.id] = e.photos;
+      this.send({ type: 'undo', card: e.id, of: e.eid }, !!e.comment || (e.photos || []).length > 0);
     }
     if (e.t === 'skip-handled') delete this.s.handledSkipped[e.id];
     this.s.order.unshift(e.id);
@@ -945,15 +964,65 @@ export class DeckView {
     this.s.notes = text;
     this.saveNow(); // at once: the backup write is synchronous, so a killed app keeps it
     clearTimeout(this.notesTimer);
-    this.notesTimer = setTimeout(() => this.sendNotes(), 1500);
+    this.notesTimer = setTimeout(() => this.sendNotes(false), 1500);
   }
-  sendNotes() {
+  // The words go as soon as typing stops. New pictures wait until the pad closes, so one can still be
+  // taken back. `pictures` says whether they go now.
+  sendNotes(pictures = true) {
     clearTimeout(this.notesTimer);
-    if ((this.s.notes || '') === (this.s.notesSent || '')) return;
+    const images = pictures ? this.s.notesPhotos : this.s.notesPhotosSent;
+    if ((this.s.notes || '') === (this.s.notesSent || '') && images.join() === this.s.notesPhotosSent.join()) return;
     this.s.notesSent = this.s.notes;
-    this.s.wordsSent.n = this.s.notes;
-    this.send({ type: 'notes', text: this.s.notes }, true);
+    this.s.notesPhotosSent = images.slice();
+    this.s.wordsSent.n = mark(this.s.notes, images);
+    this.send({ type: 'notes', text: this.s.notes, ...withPictures(images) }, true);
     this.saveNow();
+  }
+
+  // ---------- photos
+
+  async addPhoto(input) {
+    const where = input.dataset.photo;
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    const card = this.topId();
+    const label = input.closest('.photobtn');
+    label.classList.add('busy');
+    try {
+      const id = await savePhoto(file);
+      if (where === 'comment') this.s.draftPhotos[card] = [...(this.s.draftPhotos[card] || []), id];
+      else this.s.notesPhotos.push(id);
+      this.saveNow();
+      await this.drawPhotos();
+      this.syncAttached();
+    } catch (e) {
+      stripError(this.host.querySelector(where === 'comment' ? '#commentphotos' : '#notesphotos'), e);
+    } finally {
+      label.classList.remove('busy');
+    }
+  }
+
+  dropPhoto(id, where) {
+    if (where === 'comment') {
+      const card = this.topId();
+      const left = this.draftPics(card).filter(x => x !== id);
+      if (left.length) this.s.draftPhotos[card] = left; else delete this.s.draftPhotos[card];
+    } else {
+      this.s.notesPhotos = this.s.notesPhotos.filter(x => x !== id);
+    }
+    this.saveNow();
+    this.drawPhotos();
+    this.syncAttached();
+    discardPhoto(id);
+  }
+
+  drawPhotos() {
+    return Promise.all([
+      drawStrip(this.host.querySelector('#commentphotos'), this.draftPics(), 'comment'),
+      drawStrip(this.host.querySelector('#notesphotos'), this.s.notesPhotos, 'notes'),
+      drawStrip(this.host.querySelector('#endphotos'), this.s.notesPhotos, 'notes'),
+    ]);
   }
 
   toggleNotes(force) {
@@ -969,10 +1038,11 @@ export class DeckView {
     if (on) {
       if (this.composing) this.closeComposer();
       padSet(this.notesText, this.s.notes || '');
+      this.drawPhotos();
       padFocus(this.notesText);
     } else {
       padBlur(this.notesText);
-      this.sendNotes();
+      this.sendNotes(true);
     }
   }
 
@@ -985,6 +1055,7 @@ export class DeckView {
     this.root.classList.add('composing');
     this.composer.hidden = false;
     padSet(this.comment, this.draft());
+    this.drawPhotos();
     this.syncAttached();
     padFocus(this.comment);
     scrollTo(0, 0);
@@ -1089,7 +1160,7 @@ export class DeckView {
         <h2 class="end-title">${early ? 'Replan this deck?' : 'Deck done'}</h2>
         <div class="end-sub">${esc(sub)}</div>
         <div class="tally">${groups.map(g => `<div class="dir-${g.dir}"><b data-to="${g.n}">0</b><span>${esc(g.words)}</span></div>`).join('')}</div>
-        ${padHTML('endnotes', 'Anything else on this deck?')}
+        <div class="padwrap">${padHTML('endnotes', 'Anything else on this deck?')}<div class="photostrip" id="endphotos" hidden></div>${photoButton('notes')}</div>
         <div class="end-actions">
           ${early ? '' : `<button class="primary" data-act="done">Deck's done</button>`}
           <button class="${early ? 'primary' : 'secondary'}" data-act="replan">Replan this deck</button>
@@ -1100,6 +1171,7 @@ export class DeckView {
     padSet(pad, this.s.notes || '');
     padReady(pad, text => this.notesChanged(text));
     dragToClose(pad, () => pad, () => {}, () => padBlur(pad));
+    this.drawPhotos();
     this.endBox.hidden = false;
     this.root.classList.add('ended');
     this.skipBtn.disabled = true;
@@ -1135,6 +1207,12 @@ export class DeckView {
   // Unsent words go first, so nothing that was written can be lost by starting over.
   startOver(keep) {
     this.secure();
+    if (!keep) { // pictures that haven't gone yet go now, like the words
+      this.sendNotes(true);
+      for (const [card, pics] of Object.entries(this.s.draftPhotos)) {
+        this.send({ type: 'draft', card, text: this.s.drafts[card] || '', ...withPictures(pics) }, true);
+      }
+    }
     const words = wordsIn(this.deck, this.s);
     if (this.pack.demo) {
       sendWords(this.pack, this.deck, this.s, words.filter(w => !w.sent));
@@ -1149,11 +1227,15 @@ export class DeckView {
       next.notesSent = this.s.notes || '';
       next.drafts = { ...this.s.drafts };
       next.draftsSent = { ...this.s.draftsSent };
+      next.draftPhotos = { ...this.s.draftPhotos };
+      next.notesPhotos = this.s.notesPhotos;
+      next.notesPhotosSent = this.s.notesPhotosSent;
       for (const [id, a] of Object.entries(this.s.answers)) {
         if (a.comment && !next.drafts[id]) {
           next.drafts[id] = a.comment;
           next.draftsSent[id] = a.comment; // it went with the answer
         }
+        if ((a.photos || []).length && !next.draftPhotos[id]) next.draftPhotos[id] = a.photos;
       }
     }
     this.s = next;

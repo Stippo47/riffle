@@ -8,6 +8,9 @@ packs/<pack-id>/decks/<deck-id>.json
 packs/<pack-id>/thoughts.json
 packs/<pack-id>/img/<picture>
 answers/<time>-<random>.json
+answers/img/<id>.jpg
+push/<time>-<device>.json
+read.json
 ```
 
 ## pack.json
@@ -136,10 +139,24 @@ Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typ
 | `deck` | `verdict` (`done`, `replan`), `tally`, `answered`, `total` | The deck as a whole. `replan` means rethink it from the base; the answers still stand |
 | `deck-reset` | `keptNotes` | They started the deck over. Answers on this deck from before this no longer stand, though anything they typed was still said. If `keptNotes`, comments came back as drafts on their cards, and the notes stayed |
 
+**Pictures.** An `answer`, `notes`, `thought` or `draft` event can carry `images`, a list of paths like `answers/img/<id>.jpg`. Pictures upload apart from the words, so one can arrive a little after the event that names it. Only the event that stands counts: a picture named by nothing that stands was taken back.
+
 **`swipe` is the meaning, not the direction.** `right` is go, good, yes or fine. `left` is workshop, problem, rethink or redo. `down` is idk. `up` is a comment on its own. Someone may have swapped which way of swiping does which, and that never shows here.
 
 **On option cards,** `selected` lists option ids. With `swipe: right` it means only those. `byPick: true` means nothing was tapped, so it's the writer's pick. With `swipe: left` it means even those weren't good, redo in their direction, and an empty list means all of them are bad.
 
 **`handledAt`** on an answer says which conclusion it was about.
 
-**Reading them:** go through events by `at`. Drop any repeated `eid`: if the app closes mid-send, a batch can go out twice. Drop answers named by an `undo`. For each card, the latest answer left stands, and a draft counts only if no answer came after it.
+## read.json
+
+The writer's note of what's been read, per pack. The phone shows the latest time in its settings.
+
+```json
+{ "v": 1, "packs": { "a-project": { "at": "2026-11-02T12:00:00.000Z", "files": ["<answers file>"] } } }
+```
+
+## A push record
+
+Written by the phone when notifications are turned on or off, one new file each time, under `push/`. The newest record for a `device` is the one that counts. It holds either `subscription`, which the signing machine sends to, or `off: true`.
+
+**Reading answers:** go through events by `at`. Drop any repeated `eid`: if the app closes mid-send, a batch can go out twice. Drop answers named by an `undo`. For each card, the latest answer left stands, and a draft counts only if no answer came after it.

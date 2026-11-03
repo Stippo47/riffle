@@ -3,7 +3,10 @@
 // Run: node tests/push.mjs
 import { createDecipheriv, createECDH, createPublicKey, generateKeyPairSync, hkdfSync, randomBytes, verify } from 'node:crypto';
 import { createServer } from 'node:http';
-import { encrypt, pushOne, vapidHeader } from '../skill/notify.mjs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { encrypt, pushOne, subscriptions, vapidHeader } from '../skill/notify.mjs';
 
 let failed = 0;
 const ok = (cond, what, extra = '') => {
@@ -70,6 +73,21 @@ ok(verify('sha256', Buffer.from(`${h}.${c}`), { key, dsaEncoding: 'ieee-p1363' }
 const claims = JSON.parse(unb64(c).toString());
 ok(claims.aud === 'http://localhost:8799' && claims.exp > Date.now() / 1000 && claims.exp < Date.now() / 1000 + 24 * 3600 && claims.sub.startsWith('https://'), 'with the claims push services require', JSON.stringify(claims));
 ok(vapidHeader('https://web.push.apple.com/x', keys).includes(keys.publicKey), "Apple's endpoint gets the same form of header");
+
+// Which phones get one: the newest record per phone, unless that one says off.
+const repo = mkdtempSync(join(tmpdir(), 'riffle-push-'));
+mkdirSync(join(repo, 'push'));
+const rec = (name, r) => writeFileSync(join(repo, 'push', `${name}.json`), JSON.stringify(r));
+const sub = e => ({ endpoint: e, keys: {} });
+rec('2026-01-01-a', { device: 'a', subscription: sub('old') });
+rec('2026-01-02-a', { device: 'a', subscription: sub('new') });
+rec('2026-01-01-b', { device: 'b', subscription: sub('b') });
+rec('2026-01-02-b', { device: 'b', off: true });
+rec('2026-01-01-c', { device: 'c', off: true });
+rec('2026-01-02-c', { device: 'c', subscription: sub('c') });
+const subs = subscriptions(repo).map(r => r.subscription.endpoint).sort();
+ok(subs.join() === 'c,new', 'the newest record per phone wins, and off means off', subs.join());
+ok(subscriptions(join(repo, 'nothing')).length === 0, 'no records means no phones');
 
 console.log(failed ? `${failed} failed` : 'all passed');
 process.exit(failed ? 1 : 0);

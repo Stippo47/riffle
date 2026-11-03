@@ -10,6 +10,7 @@ const NO_DB = Symbol('no database');
 const OPEN_TIMEOUT = 4000;
 
 const memoryFiles = new Map();          // pulled files, if there's no database at all
+const memoryPhotos = new Map();
 const memorySecrets = new Map();
 const pending = new Map();              // id -> the newest write of that id not yet safely stored
 const failed = new Set();
@@ -34,13 +35,14 @@ function open() {
   if (dbPromise) return dbPromise;
   const attempt = new Promise((resolve, reject) => {
     let req;
-    try { req = indexedDB.open('riffle', 1); } catch { resolve(null); return; }
+    try { req = indexedDB.open('riffle', 2); } catch { resolve(null); return; }
     const timer = setTimeout(() => reject(new Error('the database did not open')), OPEN_TIMEOUT);
     req.onupgradeneeded = () => {
       const db = req.result;
-      db.createObjectStore('kv');
-      db.createObjectStore('files');
-      db.createObjectStore('queue', { autoIncrement: true });
+      for (const name of ['kv', 'files', 'photos']) {
+        if (!db.objectStoreNames.contains(name)) db.createObjectStore(name);
+      }
+      if (!db.objectStoreNames.contains('queue')) db.createObjectStore('queue', { autoIncrement: true });
     };
     req.onsuccess = () => {
       clearTimeout(timer);
@@ -51,7 +53,6 @@ function open() {
       resolve(db);
     };
     req.onerror = () => { clearTimeout(timer); resolve(null); };
-    req.onblocked = () => { clearTimeout(timer); resolve(null); };
   });
   dbPromise = attempt;
   return attempt;
@@ -203,6 +204,17 @@ export const files = {
   set: (key, val) => run('files', 'readwrite', s => s.put(val, key)).then(v => { if (v === NO_DB) memoryFiles.set(key, val); }),
   del: key => run('files', 'readwrite', s => s.delete(key)).then(v => { if (v === NO_DB) memoryFiles.delete(key); }),
   all: () => run('files', 'readonly', s => s.getAll()).then(v => (v === NO_DB ? [...memoryFiles.values()] : v), () => []),
+};
+
+// ---------- photos. Too big for the backup list, so a failed save tells the person straight away.
+
+export const photos = {
+  get: id => run('photos', 'readonly', s => s.get(id)).then(v => (v === NO_DB ? memoryPhotos.get(id) : v)),
+  set: (id, rec) => run('photos', 'readwrite', s => s.put(rec, id)).then(v => {
+    if (v === NO_DB) { memoryPhotos.set(id, rec); setTrouble('memory'); }
+  }),
+  del: id => run('photos', 'readwrite', s => s.delete(id)).then(v => { if (v === NO_DB) memoryPhotos.delete(id); }),
+  keys: () => run('photos', 'readonly', s => s.getAllKeys()).then(v => (v === NO_DB ? [...memoryPhotos.keys()] : v)),
 };
 
 // ---------- answers waiting to send

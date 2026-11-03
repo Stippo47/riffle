@@ -291,7 +291,7 @@ def check_cards(cards, base=None, pack=None):
         if step == 3:
             warnings.append(f"{name}: won't fit a small iPhone even in its smallest type, so the end of its description gets cut, with the whole of it on the back. Shorten it, or move some to details")
         elif step == 2:
-            warnings.append(f'{name}: only fits a small iPhone in its smallest type. Shorter would read better')
+            warnings.append(f'{name}: may only fit a small iPhone in its smallest type. Shorter would read better')
         if not (c.get('why') or handled):
             warnings.append(f'{name}: nothing says what this changes. Technical cards with no context get sent back')
         for image in [*(c.get('images') or []), *[o.get('image') for o in c.get('options') or [] if o.get('image')]]:
@@ -839,6 +839,7 @@ def notify_once(body):
 
 
 def cmd_notify(a):
+    sync()
     badge = a.badge if a.badge is not None else owed_cards(summarise(read_events())[0])
     send_notification(a.title, a.body, badge, a.tag)
 

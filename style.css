@@ -419,12 +419,27 @@ svg{display:block}
 .sheet-head{flex:none;display:flex;flex-direction:column;align-items:center;gap:3px;min-height:40px;width:100%;font-family:var(--display);font-size:16px;font-weight:700;color:var(--ink)}
 .grabber{display:block;width:40px;height:5px;margin-top:5px;background:var(--dim);border-radius:3px}
 [data-look=inventory] .grabber{border-radius:0}
-.notes-sheet .pad{flex:1}
 
 /* The comment box. The title and buttons go away, and the card and box share all the height the keyboard leaves. */
 .composer{flex:1 1 42%;min-height:0;display:flex;flex-direction:column;transition:transform .16s ease-out}
 .composer.following{transition:none}
 .composer .pad{flex:1}
+
+/* A place to type with a photo button in its corner. Pictures sit beside the button, inside the box. */
+.padwrap{position:relative;display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+.padwrap .pad{flex:1 1 auto;padding-bottom:58px}
+.photobtn{position:absolute;right:6px;bottom:6px;width:46px;height:46px;display:flex;align-items:center;justify-content:center;color:var(--dim);cursor:pointer}
+.photobtn svg{width:26px;height:26px;fill:none;stroke:currentColor}
+.photobtn input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.photobtn.busy{opacity:.35}
+.photostrip{position:absolute;left:8px;right:58px;bottom:8px;display:flex;gap:7px;align-items:flex-end}
+.photostrip.inline{position:static;margin-top:3px}
+.photothumb{position:relative;flex:none;width:46px;height:46px;border-radius:7px;box-shadow:0 0 0 1px var(--line)}
+.photothumb img{display:block;width:100%;height:100%;object-fit:cover;border-radius:7px}
+.photothumb button{position:absolute;right:-7px;top:-7px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:#17161c;color:#fff;box-shadow:0 0 0 1.5px #fff}
+.photothumb button svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:3}
+.photoerror{font-size:13px;line-height:1.25;font-weight:600;color:#ff8a7a}
+[data-look=paper] .photoerror,[data-look=inventory] .photoerror{color:var(--bad)}
 .deck.composing{gap:8px;padding:calc(var(--sat) + 6px) 10px 8px}
 .deck.composing .topline,.deck.composing .progress{display:none}
 .deck.composing .tablewrap{flex:1 1 58%;min-height:150px;margin:0}
@@ -476,7 +491,7 @@ svg{display:block}
 [data-look=paper] .tally .dir-left b,[data-look=inventory] .tally .dir-left b{color:#b85306}
 [data-look=paper] .tally .dir-down b,[data-look=inventory] .tally .dir-down b{color:#1c63b0}
 [data-look=paper] .tally .dir-up b,[data-look=inventory] .tally .dir-up b{color:#7c5c00}
-.endbox .pad{flex:1 1 90px;min-height:72px}
+.endbox .padwrap{flex:1 1 90px;min-height:92px}
 /* While typing at the end of a deck, the pad gets the room. */
 .endbox:has(.pad:focus) :is(.end-title,.end-sub,.tally){display:none}
 .deck.ended:has(.pad:focus) .progress{display:none}
@@ -498,6 +513,7 @@ canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:
 .set-title{font-family:var(--display);font-size:19px;font-weight:700;margin:18px 0 8px}
 .set-text{font-size:15.5px;line-height:1.4;margin-bottom:10px}
 .set-text.small{font-size:13px;color:var(--dim)}
+#notifybtn{width:100%;margin-bottom:6px}
 .set-text.problem{color:var(--bad);font-weight:600;background:rgba(216,54,47,.1);padding:10px 12px;border-radius:var(--row-radius)}
 [data-look=plain] .set-text.problem,[data-look=foil] .set-text.problem,[data-look=table] .set-text.problem{color:#ffb0a6}
 .set-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px}
@@ -588,7 +604,7 @@ canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:
 [data-look=inventory] .thoughtsrow{box-shadow:var(--tile-shadow);color:#fff}
 [data-look=inventory] .thoughtsrow small{color:#efefef}
 .thoughts{gap:8px}
-.thoughts .pad{flex:0 0 auto;height:clamp(92px,24%,190px)}
+.thoughts .padwrap{flex:0 0 auto;height:clamp(116px,24%,190px)}
 .thoughts .primary{flex:none;min-height:44px;padding:6px 18px}
 .thoughts .primary:disabled{opacity:.4}
 .thoughtlist{flex:1 1 0;min-height:0;display:flex;flex-direction:column;gap:7px;padding-bottom:6px}

@@ -98,6 +98,18 @@ Drafts survive closing the app.
 
 The box and the notes pad are `contenteditable="plaintext-only"` rather than form fields, in the hope iPhones then leave out the autofill bar above the keyboard. Autocorrect, dictation and pasting work as usual.
 
+## Photos
+
+The comment box, the notes pad and the Thoughts pad each have a photo button in the corner of the box. It's a plain file input, so iPhones offer Take Photo and Photo Library. The picture is shrunk on the phone to about 1600 pixels on its long side, as a JPEG, which also leaves behind where it was taken. It's saved to the phone before its thumbnail shows, and the thumbnail has a way to remove it.
+
+Pictures go when what they're attached to goes: the answer, the thought, or the notes when the pad closes. So until then one can still be taken back, and it's only on the phone. They upload one at a time, apart from the words, so a large file never holds words back, and the first screen and settings count any still waiting. Sent ones stay on the phone for 30 days, then go.
+
+## Notifications
+
+From the Home Screen icon, on iOS 16.4 or newer. Settings has one button, which is the only thing that ever asks for permission, and is also the off switch. The phone writes its subscription to the data repo, and each start checks it's still the one on file. The writer's machine signs and sends, with a signing key that lives only there, in `~/.riffle/vapid.json`, outside every repo. The public half is in `js/push.js`. If that key is ever replaced, change the public half and turn notifications off and on again on the phone.
+
+A new deck makes one notification, not one per card, and a run of new decks makes one. The number on the icon is the cards owed, leaving out the Feel test. Tapping a notification opens the app, which checks for new decks each time it's opened.
+
 ## The buttons
 
 Undo, Notes, Skip and Grid. They act as the finger lifts.
@@ -141,6 +153,7 @@ Nothing floats over the screen, so nothing can cover the buttons or a card's wor
 - **Content and answers:** a private repo, `riffle-data`. The format is in [format.md](format.md).
 - **Connecting:** the phone reads and writes the private repo through GitHub's API, with a fine-grained key that reaches only that repo. The person makes the key and pastes it into the app, once. The app checks it can read and write, with a real test write, and refuses to keep a key that can really open any other private repo.
 - **Offline:** a service worker keeps the app on the phone. A pack's decks and pictures come down when there's signal. Answers wait in a queue with a count on the dashboard.
+- **Read:** settings says when the writer last read the answers, from a note they leave in the repo.
 - **Sending:** at most one batch every 15 seconds, plus when the app is hidden, comes back or signal returns. Each batch is a new file, so nothing can collide with whoever is writing decks.
 - **When sending fails, it says why.** A refusal from GitHub gives the status code and what to do, on the first screen, in the title line ("Not sending") and in settings. One miss counts as no signal; three in a row while the phone says it's online counts as a problem and says so. Settings shows how many have been sent and when, and has Send now, which reports what happened. Every call gives up after 25 seconds, so a call frozen with the page can't hold up the ones after it.
 - **The built-in Feel test** needs no key. Anything typed in it (comments, notes, drafts) is sent, tagged `demo: true`. Plain swipes with no words stay on the phone. Its page lists everything written there, with Send these and Copy, and each word is marked once sent, so nothing goes twice. "Start the Feel test again" takes two steps, says what it clears, queues any unsent words first and keeps them listed.
@@ -154,15 +167,11 @@ Nothing floats over the screen, so nothing can cover the buttons or a card's wor
 - **Notes** go about 1.5 seconds after typing stops, and **drafts** (comments on a card not thrown yet) about 5 seconds after, each only if changed. At every start, the app goes through every deck's saved state and queues any notes or drafts that haven't gone, including drafts on cards no longer in the deck.
 - **What can still go:** the phone dying in the moment between a keystroke and the backup write, or the browser clearing its own data. Settings says whether the browser has promised to keep it.
 
-On iPhone, the app has to be added to the Home Screen: Safari and the Home Screen app keep separate data, and Safari can clear a site's data when it isn't used for a while. iPhones only send while the app is open. Web pages can't vibrate there, so the tick uses a switch-control trick that works on recent versions, and does nothing otherwise.
+On iPhone, the app has to be added to the Home Screen: Safari and the Home Screen app keep separate data, and Safari can clear a site's data when it isn't used for a while. iPhones only send while the app is open, or just as it's hidden. Web pages can't vibrate there, so the tick uses a switch-control trick that works on recent versions, and does nothing otherwise.
 
 ## For testing
 
 On a local test server only: `?api=` points the app at a stand-in for GitHub, and `?insets=59,34` pretends to have an iPhone's top and bottom safe areas, to check the true spacing.
-
-## Still to build
-
-Photos on comments, notes and thoughts; notifications.
 
 ## The writer's side
 

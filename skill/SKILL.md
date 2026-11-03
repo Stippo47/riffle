@@ -19,7 +19,7 @@ A project names its pack with one line in a `.riffle-pack` file at its root. Wor
 
 ```
 riffle answers              what came back since you last read
-riffle answers --mark-read  the same, and records it as read
+riffle answers --mark-read  the same, and records it as read, which the app's settings show
 riffle redeal               handled cards they answered, and cards sent back to you
 riffle status               every deck, and what's owed
 ```
@@ -118,6 +118,6 @@ riffle thought <pack> <thought-id> --how "One or two plain sentences."
 
 ## Notifications
 
-`riffle deck` notifies the phone, at most once every 10 minutes, so a run of new decks makes one notification. `--quiet` skips it, and `riffle notify --title "..." --body "..."` sends one by hand.
+They turn these on in the app's settings. `riffle deck` then notifies the phone, at most once every 10 minutes, so a run of new decks makes one notification, and sets the number on its icon to the cards owed. `--quiet` skips it, and `riffle notify --title "..." --body "..."` sends one by hand.
 
 The signing key lives in `~/.riffle/vapid.json`, on this machine only, outside every repo. Never copy it into a repo. Without it, notifications don't send and everything else still works.
