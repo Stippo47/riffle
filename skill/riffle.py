@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 from datetime import datetime, timezone
@@ -130,18 +131,41 @@ def sync():
         print(f'  warning: could not update from GitHub, so this is what the clone already has. {r.stderr.strip()[:200]}')
 
 
+def in_batches(names, limit=6000):
+    """Splits paths into runs short enough for one command line: Windows stops at about 32,000 characters,
+    and a deck of many films and boards can name hundreds of files."""
+    batch, size = [], 0
+    for n in names:
+        if batch and size + len(n) + 3 > limit:
+            yield batch
+            batch, size = [], 0
+        batch.append(n)
+        size += len(n) + 3
+    if batch:
+        yield batch
+
+
 def publish(message, *paths):
     """Commits only these paths and pushes. Answers can land at any moment, so a rejected push pulls and tries once more."""
     names = [os.path.relpath(p, DATA) for p in paths]  # relative, as a big board can list a lot of them
-    git('add', '--', *names)
-    if not git('diff', '--cached', '--name-only', '--', *names).stdout.strip():
+    for b in in_batches(names):
+        git('add', '--', *b)
+    if not any(git('diff', '--cached', '--name-only', '--', *b).stdout.strip() for b in in_batches(names)):
         print('Nothing changed, so nothing was pushed.')
         return False
     user = getpass.getuser()
-    if user and user.lower() in git('diff', '--cached', '--', *names).stdout.lower():
-        git('reset', '-q', '--', *names)
+    if user and any(user.lower() in git('diff', '--cached', '--', *b).stdout.lower() for b in in_batches(names)):
+        for b in in_batches(names):
+            git('reset', '-q', '--', *b)
         die('Stopped: the change holds the name of this computer\'s user, which must not go into a repo. Nothing was committed.')
-    git('commit', '-q', '-m', f'{message}\n\n{ATTRIBUTION}', '--', *names)
+    # One commit of exactly these paths, however many: the list goes to git in a file, not on the command line.
+    with tempfile.NamedTemporaryFile('wb', suffix='.paths', delete=False) as f:
+        f.write(b'\0'.join(n.encode('utf-8') for n in names))
+    listing = pathlib.Path(f.name)
+    try:
+        git('commit', '-q', '-m', f'{message}\n\n{ATTRIBUTION}', f'--pathspec-from-file={listing}', '--pathspec-file-nul')
+    finally:
+        listing.unlink(missing_ok=True)
     if git('push', '-q', 'origin', 'HEAD', check=False).returncode:
         git('pull', '-q', '--rebase', '--autostash')
         git('push', '-q', 'origin', 'HEAD')
