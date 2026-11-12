@@ -117,9 +117,28 @@ From the Home Screen icon, on iOS 16.4 or newer. Settings has one button, which 
 
 The number on the icon is the cards owed, leaving out the Feel test. The app checks for new decks each time it's opened.
 
-## Addresses
+## Addresses and links
 
 Any pack, deck, card or part has an address, `pack/deck/card/part`. Opening the app with `#open=` and an address goes straight there: a notification's tap does this. Anything no longer there stops at the level above, so a deck that's gone opens its pack.
+
+**Links** are plain text in any words: `[Label](riffle:pack/deck/card/part)`. Wherever words show, on a card's face and back, in its parts, in a comment, a thought or the Feel test's list, a link shows as a small tappable label, and a web address as a link that opens in the browser. A one-line chip shows each link by its label only.
+
+**Following one** goes to that card, its parts open if it names a part. The back button turns into a curved arrow, says where it goes ("Back to Has a link"), and returns to the card the link was on, as it was: its parts open, its comment box open with the words in it. Several links in a row come back one at a time. Going anywhere by any other way, the pack's page or a deck's tile, starts the trail again.
+
+**The link button** sits beside the photo button in every place to type: a comment, a part's comment, notes and Thoughts. It offers, in this order: the card in the mini player, if there is one; this card, part or deck; or "Pick one from a list", every deck in every pack, this pack first, opening to its cards and their parts. The link goes in where the caret was, as if typed, so it's saved like anything typed.
+
+## Breadcrumbs
+
+The deck's title line reads Pack › Topic › Deck › Card, and each is a way there. Pack goes to the pack's page; Topic goes there at that topic; Deck opens the overview; Card brings the card itself back into view, from its back or its parts. The card's crumb follows the card on top. Where the line is short, the earlier crumbs give way first. In One line and Full screen, which share the line with the buttons, only the deck and the card show.
+
+## The mini player
+
+Shrink, in the buttons, puts the deck into a small floating card in a corner, showing the card it was on, and goes to the pack's page. It stays over every screen. Any other deck can be opened and used as usual, comment box and all.
+
+- **Tapping it** brings its deck back full size, at the same card, with its parts or comment box open if they were. If another deck was open, that one goes into the corner in its place, so they swap. Drafts in both are kept, because each deck saves its own as ever.
+- **Dragging it** to any corner moves it there, and it stays there. Dragging it never reaches the card underneath.
+- **While typing**, the keyboard takes the bottom, so it waits at the top of its side.
+- It's kept on the phone, so it's still there after the app is closed.
 
 ## The buttons
 

@@ -5,6 +5,7 @@ import * as store from './store.js';
 import { enqueue, newId, photoPath } from './sync.js';
 import { thoughtsKey } from './deck.js';
 import { discardPhoto, drawStrip, photoButton, savePhoto, stripError } from './photos.js';
+import { linkButton, linkify } from './links.js';
 
 const DRAFT_SEND_AFTER = 5000;
 
@@ -16,8 +17,8 @@ export const thoughtCount = async pack => {
 const when = at => new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 
 export class ThoughtsView {
-  constructor({ host, pack, onExit }) {
-    Object.assign(this, { host, pack, onExit });
+  constructor({ host, pack, onExit, nav = {} }) {
+    Object.assign(this, { host, pack, onExit, nav });
     this.key = thoughtsKey(pack);
   }
 
@@ -27,13 +28,14 @@ export class ThoughtsView {
     this.host.innerHTML = `
       <div class="thoughts screen">
         <div class="deckbar">
-          <button class="iconbtn" data-go="back" aria-label="Back">${icon('chevron-left')}</button>
+          <button class="iconbtn${this.nav.backBy ? ' linked' : ''}" data-go="back" aria-label="${esc(this.nav.backBy ? `Back to ${this.nav.backBy}` : 'Back')}">${icon(this.nav.backBy ? 'corner-up-left' : 'chevron-left')}</button>
           <div class="t">Thoughts</div>
           <div class="n" data-slot="notice"></div>
         </div>
         <div class="padwrap">
           ${padHTML('thoughtpad', "Anything on your mind about this project. It doesn't need a card.")}
           <div class="photostrip" id="thoughtphotos" hidden></div>
+          ${linkButton('thought')}
           ${photoButton('thought')}
         </div>
         <button class="primary" id="filethought">File it</button>
@@ -57,6 +59,7 @@ export class ThoughtsView {
     this.host.onclick = e => {
       const b = e.target.closest('[data-act=rmphoto]');
       if (b) this.dropPhoto(b.dataset.photoId);
+      if (e.target.closest('[data-act=linkcard]') && this.nav.linker) this.nav.linker({ pad: this.pad, here: null, packId: this.pack.id });
     };
     this.syncButton();
     drawStrip(this.strip, this.s.draftPhotos, 'thought');
@@ -138,7 +141,7 @@ export class ThoughtsView {
       const h = answers[t.id] && answers[t.id].handled;
       return `<div class="word thought${h ? ' handled' : ''}" data-id="${esc(t.id)}">
         <small>${esc(when(t.at))}</small>
-        ${t.text ? `<span>${esc(t.text)}</span>` : ''}
+        ${t.text ? `<span>${linkify(t.text)}</span>` : ''}
         ${(t.photos || []).length ? '<div class="photostrip inline"></div>' : ''}
         ${h ? `<div class="handled-band small">${icon('check')}<span>Handled</span></div><span class="how">${esc(h.how)}</span>` : ''}
       </div>`;

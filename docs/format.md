@@ -72,6 +72,10 @@ A card's face reads at a glance, so as a guide: `title` 26 characters, `text` 11
 
 **Never name a direction on a card.** People can swap what each way of swiping does, so "swipe right" may be wrong for them. Say "add a comment", or say nothing.
 
+### Links
+
+Any words, on a card or in an answer, can link to a pack, deck, card or part: `[Label](riffle:pack/deck/card/part)`, with as many of the address's parts as are wanted, each URL-encoded if it holds a slash. The phone shows the label as a tappable link, and a plain `https://` address as a link to the web. `riffle link <pack> <deck> <card> [part]` prints one to paste. The words they type can hold links the same way, made with the comment box's link button.
+
 ### Films
 
 `videos` sits beside `images`, on a card or a part. Each is a path, or `{ "src": ..., "poster": ... }`. They play on the card's back muted, looping and inline, and a tap pauses or plays one. The corner button opens one full screen, where it can be scrubbed, slowed to a half or a quarter, zoomed into and drawn on.

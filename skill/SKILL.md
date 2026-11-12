@@ -75,6 +75,8 @@ Add `"stack": "some-name"` to decks in a topic that should be dealt one after an
   ] }
 ```
 
+**Links.** Any words on a card can link to another card, deck or part, so a report can point at the question it answers: `riffle link <pack> <deck> <card> [part]` prints the text to paste, like `[Gates](riffle:proj/paths/gates)`. `check` warns about a link to something that isn't there.
+
 ### Writing cards
 
 If a card is technical with no context, they'll send it back. So:
@@ -111,6 +113,7 @@ If a card is technical with no context, they'll send it back. So:
 - **idk, huh:** they need more context. Add it and deal it back, or decide it yourself if it's technical. If they say idk twice on the same card, decide it yourself and say so.
 - **comment on its own:** their own suggestion. Read it.
 - **Comments and notes** are often the most useful part. Read every one. Pictures are listed with their path in the clone: open them.
+- **Links** in their words point at a card, like `[Gates](riffle:proj/paths/gates)`, made with the link button. `riffle answers` writes each out as where it goes: `[Gates → My project › Garden › Paths › Gates]`. "Like this one" with a link means that card.
 - **Drawings** are pictures they drew on, to circle or arrow what they mean. `riffle answers` lists each with what it was drawn over. Open it: the circle is the point of the comment.
 - **Parts** show under their card: `part feet (Feet): PROBLEM, "they slide"`. A part can be marked or commented on without the card being swiped. `riffle redeal` lists parts marked problem or huh.
 - **Deck: replan** means the whole deck's premise is off. Rethink it from the base. **Started over** means they want to go through it again.

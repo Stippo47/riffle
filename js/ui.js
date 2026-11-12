@@ -137,6 +137,42 @@ export function padBlur(el) {
   if (sel) sel.removeAllRanges();
 }
 
+// Where the caret was in each pad, so something put in later lands there, even after the pad lost focus.
+document.addEventListener('selectionchange', () => {
+  const sel = getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const r = sel.getRangeAt(0);
+  const node = r.startContainer && (r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement);
+  const pad = node && node.closest && node.closest('.pad');
+  if (pad) pad.caret = r.cloneRange();
+});
+
+// Puts text into a pad where its caret last was, or at the end, as if typed: its input handler runs, so
+// it's saved like anything typed.
+export function padInsert(el, text) {
+  el.focus();
+  const sel = getSelection();
+  const r = el.caret && el.contains(el.caret.startContainer) ? el.caret : null;
+  if (sel) {
+    sel.removeAllRanges();
+    if (r) sel.addRange(r);
+    else { const end = document.createRange(); end.selectNodeContents(el); end.collapse(false); sel.addRange(end); }
+  }
+  // A space first, if it would otherwise run on from a word.
+  const at0 = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+  const before = at0 && at0.startContainer.nodeType === 3 ? at0.startContainer.textContent.slice(0, at0.startOffset) : padText(el);
+  if (before && !/\s$/.test(before)) text = ` ${text}`;
+  let ok = false;
+  try { ok = document.execCommand('insertText', false, text); } catch { ok = false; }
+  if (!ok) {
+    const at = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+    const node = document.createTextNode(text);
+    if (at) { at.deleteContents(); at.insertNode(node); at.setStartAfter(node); at.collapse(true); } else el.append(node);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  el.classList.toggle('is-empty', !padText(el));
+}
+
 // Dragging down on a panel brings it back down. A long text scrolled away from its top scrolls
 // first. shift(dy) moves the panel with the finger, and close() runs if the drag was far or fast.
 export function dragToClose(panel, scroller, shift, close, distance = 56) {

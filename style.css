@@ -244,7 +244,7 @@ svg{display:block}
 .deck .deckbar{order:1}
 .progress{order:2;height:3px;background:var(--line);overflow:hidden;flex:none}
 .progress b{display:block;height:100%;width:0;background:var(--ink);transition:width .2s}
-.tools{order:3;display:grid;grid-template-columns:repeat(4,1fr);background:var(--rail);box-shadow:inset 0 0 0 1px var(--rail-line);border-radius:var(--rail-radius);color:var(--rail-ink);flex:none}
+.tools{order:3;display:grid;grid-template-columns:repeat(5,1fr);background:var(--rail);box-shadow:inset 0 0 0 1px var(--rail-line);border-radius:var(--rail-radius);color:var(--rail-ink);flex:none}
 .tools button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:12px;min-height:48px;border-radius:var(--rail-radius)}
 .tools button svg{width:22px;height:22px;fill:none;stroke:currentColor}
 .tablewrap{order:4;position:relative;flex:1 1 0;min-height:0;margin-bottom:12px}
@@ -796,3 +796,75 @@ input.viewer-scrub{flex:1;min-width:0;height:44px;padding:0;margin:0;border:0;ba
 [data-look=inventory] .part,[data-look=inventory] .part-mark,[data-look=inventory] .part-say,[data-look=inventory] .part h3 b{border-radius:0}
 [data-look=inventory] .part{box-shadow:0 0 0 3px #1d1d1d}
 [data-look=inventory] .part-pad .pad{color:var(--card-ink);box-shadow:inset 0 0 0 2px #1d1d1d}
+
+/* ---------- links in words: a card or part in Riffle, or a web address */
+.rlink,.weblink{display:inline;padding:0 .28em;margin:0 .05em;border-radius:5px;background:rgba(47,143,224,.16);color:#1d5fa8;font-weight:600;text-decoration:none;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer;-webkit-user-select:none;user-select:none}
+.rlink::before{content:"↗ ";font-weight:700}
+.weblink{background:rgba(23,22,28,.07);color:inherit;text-decoration:underline;text-underline-offset:2px}
+.screen .rlink,.word .rlink,.thoughtlist .rlink,.parts-lead .rlink{background:rgba(110,170,255,.2);color:#8cc0ff}
+[data-look=paper] .screen .rlink,[data-look=paper] .word .rlink,[data-look=paper] .parts-lead .rlink,[data-look=inventory] .screen .rlink,[data-look=inventory] .word .rlink{background:rgba(29,95,168,.14);color:#1d5fa8}
+.card .rlink,.part .rlink,.island .rlink{background:rgba(47,143,224,.16);color:#1d5fa8}
+
+/* A link button beside the photo button, in every place to type that has one. */
+.padlink{position:absolute;right:52px;bottom:6px;width:46px;height:46px;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+.padlink svg{width:24px;height:24px;fill:none;stroke:currentColor}
+.padwrap:has(.padlink) .photostrip{right:104px}
+.part-pad .padlink{color:var(--card-dim)}
+
+/* Linking a card: a small sheet over the keyboard, and a list to pick from. */
+.linksheet-back{position:absolute;inset:0;z-index:129}
+.linksheet{position:absolute;left:8px;right:8px;bottom:8px;z-index:130;display:grid;gap:6px;padding:10px;border-radius:16px;background:var(--row-bg);box-shadow:0 10px 30px rgba(0,0,0,.45),inset 0 0 0 1px var(--row-line);color:var(--ink)}
+.ls-title{font-family:var(--display);font-size:16px;font-weight:700;padding:2px 4px 2px}
+.linksheet button{display:flex;align-items:center;gap:10px;min-height:48px;padding:6px 12px;border-radius:12px;background:rgba(127,127,127,.12);text-align:left;font-size:15.5px;line-height:1.2}
+.linksheet button small{display:block;font-size:12.5px;color:var(--dim);font-weight:600;margin-bottom:1px}
+.linksheet button span{min-width:0;flex:1}
+.linksheet button svg{width:20px;height:20px;fill:none;stroke:currentColor;flex:none}
+.linksheet .ls-cancel{justify-content:center;background:none;color:var(--dim);font-weight:600;min-height:42px}
+[data-look=inventory] .linksheet,[data-look=inventory] .linksheet button{border-radius:0}
+.picker{position:absolute;inset:0;z-index:140;display:flex;flex-direction:column;background-color:var(--bg);background-image:var(--bg-art);padding:calc(var(--sat) + 2px) 14px 0}
+.picker-list{flex:1;min-height:0;padding:4px 0 calc(var(--sab) + 16px)}
+.pk-pack{font-family:var(--display);font-size:18px;font-weight:700;margin:14px 0 6px}
+.pk-deck{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:8px 12px;margin-top:6px;background:var(--row-bg);box-shadow:inset 0 0 0 1px var(--row-line);border-radius:var(--row-radius);text-align:left;font-size:16px;font-weight:600}
+.pk-deck span{flex:1;min-width:0}
+.pk-deck small{font-size:12.5px;color:var(--dim);font-weight:600}
+.pk-deck svg{width:18px;height:18px;fill:none;stroke:currentColor;transition:transform .15s}
+.pk-deck.open svg{transform:rotate(90deg)}
+.pk-cards{display:grid;gap:5px;margin:6px 0 4px 14px}
+.pk-card{display:block;width:100%;min-height:44px;padding:8px 12px;border-radius:10px;background:var(--tint,#fff);color:var(--card-ink);text-align:left;font-size:15px;line-height:1.2;box-shadow:inset 0 0 0 1.5px var(--rim,transparent)}
+.pk-card small{display:block;font-size:12px;color:var(--card-dim);margin-top:2px}
+.pk-part{margin-left:14px;min-height:38px;font-size:14px}
+[data-look=inventory] .pk-deck{box-shadow:var(--tile-shadow);color:#fff}
+[data-look=inventory] .pk-card{border-radius:0}
+
+/* ---------- breadcrumbs: Pack › Topic › Deck › Card, each one tappable */
+.crumbs{display:flex;align-items:center;min-width:0;gap:0;font-family:var(--font)}
+.deckbar .crumbs.t{font-size:15px;font-weight:600}
+.crumb{flex:0 1 auto;min-width:1.6em;max-width:max-content;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:10px 2px;color:var(--dim);font-weight:600}
+.crumb-pack{flex-shrink:6}
+.crumb-topic{flex-shrink:4}
+.crumb-deck{flex-shrink:2;color:var(--ink)}
+.crumb-card{flex-shrink:1;color:var(--ink);font-weight:800;min-width:3em}
+.crumbs i{flex:none;font-style:normal;color:var(--dim);padding:0 3px;opacity:.7}
+[data-layout=one] .deck .crumb-pack,[data-layout=one] .deck .crumb-topic,[data-layout=one] .deck .crumbs .c-pack,[data-layout=one] .deck .crumbs .c-topic,
+[data-layout=story] .deck:not(.composing):not(.ended) .crumb-pack,[data-layout=story] .deck:not(.composing):not(.ended) .crumb-topic,[data-layout=story] .deck:not(.composing):not(.ended) .crumbs .c-pack,[data-layout=story] .deck:not(.composing):not(.ended) .crumbs .c-topic{display:none}
+[data-layout=story] .deck:not(.composing):not(.ended) .crumb{color:var(--card-dim)}
+[data-layout=story] .deck:not(.composing):not(.ended) .crumb-deck,[data-layout=story] .deck:not(.composing):not(.ended) .crumb-card{color:var(--card-ink)}
+[data-layout=story] .deck:not(.composing):not(.ended) .crumbs i{color:var(--card-dim)}
+[data-look=inventory] .crumbs.t{font-family:var(--display);font-weight:400}
+.deckbar .iconbtn.linked{color:var(--accent)}
+
+/* ---------- the mini player: one deck, small, floating in a corner */
+body.covered .island-layer{display:none}
+.island-layer{position:fixed;left:0;right:0;top:0;height:var(--vvh,100dvh);transform:translateY(var(--vvt,0px));pointer-events:none;z-index:150}
+.island{position:absolute;width:96px;height:128px;display:flex;flex-direction:column;gap:3px;padding:8px 8px 7px;border-radius:12px;background:var(--tint,#fff);color:var(--card-ink);text-align:left;box-shadow:0 8px 22px rgba(0,0,0,.5),0 0 0 2px rgba(255,255,255,.85),inset 0 0 0 2px var(--rim,transparent);pointer-events:auto;touch-action:none;transition:left .22s cubic-bezier(.2,.9,.3,1),right .22s cubic-bezier(.2,.9,.3,1),top .22s cubic-bezier(.2,.9,.3,1),bottom .22s cubic-bezier(.2,.9,.3,1);overflow:hidden;font-family:var(--font)}
+.island.dragging{transition:none;opacity:.92;box-shadow:0 14px 30px rgba(0,0,0,.55),0 0 0 2px #fff}
+.island[data-corner=tl],.island[data-corner=bl]{left:10px}
+.island[data-corner=tr],.island[data-corner=br]{right:10px}
+.island[data-corner=tl],.island[data-corner=tr]{top:calc(var(--sat) + 104px)}
+.island[data-corner=bl],.island[data-corner=br]{bottom:calc(var(--sab) + 80px)}
+.island-layer.typing .island[data-corner=bl],.island-layer.typing .island[data-corner=br]{bottom:auto;top:calc(var(--sat) + 10px)}
+.island-layer.typing .island[data-corner=tl],.island-layer.typing .island[data-corner=tr]{top:calc(var(--sat) + 10px)}
+.isl-deck{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--card-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
+.isl-text{flex:1;min-height:0;font-size:12.5px;font-weight:700;line-height:1.18;overflow:hidden;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical}
+.isl-kind{flex:none;font-size:10px;font-weight:700;color:var(--card-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+[data-look=inventory] .island{border-radius:0;box-shadow:0 0 0 3px #1d1d1d,6px 6px 0 3px rgba(0,0,0,.28)}

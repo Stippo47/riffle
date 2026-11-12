@@ -48,6 +48,7 @@ WORDS = {
     'board': {'right': 'GO', 'left': 'REDO', 'down': 'IDK', 'up': 'COMMENT'},
 }
 HANDLED_WORDS = {'right': 'FINE', 'left': 'WORKSHOP', 'down': 'IDK', 'up': 'COMMENT'}
+LINK = re.compile(r'\[([^\]\n]{1,120})\]\(riffle:([^)\s]{1,400})\)')  # a link to a pack, deck, card or part
 NAMED_DIRECTION = re.compile(r'\b(swip\w*|throw\w*|drag\w*|flick\w*|hold\w*|pull\w*|push\w*)\s+(it\s+|this\s+|this one\s+|the card\s+|that\s+)?(to the\s+)?(right|left|up|down)\b', re.I)
 LOOKS_LIKE_CODE = re.compile(r'\b[a-z]+_[a-z_]+\b|\b[a-z]+[A-Z][a-zA-Z]+\b|\b\w+\.(java|py|js|json|ya?ml|toml|gradle|kts)\b|\w\(\)|`')
 # A card's face is meant to read at a glance. Past these it gets a warning, even where it fits.
@@ -383,6 +384,12 @@ def check_cards(cards, base=None, pack=None):
         for it in c.get('items') or []:
             wording[f'item {it.get("id")}'] = ' '.join(str(it.get(f) or '') for f in ('label', 'text'))
         for field, words in wording.items():
+            for m in LINK.finditer(str(words)):
+                bits = [urllib.parse.unquote(x) for x in m.group(2).split('/')]
+                if len(bits) >= 3 and bits[2] in seen | {x.get('id') for x in cards}:
+                    continue  # a card in this same deck, which may not be sent yet
+                if DATA and 'no such' in resolve(m.group(2)):
+                    warnings.append(f'{name}: {field} links to {m.group(2)}, which isn\'t there: {resolve(m.group(2))}')
             if NAMED_DIRECTION.search(str(words)):
                 errors.append(f'{name}: {field} names a swipe direction. People can swap those, so say "add a comment" or nothing')
             if field != 'details' and not field.startswith('part ') and LOOKS_LIKE_CODE.search(str(words)):
@@ -435,6 +442,38 @@ def check_deck(d, base, pack):
         if d['topic'] not in topics:
             errors.append(f'no topic called {d["topic"]} in {pack}. These exist: {", ".join(sorted(topics)) or "none"}. Make it with: riffle topic {d["topic"]} --pack {pack} --title "..."')
     return errors, warnings
+
+
+def resolve(address):
+    """A link's address as Pack › Topic › Deck › Card › Part, from the files as they are now. What no
+    longer exists says so."""
+    bits = [urllib.parse.unquote(x) for x in str(address).split('/')]
+    pack, deck_id, card_id, part_id = (bits + [None] * 4)[:4]
+    pf = DATA / 'packs' / str(pack) / 'pack.json' if DATA and pack else None
+    if not pf or not pf.exists():
+        return f'{address} (no such pack)'
+    p = load_json(pf)
+    names = [p.get('title') or pack]
+    if not deck_id:
+        return ' › '.join(names)
+    df = DATA / 'packs' / pack / 'decks' / f'{deck_id}.json'
+    if not df.exists():
+        return ' › '.join([*names, f'{deck_id} (no such deck)'])
+    d = load_json(df)
+    topic = next((t for t in p.get('topics', []) if t.get('id') == d.get('topic')), None)
+    names += [(topic or {}).get('title') or 'Misc', d.get('title') or deck_id]
+    if card_id:
+        card = next((c for c in d.get('cards', []) if c.get('id') == card_id), None)
+        names.append((card.get('title') or card_id) if card else f'{card_id} (no such card)')
+        if part_id:
+            part = next((x for x in (card or {}).get('parts') or [] if x.get('id') == part_id), None)
+            names.append(part.get('title') or part_id if part else f'{part_id} (no such part)')
+    return ' › '.join(names)
+
+
+def readable(text):
+    """Their words with each link written out as where it goes."""
+    return LINK.sub(lambda m: f'[{m.group(1).strip()} → {resolve(m.group(2))}]', str(text or ''))
 
 
 def report_check(errors, warnings):
@@ -892,7 +931,7 @@ def part_line(e, card):
     said = part_word(e) or 'no mark'
     line = f'      part {e.get("part")} ({title}): {said}'
     if e.get('comment'):
-        line += f', "{e["comment"]}"'
+        line += f', "{readable(e["comment"])}"'
     if e.get('images'):
         line += f'\n          pictures: {pictures(e)}'
     return line
@@ -910,7 +949,7 @@ def answer_line(a, card):
         parts.append('on your handled conclusion')
     line = f'  {a["card"]} ({title}): ' + ', '.join(str(p) for p in parts)
     if a.get('comment'):
-        line += f'\n      "{a["comment"]}"'
+        line += f'\n      "{readable(a["comment"])}"'
     if a.get('images'):
         line += f'\n      pictures: {pictures(a)}'
     return line
@@ -944,7 +983,7 @@ def cmd_answers(a):
                 elif card_id in d['drafts']:
                     dr = d['drafts'][card_id]
                     if dr.get('text'):
-                        print(f'  {card_id}: still writing: "{dr["text"]}"')
+                        print(f'  {card_id}: still writing: "{readable(dr["text"])}"')
                     if dr.get('selected'):
                         print(f'  {card_id}: still choosing: {names_of(card, dr["selected"])}')
                     if dr.get('images'):
@@ -957,7 +996,7 @@ def cmd_answers(a):
                     for p in sorted(parts_here, key=lambda e: order.index(e.get('part')) if e.get('part') in order else 99):
                         print(part_line(p, card))
             if d['notes'] and d['notes'] in shown:
-                print(f'  Deck notes: "{d["notes"].get("text", "")}"')
+                print(f'  Deck notes: "{readable(d["notes"].get("text", ""))}"')
                 if d['notes'].get('images'):
                     print(f'      pictures: {pictures(d["notes"])}')
             for r in d['resets']:
@@ -966,7 +1005,7 @@ def cmd_answers(a):
             for old in d['earlier']:
                 if old in shown:
                     on = f'{old["card"]}, part {old["part"]}' if old.get('type') == 'part' else old['card']
-                    print(f'  Said before starting over, on {on}: "{old["comment"]}"')
+                    print(f'  Said before starting over, on {on}: "{readable(old["comment"])}"')
             if d['verdict'] and d['verdict'] in shown:
                 v = d['verdict']
                 print(f'  DECK: {"done" if v.get("verdict") == "done" else "REPLAN FROM THE BASE"} ({v.get("answered")} of {v.get("total")} answered)')
@@ -975,12 +1014,12 @@ def cmd_answers(a):
             if new:
                 print(f'\n{pack}: thoughts')
                 for t in new:
-                    print(f'  {t["id"]}: "{t["text"]}"')
+                    print(f'  {t["id"]}: "{readable(t["text"])}"')
                     if t.get('images'):
                         print(f'      pictures: {pictures(t)}')
         for pack, t in thought_drafts.items():
             if t in shown and t.get('text'):
-                print(f'\n{pack}: a thought still being written: "{t["text"]}"')
+                print(f'\n{pack}: a thought still being written: "{readable(t["text"])}"')
     if a.mark_read:
         for pack in sorted({e.get('pack') for e in shown if e.get('pack')}):
             entry = state.setdefault('packs', {}).setdefault(pack, {'files': []})
@@ -1329,6 +1368,18 @@ def cmd_notify_flush(a):
             pass
 
 
+def cmd_link(a):
+    """The text of a link to a pack, deck, card or part, to put in a card's words."""
+    sync()
+    address = '/'.join(x for x in (a.pack_id, a.deck, a.card, a.part) if x)
+    where = resolve(address)
+    if 'no such' in where:
+        die(f'Nothing there: {where}')
+    label = a.label or where.split(' › ')[-1]
+    print(f'[{label}](riffle:{address})')
+    print(f'  goes to {where}')
+
+
 def cmd_notify(a):
     sync()
     badge = a.badge if a.badge is not None else owed_cards(summarise(read_events())[0])
@@ -1398,6 +1449,10 @@ def main():
     s = sub.add_parser('thought', help='answer one of their thoughts')
     s.add_argument('pack_id'); s.add_argument('thought_id'); s.add_argument('--how', required=True)
     s.set_defaults(fn=cmd_thought)
+
+    s = sub.add_parser('link', help='the text of a link to a deck, card or part, to put in a card')
+    s.add_argument('pack_id'); s.add_argument('deck', nargs='?'); s.add_argument('card', nargs='?'); s.add_argument('part', nargs='?'); s.add_argument('--label')
+    s.set_defaults(fn=cmd_link)
 
     s = sub.add_parser('notify', help='send a notification to the phone by hand')
     s.add_argument('--title', default='Riffle'); s.add_argument('--body', default=''); s.add_argument('--badge', type=int); s.add_argument('--tag', default='riffle')

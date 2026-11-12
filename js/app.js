@@ -2,13 +2,15 @@
 import { DEMO_PACK } from './demo.js';
 import { DeckView, archiveWords, cardHTML, deckKey, deckSummary, markHTML, queueUnsentWords, sendWords, toolsHTML, wordsIn } from './deck.js';
 import { ThoughtsView, thoughtCount } from './thoughts.js';
-import { DEFAULT_DIRS, MEANING, confetti, esc, getDirs, icon, paintNotices, safeIcon, setDirs, setNotice, tick } from './ui.js';
+import { DEFAULT_DIRS, MEANING, confetti, esc, getDirs, icon, padInsert, paintNotices, safeIcon, setDirs, setNotice, tick } from './ui.js';
 import * as store from './store.js';
 import * as sync from './sync.js';
 import * as push from './push.js';
 import { countWords } from './photos.js';
+import { addressOf, linkify, linkText, plainLinks, splitAddress } from './links.js';
+import { initIsland, islandNow, setIsland } from './island.js';
 
-const VERSION = '0.6.0';
+const VERSION = '0.7.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -38,6 +40,8 @@ const MARKS = [
 
 let current = null;     // the view on screen that holds typed words, if any
 let render = () => {};  // draws the current screen again
+let screen = { kind: 'home' }; // where things are when no view holding words is open
+let trail = [];         // the places links were followed from, newest last, so Back goes there
 let pullNow = () => {};
 let updateReady = false;
 const isLocalHost = ['localhost', '127.0.0.1'].includes(location.hostname);
@@ -337,6 +341,8 @@ async function refreshStatusLine() {
 async function showHome() {
   current = null;
   render = showHome;
+  screen = { kind: 'home' };
+  trail = [];
   const packs = await library();
   const rows = [];
   let owed = 0;
@@ -390,11 +396,13 @@ function packTile(p, left, count, big = 0) {
 
 // ---------- a pack's page
 
-async function showPack(id, message = '') {
+async function showPack(id, message = '', { topic = null, keepTrail = false } = {}) {
   current = null;
   const pack = (await library()).find(p => p.id === id);
   if (!pack) { showHome(); return; }
   render = () => showPack(id);
+  screen = { kind: 'pack', pack: id };
+  if (!keepTrail) trail = [];
   const sums = await summaries(pack);
   const { topics, misc } = topicsOf(pack);
   const deckRow = (d, inStack, art) => {
@@ -410,7 +418,7 @@ async function showPack(id, message = '') {
     const done = t.decks.filter(d => sums.get(d.id).finished).length;
     const cleared = done === t.decks.length;
     const art = safeIcon(t.icon) || safeIcon(pack.icon) || icon('card-random');
-    return `<section class="topic ${cleared ? 'cleared' : ''}" style="--pc:${esc(t.color || pack.color || '#7b8294')}">
+    return `<section class="topic ${cleared ? 'cleared' : ''}" data-topic="${esc(t.id)}" style="--pc:${esc(t.color || pack.color || '#7b8294')}">
       <div class="topic-head">
         <span class="topic-art">${safeIcon(t.icon) || icon('card-random')}</span>
         <span class="topic-title">${esc(t.title)}</span>
@@ -438,6 +446,10 @@ async function showPack(id, message = '') {
   app.querySelector('[data-go=thoughts]').onclick = () => openThoughts(pack);
   if (pack.demo) await drawFeelWords(pack);
   app.querySelectorAll('[data-deck]').forEach(b => { b.onclick = () => openDeck(pack, b.dataset.deck); });
+  if (topic) {
+    const section = app.querySelector(`[data-topic="${CSS.escape(topic)}"]`);
+    if (section) section.scrollIntoView({ block: 'start' });
+  }
 }
 
 // ---------- what's written in the Feel test
@@ -487,7 +499,7 @@ async function drawFeelWords(pack, confirming = false) {
   const words = await feelWords(pack);
   const unsent = words.live.filter(w => !w.sent);
   const swipes = [...words.states.values()].reduce((n, s) => n + Object.keys(s.answers || {}).length, 0);
-  const row = w => `<div class="word"><small>${esc(w.where)}</small><span>${esc([w.text, (w.pics || []).length ? `(${countWords(w.pics.length)})` : ''].filter(Boolean).join(' '))}</span><em class="${w.sent ? 'sent' : ''}">${w.sent ? 'Sent' : 'Not sent yet'}</em></div>`;
+  const row = w => `<div class="word"><small>${esc(w.where)}</small><span>${linkify([w.text, (w.pics || []).length ? `(${countWords(w.pics.length)})` : ''].filter(Boolean).join(' '))}</span><em class="${w.sent ? 'sent' : ''}">${w.sent ? 'Sent' : 'Not sent yet'}</em></div>`;
   const count = words.live.length;
   host.innerHTML = `
     <div class="demo-note">Anything you type here gets sent, tagged as a test. Swipes with no words stay on this phone.</div>
@@ -526,8 +538,13 @@ async function drawFeelWords(pack, confirming = false) {
   });
 }
 
-async function openThoughts(pack) {
-  const view = new ThoughtsView({ host: app, pack, onExit: () => { current = null; showPack(pack.id); } });
+async function openThoughts(pack, { keepTrail = false } = {}) {
+  if (!keepTrail) trail = [];
+  const view = new ThoughtsView({
+    host: app, pack,
+    onExit: () => { current = null; if (trail.length) goBack(); else showPack(pack.id); },
+    nav: { linker: showLinkSheet, backBy: trail.length ? placeLabel(trail[trail.length - 1]) : null },
+  });
   current = view;
   render = () => {};
   try {
@@ -539,19 +556,32 @@ async function openThoughts(pack) {
   }
 }
 
-async function openDeck(pack, deckId, at = null) {
+// `at` is a place to open at: a card, its parts, and whether a comment was being written there.
+async function openDeck(pack, deckId, at = null, { keepTrail = false } = {}) {
   const deck = pack.decks.find(d => d.id === deckId);
-  if (!deck) { showPack(pack.id); return; }
+  if (!deck) { showPack(pack.id, '', { keepTrail }); return; }
+  if (!keepTrail) trail = [];
   const images = await imagesFor(pack, deck);
   current = new DeckView({
     host: app, pack, deck, images,
-    onExit: () => { current && current.close(); showPack(pack.id); },
+    onExit: () => { current && current.close(); if (trail.length) goBack(); else showPack(pack.id); },
     onVerdict: which => afterVerdict(pack, deck, which),
+    nav: {
+      follow, shrink, linker: showLinkSheet,
+      crumb: level => { current && current.close(); showPack(pack.id, '', { topic: level === 'topic' ? deck.topic : null }); },
+      backBy: trail.length ? placeLabel(trail[trail.length - 1]) : null,
+    },
   });
   render = () => {};
   try {
     await current.open();
-    if (at && at.card && current.cards.has(at.card)) current.jump(at.card, at.part);
+    const view = current;
+    if (at && at.card && view.cards.has(at.card)) {
+      view.jump(at.card, at.partsOpen || at.part ? at.part || null : null);
+      if (at.partsOpen && !at.part && view.partsEl.hidden) view.openParts();
+      if (at.partComposing && at.part) view.openPartPad(at.part);
+      else if (at.composing && view.partsEl.hidden) view.openComposer();
+    }
   } catch {
     current = null;
     setNotice({ text: 'Not saving on this phone', act: showSettings });
@@ -562,15 +592,167 @@ async function openDeck(pack, deckId, at = null) {
 // ---------- addresses: pack/deck/card/part, from a notification or a link
 
 // Goes to a pack, a deck, a card or a part of one. Anything that no longer exists stops at the level above.
-async function openAddress(address) {
-  const [packId, deckId, cardId, partId] = String(address || '').split('/').map(x => decodeURIComponent(x || ''));
-  if (!packId) { showHome(); return; }
-  const pack = (await library()).find(p => p.id === packId);
-  if (!pack) { showHome(); return; }
+// Followed from a link, the trail back is kept; anything else starts it again.
+async function openAddress(address, { linked = false } = {}) {
+  const [packId, deckId, cardId, partId] = splitAddress(address);
+  if (!linked) trail = [];
   if (current && current.close) current.close();
   current = null;
-  if (!deckId || !pack.decks.some(d => d.id === deckId)) { showPack(pack.id); return; }
-  await openDeck(pack, deckId, cardId ? { card: cardId, part: partId || null } : null);
+  const pack = packId && (await library()).find(p => p.id === packId);
+  if (!pack) { showHome(); return; }
+  if (!deckId || !pack.decks.some(d => d.id === deckId)) { showPack(pack.id, '', { keepTrail: linked }); return; }
+  await openDeck(pack, deckId, cardId ? { card: cardId, part: partId || null, partsOpen: !!partId } : null, { keepTrail: linked });
+}
+
+// ---------- links: following one, and coming back the same way
+
+// Where things are: a deck's card with what was being typed there, thoughts, a pack's page, or home.
+function whereNow() {
+  if (current && current.place) return current.place();
+  if (current instanceof ThoughtsView) return { kind: 'thoughts', pack: current.pack.id };
+  return screen;
+}
+
+function placeLabel(p) {
+  if (!p) return null;
+  if (p.kind === 'deck') return (p.show && (p.show.title || p.show.deckTitle)) || 'the deck';
+  if (p.kind === 'thoughts') return 'Thoughts';
+  if (p.kind === 'pack') return 'the pack';
+  return 'the start';
+}
+
+async function follow(address) {
+  const from = whereNow();
+  if (current && current.secure) await Promise.resolve(current.secure()).catch(() => {});
+  trail.push(from);
+  if (trail.length > 40) trail.shift();
+  await openAddress(address, { linked: true });
+}
+
+async function goBack() {
+  const p = trail.pop();
+  if (!p) { showHome(); return; }
+  await restorePlace(p);
+}
+
+// Opens a place as it was left: the card on top, its parts, and the comment box if one was open.
+async function restorePlace(p) {
+  if (current && current.close) current.close();
+  current = null;
+  const pack = p.pack && (await library()).find(x => x.id === p.pack);
+  if (!pack) { showHome(); return; }
+  if (p.kind === 'deck') await openDeck(pack, p.deck, p, { keepTrail: true });
+  else if (p.kind === 'thoughts') await openThoughts(pack, { keepTrail: true });
+  else showPack(pack.id, '', { keepTrail: true });
+}
+
+// ---------- the mini player
+
+async function shrink() {
+  if (!(current instanceof DeckView)) return;
+  const place = current.place();
+  const packId = current.pack.id;
+  current.close();
+  current = null;
+  setIsland(place);
+  showPack(packId);
+}
+
+// A tap on the island brings its deck back, and the deck open now takes its place.
+async function tapIsland(target) {
+  let next = null;
+  if (current instanceof DeckView) { next = current.place(); current.close(); }
+  else if (current && current.close) current.close();
+  current = null;
+  setIsland(next);
+  trail = [];
+  await restorePlace(target);
+}
+
+// ---------- linking a card from a box being typed in
+
+let linkClose = null;
+// A small sheet: the card in the mini player, the card or part being written about, or one from a list.
+function showLinkSheet({ pad, here = null, packId = null }) {
+  if (linkClose) linkClose();
+  const isl = islandNow();
+  const options = [];
+  if (isl && isl.card) {
+    const address = addressOf(isl.pack, isl.deck, isl.card, isl.partsOpen ? isl.part : null);
+    if (!here || address !== here.address) options.push({ what: 'The card in the mini player', label: plainLinks((isl.show && (isl.show.title || isl.show.text)) || isl.card), address });
+  }
+  if (here) options.push(here);
+  const back = document.createElement('div');
+  back.className = 'linksheet-back';
+  const sheet = document.createElement('div');
+  sheet.className = 'linksheet';
+  sheet.id = 'linksheet';
+  sheet.innerHTML = `<div class="ls-title">Link a card</div>
+    ${options.map((o, i) => `<button data-i="${i}">${icon('link')}<span><small>${esc(o.what)}</small>${esc(o.label)}</span></button>`).join('')}
+    <button data-pick="list">${icon('layout-grid')}<span>Pick one from a list</span></button>
+    <button class="ls-cancel" data-pick="cancel">Cancel</button>`;
+  app.append(back, sheet);
+  document.body.classList.add('covered'); // the mini player waits behind it
+  let done = false;
+  linkClose = () => { done = true; back.remove(); sheet.remove(); document.body.classList.remove('covered'); linkClose = null; };
+  back.addEventListener('pointerup', () => linkClose && linkClose());
+  // Acting as the finger lifts, with the touch's own default stopped, keeps the keyboard up and the
+  // place in the words where it was.
+  sheet.addEventListener('touchstart', e => { if (e.cancelable && e.target.closest('button')) e.preventDefault(); }, { passive: false });
+  const choose = e => {
+    const b = e.target.closest('button');
+    if (!b || done) return;
+    if (b.dataset.pick === 'cancel') { linkClose(); return; }
+    if (b.dataset.pick === 'list') {
+      linkClose();
+      showPicker(packId, chosen => { if (chosen) padInsert(pad, `${linkText(chosen.label, chosen.address)} `); });
+      return;
+    }
+    const o = options[+b.dataset.i];
+    linkClose();
+    padInsert(pad, `${linkText(o.label, o.address)} `);
+  };
+  sheet.addEventListener('pointerup', choose);
+  sheet.addEventListener('click', choose);
+}
+
+// Every card in every pack, this pack first, to pick one to link. A card in parts lists its parts too.
+async function showPicker(packId, done) {
+  const lib = await library();
+  const packs = [...lib.filter(p => p.id === packId), ...lib.filter(p => p.id !== packId && !p.demo)];
+  const el = document.createElement('div');
+  el.className = 'picker';
+  el.innerHTML = `
+    <div class="ov-head">
+      <button class="iconbtn" data-pk="close" aria-label="Back">${icon('chevron-left')}</button>
+      <div class="t">Pick a card to link</div>
+    </div>
+    <div class="picker-list scroll">
+      ${packs.map(p => `<div class="pk-pack">${esc(p.title)}</div>
+        ${topicsOf(p).topics.flatMap(t => t.decks).concat(topicsOf(p).misc).map(d => `<button class="pk-deck" data-pack="${esc(p.id)}" data-deck="${esc(d.id)}"><span>${esc(d.title)}</span><small>${d.cards.length}</small>${icon('chevron-right')}</button><div class="pk-cards" hidden></div>`).join('')}`).join('')}
+    </div>`;
+  app.append(el);
+  document.body.classList.add('covered');
+  const finish = chosen => { el.remove(); document.body.classList.remove('covered'); done(chosen); };
+  el.onclick = e => {
+    if (e.target.closest('[data-pk=close]')) { finish(null); return; }
+    const c = e.target.closest('.pk-card');
+    if (c) { finish({ label: c.dataset.label, address: c.dataset.addr }); return; }
+    const d = e.target.closest('.pk-deck');
+    if (!d) return;
+    const list = d.nextElementSibling;
+    const open = list.hidden;
+    d.classList.toggle('open', open);
+    list.hidden = !open;
+    if (!open || list.childElementCount) return;
+    const pack = packs.find(p => p.id === d.dataset.pack);
+    const deck = pack.decks.find(x => x.id === d.dataset.deck);
+    list.innerHTML = deck.cards.map(card => {
+      const title = card.title || plainLinks(card.text || '');
+      return `<button class="pk-card ${esc(card.rarity || 'common')}" data-addr="${esc(addressOf(pack.id, deck.id, card.id))}" data-label="${esc(title)}">${esc(title)}<small>${esc(plainLinks(card.text || ''))}</small></button>
+        ${(card.parts || []).map(pt => `<button class="pk-card pk-part ${esc(card.rarity || 'common')}" data-addr="${esc(addressOf(pack.id, deck.id, card.id, pt.id))}" data-label="${esc(`${title} › ${pt.title}`)}">${esc(pt.title)}</button>`).join('')}`;
+    }).join('') || '<div class="demo-note">No cards.</div>';
+  };
 }
 
 // A notification's address rides in the page's hash: #open=pack/deck/card.
@@ -791,6 +973,14 @@ async function start() {
   );
   navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(() => {});
   sync.onChange(() => { refreshNotice(); refreshStatusLine(); });
+  await initIsland(tapIsland);
+  // A link tapped anywhere a deck isn't taking care of its own.
+  app.addEventListener('click', e => {
+    const l = e.target.closest('.rlink');
+    if (!l || current instanceof DeckView) return;
+    e.preventDefault();
+    follow(l.dataset.addr);
+  });
   const opening = addressIn(location.hash);
   if (opening) {
     history.replaceState(null, '', location.pathname + location.search);
@@ -819,5 +1009,5 @@ start();
 
 // For the tests in tests/, on a local test server only.
 if (isLocalHost) {
-  window.__riffle = { get current() { return current; }, showHome, showPack, showConnect, showSettings, showStyle, showDirections, setStyle, setDirs, getDirs, setNotice, onHide, openThoughts, openAddress, library, sync, store };
+  window.__riffle = { get current() { return current; }, get trail() { return trail; }, showHome, showPack, showConnect, showSettings, showStyle, showDirections, setStyle, setDirs, getDirs, setNotice, onHide, openThoughts, openAddress, follow, goBack, shrink, tapIsland, islandNow, setIsland, library, sync, store };
 }

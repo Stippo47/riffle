@@ -7,6 +7,7 @@ import * as store from './store.js';
 import { eachAtOnce, enqueue, newId, photoPath, pictureUrl } from './sync.js';
 import { openViewer } from './viewer.js';
 import { countWords, discardPhoto, drawStrip, photoButton, saveDrawing, savePhoto, stripError } from './photos.js';
+import { addressOf, linkButton, linkify, paraLinks, plainLinks } from './links.js';
 
 const DIRS = ['right', 'left', 'down', 'up'];
 const UNIT = { right: [1, 0], left: [-1, 0], up: [0, -1], down: [0, 1] };
@@ -283,7 +284,19 @@ export const toolsHTML = (ids = true) => {
     <button data-act="notes"${id('notesbtn')}>${icon('notebook-pen')}<span>Notes</span></button>
     <button data-act="skip"${id('skip')}>${icon('skip-forward')}<span>Skip</span></button>
     <button data-act="grid">${icon('layout-grid')}<span>Grid</span></button>
+    <button data-act="shrink"${id('shrinkbtn')}>${icon('minimize-2')}<span>Shrink</span></button>
   </div>`;
+};
+
+// Pack › Topic › Deck › Card, each a way there. The card's part is filled in as cards are dealt.
+export const crumbsHTML = (pack, deck, card = '') => {
+  const topic = (pack.topics || []).find(t => t.id === deck.topic);
+  return `<nav class="crumbs t" aria-label="Where this is">
+    <button class="crumb crumb-pack" data-act="crumbpack">${esc(pack.title)}</button><i class="c-pack">›</i>
+    ${topic ? `<button class="crumb crumb-topic" data-act="crumbtopic">${esc(topic.title)}</button><i class="c-topic">›</i>` : ''}
+    <button class="crumb crumb-deck" data-act="crumbdeck">${esc(deck.title)}</button><i class="c-card">›</i>
+    <button class="crumb crumb-card" data-act="crumbcard" id="crumbcard">${esc(card)}</button>
+  </nav>`;
 };
 
 // What shows at the edge the card is heading for. Which parts show is the While swiping choice.
@@ -302,11 +315,11 @@ export function cardHTML(card, images = () => null, fill = t => t) {
   const bits = [card.details ? 'details' : '', pics.length ? countOf(pics.length, 'picture') : '', films.length ? countOf(films.length, 'video') : ''].filter(Boolean);
   const moreText = parts.length ? `Tap to read the ${countOf(parts.length, 'part')}` : `Tap for ${bits.length > 1 ? `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}` : bits[0] || ''}`;
   const text = fill(card.text || ''), why = fill(card.why || ''), pick = board ? '' : fill(card.pick || '');
-  const long = text.length > 70;
+  const long = plainLinks(text).length > 70;
   const options = card.kind === 'options' ? (card.options || []) : null;
   const body = card.handled
-    ? `<h2 class="q-small">${esc(text)}</h2><p class="why how">${esc(fill(card.handled.how || ''))}</p>`
-    : `<h2 class="${long ? 'long' : ''}">${esc(text)}</h2>${why ? `<p class="why">${esc(why)}</p>` : ''}`;
+    ? `<h2 class="q-small">${linkify(card.text || '', fill)}</h2><p class="why how">${linkify(card.handled.how || '', fill)}</p>`
+    : `<h2 class="${long ? 'long' : ''}">${linkify(card.text || '', fill)}</h2>${why ? `<p class="why">${linkify(card.why, fill)}</p>` : ''}`;
   return `
     <div class="flip">
       <div class="face">
@@ -326,7 +339,7 @@ export function cardHTML(card, images = () => null, fill = t => t) {
         ${board ? '<div class="board-preview"></div><div class="opt-chosen" hidden></div>' : ''}
         ${parts.length ? `<div class="parts-preview">${parts.slice(0, PARTS_ON_FACE).map((pt, n) => `<span class="pp" data-part="${esc(pt.id)}"><i class="pp-n">${n + 1}</i><span>${esc(fill(pt.title || ''))}</span><em class="pp-mark"></em></span>`).join('')}${parts.length > PARTS_ON_FACE ? `<span class="pp pp-more">and ${parts.length - PARTS_ON_FACE} more</span>` : ''}</div>` : ''}
         <div class="prev" hidden></div>
-        ${pick && !options && !card.handled ? `<div class="pick"><b>${esc(kind.pickLabel || 'My pick')}</b>${esc(pick)}</div>` : '<div class="pickgap"></div>'}
+        ${pick && !options && !card.handled ? `<div class="pick"><b>${esc(kind.pickLabel || 'My pick')}</b>${linkify(card.pick, fill)}</div>` : '<div class="pickgap"></div>'}
         <button class="attached" data-act="opencomment" hidden>${icon('message-square-text')}<span></span></button>
         ${breaks ? `<div class="holdline">Hold ${esc(physicalOf('right'))} to break through</div>` : ''}
         <div class="more"${hasMore || board ? '' : ' hidden'}>${board ? `Tap to choose from ${board.length}` : hasMore ? esc(moreText) : ''}</div>
@@ -336,9 +349,9 @@ export function cardHTML(card, images = () => null, fill = t => t) {
       <div class="back">
         <div class="back-scroll">
           <h3>${esc(card.title || text)}</h3>
-          <p class="back-why" hidden>${esc(card.handled ? fill(card.handled.how || '') : why)}</p>
+          <p class="back-why" hidden>${linkify(card.handled ? card.handled.how || '' : card.why || '', fill)}</p>
           ${mediaHTML(card, images)}
-          ${paras(fill(card.details || ''))}
+          ${paraLinks(card.details || '', fill)}
         </div>
         <div class="back-foot">
           <button class="back-hint" data-act="flipback">Tap to flip back</button>
@@ -349,8 +362,10 @@ export function cardHTML(card, images = () => null, fill = t => t) {
 }
 
 export class DeckView {
-  constructor({ host, pack, deck, images, onExit, onVerdict }) {
-    Object.assign(this, { host, pack, deck, images, onExit, onVerdict });
+  // `nav` is how this deck reaches the rest of the app: follow(address), linker(...), shrink(), crumb(level),
+  // and backBy, the place a link came from, if one did.
+  constructor({ host, pack, deck, images, onExit, onVerdict, nav = {} }) {
+    Object.assign(this, { host, pack, deck, images, onExit, onVerdict, nav });
     this.cards = new Map(deck.cards.map(c => [c.id, c]));
     this.nodes = new Map();
     this.composing = false;
@@ -439,8 +454,8 @@ export class DeckView {
       <div class="deck screen" id="deck">
         <div class="topline">
           <div class="deckbar">
-            <button class="iconbtn" data-act="back" aria-label="Back">${icon('chevron-left')}</button>
-            <div class="t">${esc(this.deck.title)}</div>
+            <button class="iconbtn${this.nav.backBy ? ' linked' : ''}" data-act="back" aria-label="${esc(this.nav.backBy ? `Back to ${this.nav.backBy}` : 'Back')}">${icon(this.nav.backBy ? 'corner-up-left' : 'chevron-left')}</button>
+            ${crumbsHTML(this.pack, this.deck)}
             <div class="n" id="count" data-slot="notice"></div>
           </div>
           ${toolsHTML()}
@@ -451,10 +466,10 @@ export class DeckView {
           ${markHTML()}
           <div class="endbox" id="end" hidden></div>
         </div>
-        <div class="composer" id="composer" hidden><div class="padwrap">${padHTML('comment', 'Your comment. Drag down to close.')}<div class="photostrip" id="commentphotos" hidden></div>${photoButton('comment')}</div></div>
+        <div class="composer" id="composer" hidden><div class="padwrap">${padHTML('comment', 'Your comment. Drag down to close.')}<div class="photostrip" id="commentphotos" hidden></div>${linkButton('comment')}${photoButton('comment')}</div></div>
         <div class="notes-sheet" id="notes" hidden>
           <button class="sheet-head" data-act="closenotes"><i class="grabber"></i><span>Notes on this deck</span></button>
-          <div class="padwrap">${padHTML('notestext', "Anything that doesn't fit a card. Drag down to close.")}<div class="photostrip" id="notesphotos" hidden></div>${photoButton('notes')}</div>
+          <div class="padwrap">${padHTML('notestext', "Anything that doesn't fit a card. Drag down to close.")}<div class="photostrip" id="notesphotos" hidden></div>${linkButton('notes')}${photoButton('notes')}</div>
         </div>
       </div>
       <div class="overview" id="overview" hidden></div>
@@ -464,7 +479,7 @@ export class DeckView {
     Object.assign(this, {
       root: $('deck'), table: $('table'), glow: $('glow'), mark: $('mark'), composer: $('composer'), comment: $('comment'),
       notesSheet: $('notes'), notesText: $('notestext'), endBox: $('end'), overview: $('overview'), boardEl: $('boardview'), partsEl: $('partsview'),
-      countEl: $('count'), barEl: $('bar'), undoBtn: $('undo'), skipBtn: $('skip'), notesBtn: $('notesbtn'),
+      countEl: $('count'), barEl: $('bar'), undoBtn: $('undo'), skipBtn: $('skip'), notesBtn: $('notesbtn'), crumbCard: $('crumbcard'),
     });
     padSet(this.notesText, this.s.notes || '');
 
@@ -472,6 +487,9 @@ export class DeckView {
     this.host.onclick = e => {
       const l = this.lift; // something already acted on this same tap, and its click lands on whatever just opened
       if (l && e.detail !== 0 && performance.now() - l.t < 600 && Math.hypot(e.clientX - l.x, e.clientY - l.y) < 14) return;
+      const link = e.target.closest('.rlink');
+      if (link) { e.preventDefault(); this.follow(link.dataset.addr); return; }
+      if (e.target.closest('.weblink')) return; // a web address opens as any link does
       const shown = !e.target.closest('.clip-big') && e.target.closest('.back-scroll img, .back-scroll .clip, .partsview img.mpic, .partsview .clip');
       if (shown) {
         if (shown.classList.contains('clip')) this.toggleClip(shown);
@@ -551,6 +569,12 @@ export class DeckView {
       rmphoto: () => this.dropPhoto(btn.dataset.photoId, btn.dataset.where),
       keepgoing: () => this.deal(),
       clipbig: () => this.viewMedia(btn.closest('.clip')),
+      shrink: () => this.nav.shrink && this.nav.shrink(),
+      crumbpack: () => this.nav.crumb && this.nav.crumb('pack'),
+      crumbtopic: () => this.nav.crumb && this.nav.crumb('topic'),
+      crumbdeck: () => this.showOverview(),
+      crumbcard: () => this.toCard(),
+      linkcard: () => this.linkCard(btn.dataset.where),
       closeparts: () => this.closeParts(),
       partmark: () => this.markPart(btn.dataset.part, btn.dataset.mark),
       partcomment: () => this.openPartPad(btn.dataset.part),
@@ -562,6 +586,70 @@ export class DeckView {
   exit() {
     this.saveNow();
     this.onExit && this.onExit();
+  }
+
+  // ---------- links, and where this is
+
+  // Following a link leaves this deck, remembering where it was, so Back comes here again.
+  follow(address) {
+    if (!address || !this.nav.follow) return;
+    this.saveNow();
+    this.nav.follow(address);
+  }
+
+  // Where things are now, for coming back to: the card on top, its parts, and what was being typed.
+  place() {
+    const card = this.topCard();
+    const partsOpen = !this.partsEl.hidden && this.partsCard;
+    return {
+      kind: 'deck', pack: this.pack.id, deck: this.deck.id, card: partsOpen ? this.partsCard : this.topId(),
+      part: partsOpen ? (this.openPart || this.visiblePart()) : null, partsOpen: !!partsOpen,
+      composing: this.composing, partComposing: !!(partsOpen && this.openPart),
+      show: card ? { deckTitle: this.deck.title, title: card.title || '', text: card.text || '', rarity: card.rarity || 'common', kind: card.kind || 'question' } : { deckTitle: this.deck.title, text: 'Deck done' },
+    };
+  }
+
+  // The part at the top of the parts screen, scrolled to.
+  visiblePart() {
+    const box = this.partsEl.querySelector('.parts-scroll');
+    if (!box) return null;
+    const top = box.getBoundingClientRect().top;
+    const sec = [...this.partsEl.querySelectorAll('.part')].find(x => x.getBoundingClientRect().bottom > top + 40);
+    return sec ? sec.dataset.part : null;
+  }
+
+  // The card crumb brings the card itself back into view, from its back or its parts.
+  toCard() {
+    if (!this.overview.hidden) this.hideOverview();
+    if (!this.partsEl.hidden) { this.closeParts(); return; }
+    if (this.flipped) { this.flip(false); return; }
+    const top = this.topNode();
+    if (top && top.animate) top.animate([{ transform: 'scale(1)' }, { transform: 'scale(.98)' }, { transform: 'scale(1)' }], { duration: 200 });
+  }
+
+  syncCrumbs() {
+    if (!this.crumbCard) return;
+    const card = this.topCard();
+    this.crumbCard.textContent = card ? card.title || plainLinks(card.text || '') : 'The end';
+    this.crumbCard.disabled = !card;
+  }
+
+  // The link button in a box to type in: this card or part, the mini player's card, or one from a list.
+  linkCard(where) {
+    if (!this.nav.linker) return;
+    const card = this.cards.get(where === 'part' ? this.partsCard : this.topId());
+    let pad = this.comment, here = null;
+    if (where === 'part') {
+      const part = card && (card.parts || []).find(p => p.id === this.openPart);
+      pad = this.partPad(this.openPart);
+      if (part) here = { address: addressOf(this.pack.id, this.deck.id, card.id, part.id), label: `${card.title || plainLinks(card.text)} › ${part.title}`, what: 'This part' };
+    } else if (where === 'notes' || where === 'endnotes') {
+      pad = where === 'notes' ? this.notesText : this.endBox.querySelector('#endnotes');
+      here = { address: addressOf(this.pack.id, this.deck.id), label: this.deck.title, what: 'This deck' };
+    } else if (card) {
+      here = { address: addressOf(this.pack.id, this.deck.id, card.id), label: card.title || plainLinks(card.text), what: 'This card' };
+    }
+    if (pad) this.nav.linker({ pad, here, packId: this.pack.id });
   }
 
   topId() { return this.s.order[0] || null; }
@@ -629,6 +717,7 @@ export class DeckView {
       this.syncOptions();
       this.syncPartsPreview();
     }
+    this.syncCrumbs();
     this.updateCounts();
     if (!ids.length) this.showEnd();
     else this.hideEnd();
@@ -653,7 +742,7 @@ export class DeckView {
     const chip = top.querySelector('.attached');
     const text = this.draft().trim(), n = this.draftPics().length;
     chip.hidden = (!text && !n) || this.composing;
-    chip.querySelector('span').textContent = [text, n ? countWords(n) : ''].filter(Boolean).join(' · ');
+    chip.querySelector('span').textContent = [plainLinks(text), n ? countWords(n) : ''].filter(Boolean).join(' · ');
   }
 
   syncPrev() {
@@ -667,7 +756,7 @@ export class DeckView {
     const card = this.cards.get(id);
     const chosen = a.selected && a.selected.length ? `: ${this.optionNames(card, a.selected)}` : '';
     const again = card.handled ? 'This is a newer conclusion.' : 'Swipe it again to change that.';
-    box.textContent = `You said ${stampWord(card, a.swipe)}${chosen}${a.comment ? `, "${a.comment}"` : ''}. ${again}`;
+    box.innerHTML = `You said ${esc(stampWord(card, a.swipe))}${esc(chosen)}${a.comment ? `, "${linkify(a.comment)}"` : ''}. ${esc(again)}`;
   }
 
   // ---------- option cards
@@ -973,21 +1062,21 @@ export class DeckView {
       </div>
       <div class="parts-scroll scroll">
         <div class="parts-lead">
-          <p class="parts-text">${esc(fill(card.text || ''))}</p>
-          ${card.why ? `<p class="parts-why">${esc(fill(card.why))}</p>` : ''}
+          <p class="parts-text">${linkify(card.text || '', fill)}</p>
+          ${card.why ? `<p class="parts-why">${linkify(card.why, fill)}</p>` : ''}
           ${mediaHTML(card, this.images)}
-          ${paras(fill(card.details || ''))}
+          ${paraLinks(card.details || '', fill)}
         </div>
         ${card.parts.map((pt, n) => `<section class="part" data-part="${esc(pt.id)}">
           <h3><b>${n + 1}</b><span>${esc(fill(pt.title || ''))}</span></h3>
-          <div class="part-body">${paras(fill(pt.text || ''))}${mediaHTML(pt, this.images)}</div>
+          <div class="part-body">${paraLinks(pt.text || '', fill)}${mediaHTML(pt, this.images)}</div>
           <div class="part-acts">
             ${PART_MARKS.map(m => `<button class="part-mark" data-act="partmark" data-part="${esc(pt.id)}" data-mark="${m}">${esc(partWord(card, m))}</button>`).join('')}
             <button class="part-say" data-act="partcomment" data-part="${esc(pt.id)}" aria-label="Comment on this part">${icon('message-square-text')}</button>
           </div>
           <button class="attached part-chip" data-act="partcomment" data-part="${esc(pt.id)}" hidden>${icon('message-square-text')}<span></span></button>
           <div class="part-pad" hidden>
-            <div class="padwrap">${padHTML(`partpad-${n}`, 'Your comment on this part. Drag down to close.')}<div class="photostrip" hidden></div>${photoButton('part')}</div>
+            <div class="padwrap">${padHTML(`partpad-${n}`, 'Your comment on this part. Drag down to close.')}<div class="photostrip" hidden></div>${linkButton('part')}${photoButton('part')}</div>
             <button class="ghostbtn part-done" data-act="partdone">Done</button>
           </div>
         </section>`).join('')}
@@ -1038,7 +1127,7 @@ export class DeckView {
     const chip = section.querySelector('.part-chip');
     const text = (st.text || '').trim(), n = (st.photos || []).length;
     chip.hidden = (!text && !n) || this.openPart === partId;
-    chip.querySelector('span').textContent = [text, n ? countWords(n) : ''].filter(Boolean).join(' · ');
+    chip.querySelector('span').textContent = [plainLinks(text), n ? countWords(n) : ''].filter(Boolean).join(' · ');
   }
 
   syncPartsCount() {
@@ -1368,6 +1457,10 @@ export class DeckView {
   onTap(e) {
     this.lift = { t: performance.now(), x: e.clientX, y: e.clientY };
     const t = this.dragFrom || e.target; // the lift's own target is the table, which holds the finger
+    const link = t && t.closest && t.closest('.rlink');
+    if (link) { this.follow(link.dataset.addr); return; }
+    const web = t && t.closest && t.closest('.weblink');
+    if (web) { window.open(web.href, '_blank', 'noopener'); return; }
     if (t && t.closest && t.closest('.attached')) { this.openComposer(); return; }
     const id = this.topId();
     if (!id) return;
@@ -1787,7 +1880,7 @@ export class DeckView {
         <h2 class="end-title">${early ? 'Replan this deck?' : 'Deck done'}</h2>
         <div class="end-sub">${esc(sub)}</div>
         <div class="tally">${groups.map(g => `<div class="dir-${g.dir}"><b data-to="${g.n}">0</b><span>${esc(g.words)}</span></div>`).join('')}</div>
-        <div class="padwrap">${padHTML('endnotes', 'Anything else on this deck?')}<div class="photostrip" id="endphotos" hidden></div>${photoButton('notes')}</div>
+        <div class="padwrap">${padHTML('endnotes', 'Anything else on this deck?')}<div class="photostrip" id="endphotos" hidden></div>${linkButton('endnotes')}${photoButton('notes')}</div>
         <div class="end-actions">
           ${early ? '' : `<button class="primary" data-act="done">Deck's done</button>`}
           <button class="${early ? 'primary' : 'secondary'}" data-act="replan">Replan this deck</button>
