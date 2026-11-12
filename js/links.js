@@ -38,7 +38,19 @@ export function linkify(text, fill = t => t) {
 export const plainLinks = text => String(text ?? '').replace(LINK, (all, label, address, url) => (url ? shortUrl(url) : label.trim()));
 
 // Paragraphs, like ui.js paras, with links.
-export const paraLinks = (text, fill = t => t) => String(text || '').split(/\n{2,}/).map(p => `<p>${linkify(p, fill)}</p>`).join('');
+export const paraLinks = (text, fill = t => t) => blocks(text, p => linkify(p, fill));
+
+// **Bold** in text already made safe. Escaping never makes stars, so this can't open a tag.
+export const bold = html => html.replace(/\*\*(?=\S)(.+?)\*\*/g, '<strong>$1</strong>');
+
+// Blank lines make paragraphs; a paragraph of "- " lines is a list; other single line breaks stay.
+export function blocks(text, line) {
+  return String(text || '').split(/\n{2,}/).map(p => {
+    const rows = p.split('\n');
+    if (rows.every(r => /^\s*- /.test(r))) return `<ul>${rows.map(r => `<li>${bold(line(r.replace(/^\s*- /, '')))}</li>`).join('')}</ul>`;
+    return `<p>${rows.map(r => bold(line(r))).join('<br>')}</p>`;
+  }).join('');
+}
 
 export const hasLinks = text => { LINK.lastIndex = 0; return LINK.test(String(text || '')); };
 

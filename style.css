@@ -420,6 +420,8 @@ svg{display:block}
 .back-scroll{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;padding:18px 20px 8px;font-size:17px;line-height:1.42;-webkit-user-select:text;user-select:text}
 .back-scroll h3{font-family:var(--card-display);font-size:21px;margin-bottom:10px}
 .back-scroll p{margin-bottom:12px;color:#2c2b33}
+.back-scroll ul,.part-body ul{margin:0 0 12px 1.2em;padding:0;color:#2c2b33}
+.back-scroll li,.part-body li{margin-bottom:5px}
 .back-scroll img{display:block;width:100%;border-radius:10px;margin-bottom:12px;cursor:zoom-in;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .back-foot{flex:none;display:flex;border-top:1px solid rgba(23,22,28,.1)}
 .back-hint{flex:1;min-height:46px;font-size:14px;font-weight:600;color:var(--card-dim)}
