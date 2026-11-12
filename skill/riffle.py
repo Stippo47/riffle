@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.parse
 from datetime import datetime, timezone
 
 HOME = pathlib.Path.home()
@@ -21,16 +22,24 @@ REMOTE = 'https://github.com/Stippo47/riffle-data.git'
 OWN_FILES = HOME / '.riffle'  # outside every repo: the push signing key, the icon library
 ICON_LIBRARY = OWN_FILES / 'icons'
 LAST_NOTIFY = OWN_FILES / 'last-notify'
+NOTIFY_PENDING = OWN_FILES / 'notify-pending.json'  # what the next notification will name
+NOTIFY_WAITER = OWN_FILES / 'notify-waiter'  # when the one waiting to send it is due
+NOTIFY_LOG = OWN_FILES / 'notify-log.jsonl'
 NOTIFY_GAP = 600  # seconds. A run of new decks makes one notification, not one each
 ATTRIBUTION = 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
 
 KINDS = {'question', 'report', 'design', 'options', 'board'}
 RARITIES = {'common', 'uncommon', 'rare', 'epic', 'legendary'}
-CARD_FIELDS = {'id', 'version', 'kind', 'rarity', 'title', 'text', 'why', 'pick', 'details', 'images', 'options', 'items', 'handled'}
+CARD_FIELDS = {'id', 'version', 'kind', 'rarity', 'title', 'text', 'why', 'pick', 'details', 'images', 'videos', 'parts', 'options', 'items', 'handled'}
 DECK_FIELDS = {'title', 'topic', 'stack', 'order', 'misc', 'cards'}
 OPTION_FIELDS = {'id', 'label', 'text', 'image'}
-ITEM_FIELDS = {'id', 'label', 'text', 'image', 'thumb'}
+ITEM_FIELDS = {'id', 'label', 'text', 'image', 'thumb', 'video'}
+PART_FIELDS = {'id', 'title', 'text', 'images', 'videos'}
+VIDEO_FIELDS = {'src', 'poster'}
 ITEM_LABEL_LIMIT = 36
+PART_TITLE_LIMIT = 40  # one line on the card's face
+PARTS_ON_FACE = 4  # the app shows this many part titles on the face, then "and N more"
+PARTS_MANY = 12
 WORDS = {
     'question': {'right': 'GO', 'left': 'WORKSHOP', 'down': 'IDK', 'up': 'COMMENT'},
     'report': {'right': 'GOOD', 'left': 'PROBLEM', 'down': 'HUH?', 'up': 'COMMENT'},
@@ -61,6 +70,11 @@ IMAGE_LONG_SIDE = 2000
 IMAGE_QUALITY = 82
 THUMB_LONG_SIDE = 360
 THUMB_QUALITY = 72
+# Films play muted and looping on the phone, and come down like pictures, so they're kept small.
+VIDEO_TYPES = {'.mp4', '.m4v', '.mov', '.webm', '.mkv', '.avi'}
+VIDEO_AS_IS = {'.mp4', '.m4v'}
+VIDEO_LIMIT = 2_000_000  # bytes
+VIDEO_TRIES = [(1280, 26), (960, 29), (720, 32), (540, 35)]  # long side and quality, until it fits
 
 
 def now():
@@ -216,9 +230,14 @@ def face_height(c, st):
         h += 70 + st['line'] * 1.3 + st['linem']  # at least a row of small pictures, and the line under them
     elif c.get('pick') and not handled:
         h += lines(c['pick'], st['pick'], width - 29) * st['pick'] * st['picklh'] + st['pickpad'] + 18 + 10
+    parts = c.get('parts') or []
+    if parts and kind not in ('options', 'board'):
+        h += 10 + min(len(parts), PARTS_ON_FACE) * (34 if st['pad'] == 28 and st['h2'] == 21 else 30)
+        if len(parts) > PARTS_ON_FACE:
+            h += 26
     if rarity in ('epic', 'legendary'):
         h += st['line'] * 1.3 + st['linem']
-    if c.get('details') or c.get('images'):
+    if c.get('details') or c.get('images') or c.get('videos') or parts:
         h += st['line'] * 1.3 + st['linem']
     return h
 
@@ -232,6 +251,31 @@ def estimate(c):
 
 
 # ---------- checking cards
+
+def film_of(v):
+    """A film entry as {src, poster}, from a path or an object. None if it's neither."""
+    if isinstance(v, str) and v:
+        return {'src': v}
+    if isinstance(v, dict) and v.get('src'):
+        return v
+    return None
+
+
+def check_films(name, where, films, errors, warnings):
+    for v in films or []:
+        f = film_of(v)
+        if not f:
+            errors.append(f'{name}: {where}videos holds something that is neither a path nor {{"src": ..., "poster": ...}}')
+            continue
+        if isinstance(v, dict):
+            for extra in sorted(set(v) - VIDEO_FIELDS):
+                warnings.append(f'{name}: the app ignores "{extra}" on a film. Is it a typo?')
+        ext = pathlib.Path(f['src']).suffix.lower()
+        if ext not in VIDEO_TYPES:
+            errors.append(f'{name}: {f["src"]} is not a film the app can play. Use an mp4')
+        elif ext not in VIDEO_AS_IS and not shutil.which('ffmpeg'):
+            errors.append(f'{name}: {f["src"]} needs ffmpeg to become an mp4, and ffmpeg is not installed here')
+
 
 def check_cards(cards, base=None, pack=None):
     errors, warnings = [], []
@@ -293,8 +337,9 @@ def check_cards(cards, base=None, pack=None):
                 errors.append(f'{name}: each item needs its own id')
             if not all(it.get('label') for it in items):
                 errors.append(f'{name}: each item needs a short label')
-            if not all(it.get('image') for it in items):
-                errors.append(f'{name}: each item needs a picture, in image')
+            if not all(it.get('image') or it.get('video') for it in items):
+                errors.append(f'{name}: each item needs a picture, in image, or a film, in video')
+            check_films(name, 'an item\'s ', [it['video'] for it in items if it.get('video')], errors, warnings)
             picks = c.get('pick') or []
             picks = [picks] if isinstance(picks, str) else picks
             for p in picks:
@@ -307,7 +352,30 @@ def check_cards(cards, base=None, pack=None):
                     warnings.append(f'{name}: the app ignores "{extra}" on an item. Is it a typo?')
                 if len(str(it.get('label') or '')) > ITEM_LABEL_LIMIT:
                     warnings.append(f'{name}: item {it.get("id")}\'s label is {len(it["label"])} characters, over {ITEM_LABEL_LIMIT}. It sits under a small tile, and the item\'s text can say more')
+        check_films(name, '', c.get('videos'), errors, warnings)
+        parts = c.get('parts') or []
+        if parts:
+            if kind in ('options', 'board'):
+                errors.append(f'{name}: parts go on questions, reports and designs, not on {kind} cards')
+            pids = [pt.get('id') if isinstance(pt, dict) else None for pt in parts]
+            if len(set(pids)) != len(pids) or not all(pids):
+                errors.append(f'{name}: each part needs its own id')
+            for pt in (x for x in parts if isinstance(x, dict)):
+                pname = f'{name}, part {pt.get("id")}'
+                if not pt.get('title'):
+                    errors.append(f'{pname}: needs a short title, shown on the card\'s face')
+                elif len(str(pt['title'])) > PART_TITLE_LIMIT:
+                    warnings.append(f'{pname}: its title is {len(str(pt["title"]))} characters, over {PART_TITLE_LIMIT}. It sits on one line of the card\'s face')
+                if not (pt.get('text') or pt.get('images') or pt.get('videos')):
+                    errors.append(f'{pname}: needs text, pictures or films')
+                for extra in sorted(set(pt) - PART_FIELDS):
+                    warnings.append(f'{pname}: the app ignores "{extra}" on a part. Is it a typo?')
+                check_films(pname, '', pt.get('videos'), errors, warnings)
+            if len(parts) > PARTS_MANY:
+                warnings.append(f'{name}: {len(parts)} parts is a lot for one card. Could it be two cards, or a deck?')
         wording = {f: c.get(f) for f in ('text', 'why', 'pick', 'details') if c.get(f) and not (f == 'pick' and kind in ('options', 'board'))}
+        for pt in (x for x in parts if isinstance(x, dict)):
+            wording[f'part {pt.get("id")}'] = ' '.join(str(pt.get(f) or '') for f in ('title', 'text'))
         if handled:
             wording['handled.how'] = handled.get('how')
         for o in c.get('options') or []:
@@ -317,7 +385,7 @@ def check_cards(cards, base=None, pack=None):
         for field, words in wording.items():
             if NAMED_DIRECTION.search(str(words)):
                 errors.append(f'{name}: {field} names a swipe direction. People can swap those, so say "add a comment" or nothing')
-            if field != 'details' and LOOKS_LIKE_CODE.search(str(words)):
+            if field != 'details' and not field.startswith('part ') and LOOKS_LIKE_CODE.search(str(words)):
                 warnings.append(f'{name}: {field} looks like it has code in it ("{LOOKS_LIKE_CODE.search(str(words)).group(0)}"). Say it in everyday words')
         for field, most in LIMITS.items():
             if len(str(c.get(field) or '')) > most and not (field == 'pick' and kind in ('options', 'board')):
@@ -330,7 +398,14 @@ def check_cards(cards, base=None, pack=None):
         if not (c.get('why') or handled):
             warnings.append(f'{name}: nothing says what this changes. Technical cards with no context get sent back')
         items = c.get('items') or []
+        films = [*(c.get('videos') or []), *[it.get('video') for it in items]]
+        for pt in (x for x in parts if isinstance(x, dict)):
+            films.extend(pt.get('videos') or [])
         wanted = [*(c.get('images') or []), *[o.get('image') for o in [*(c.get('options') or []), *items]], *[it.get('thumb') for it in items]]
+        for pt in (x for x in parts if isinstance(x, dict)):
+            wanted.extend(pt.get('images') or [])
+        for f in filter(None, map(film_of, films)):
+            wanted.extend([f['src'], f.get('poster')])
         for image in filter(None, wanted):
             if image.startswith('img/') and not pack and not (base is not None and (base / image).exists()):
                 continue  # it may well be in the pack, but no pack was named
@@ -404,10 +479,70 @@ def shrink_image(source, target, long_side=IMAGE_LONG_SIDE, quality=IMAGE_QUALIT
     return target
 
 
+def probe(path):
+    """What ffprobe says about a film: its codec, size and length. None without ffprobe, or if it can't tell."""
+    ff = shutil.which('ffprobe')
+    if not ff:
+        return None
+    r = subprocess.run([ff, '-v', 'error', '-show_entries', 'stream=codec_type,codec_name,width,height:format=duration', '-of', 'json', str(path)], capture_output=True, text=True, encoding='utf-8', errors='replace')
+    try:
+        info = json.loads(r.stdout)
+    except ValueError:
+        return None
+    video = next((x for x in info.get('streams', []) if x.get('codec_type') == 'video'), None)
+    if not video:
+        return None
+    try:
+        length = float(info.get('format', {}).get('duration') or 0)
+    except ValueError:
+        length = 0
+    return {'codec': video.get('codec_name'), 'width': video.get('width'), 'height': video.get('height'), 'duration': length}
+
+
+def make_film(source, target):
+    """Copies a film in, or turns it into a small muted H.264 mp4 the phone plays, under VIDEO_LIMIT. Returns the file."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source = pathlib.Path(source)
+    info = probe(source)
+    as_is = source.suffix.lower() in VIDEO_AS_IS and source.stat().st_size <= VIDEO_LIMIT and (info is None or info['codec'] == 'h264')
+    ffmpeg = shutil.which('ffmpeg')
+    if as_is or not ffmpeg:
+        shutil.copyfile(source, target)
+        if not ffmpeg and source.stat().st_size > VIDEO_LIMIT:
+            print(f'  warning: {source.name} is {source.stat().st_size / 1e6:.1f} MB, over {VIDEO_LIMIT / 1e6:.0f} MB, and ffmpeg is not here to shrink it. It went up as it is.')
+        return target
+    for long_side, quality in VIDEO_TRIES:
+        fit = f"scale='min({long_side},iw)':'min({long_side},ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2"
+        r = subprocess.run([ffmpeg, '-y', '-v', 'error', '-i', str(source), '-an', '-c:v', 'libx264', '-preset', 'medium', '-crf', str(quality),
+                            '-pix_fmt', 'yuv420p', '-vf', fit, '-movflags', '+faststart', str(target)], capture_output=True, text=True, encoding='utf-8', errors='replace')
+        if r.returncode:
+            die(f'ffmpeg could not turn {source.name} into an mp4:\n{r.stderr.strip()[:600]}')
+        if target.stat().st_size <= VIDEO_LIMIT:
+            break
+    if target.stat().st_size > VIDEO_LIMIT:
+        print(f'  warning: {source.name} is still {target.stat().st_size / 1e6:.1f} MB at its smallest. A shorter film would load faster on a phone.')
+    return target
+
+
+def make_poster(film, target):
+    """A still from early in the film, for tiles and for before it plays. None without ffmpeg."""
+    ffmpeg = shutil.which('ffmpeg')
+    if not ffmpeg:
+        return None
+    target.parent.mkdir(parents=True, exist_ok=True)
+    info = probe(film) or {}
+    for at in (min(0.5, (info.get('duration') or 0) / 3), 0):
+        r = subprocess.run([ffmpeg, '-y', '-v', 'error', '-ss', f'{at:.2f}', '-i', str(film), '-frames:v', '1', '-q:v', '3', str(target)], capture_output=True)
+        if not r.returncode and target.exists() and target.stat().st_size:
+            return target
+    return None
+
+
 def bring_images(cards, base, pack, deck_id):
-    """Shrinks pictures for bus data and copies them in, and keeps or makes a board's thumbnails. Returns the files made."""
+    """Shrinks pictures for bus data and copies them in, keeps or makes a board's thumbnails, and brings
+    films in small with a poster frame each. Returns the files made."""
     made = []
-    pictures, thumbs = {}, {}
+    pictures, thumbs, films = {}, {}, {}
     folder = DATA / 'packs' / pack / 'img'
 
     def free_name(stem, source, taken):
@@ -444,21 +579,54 @@ def bring_images(cards, base, pack, deck_id):
         made.append(out)
         return f'img/thumb/{out.name}'
 
+    def bring_film(entry):
+        """A film and its poster: one given is kept like a picture, and with none, one is made from the film."""
+        f = dict(film_of(entry))
+        source, in_pack = picture_source(f['src'], base, pack)
+        if not in_pack:
+            out = make_film(source, folder / f'{free_name(f"{deck_id}-{source.stem}", source, films)}.mp4')
+            made.append(out)
+            f['src'] = f'img/{out.name}'
+        if f.get('poster'):
+            f['poster'] = bring(f['poster'])
+        elif not in_pack:
+            poster = make_poster(DATA / 'packs' / pack / f['src'], folder / 'poster' / f'{pathlib.Path(f["src"]).stem}.jpg')
+            if poster:
+                made.append(poster)
+                f['poster'] = f'img/poster/{poster.name}'
+            else:
+                print(f'  warning: no poster for {f["src"]}, since ffmpeg is not here. The phone shows its first frame instead.')
+        return f
+
     for c in cards:
         if c.get('images'):
             c['images'] = [bring(i) for i in c['images']]
+        if c.get('videos'):
+            c['videos'] = [bring_film(v) for v in c['videos']]
+        for pt in c.get('parts') or []:
+            if pt.get('images'):
+                pt['images'] = [bring(i) for i in pt['images']]
+            if pt.get('videos'):
+                pt['videos'] = [bring_film(v) for v in pt['videos']]
         for o in c.get('options') or []:
             if o.get('image'):
                 o['image'] = bring(o['image'])
         items = c.get('items') or []
         for it in items:
-            it['image'] = bring(it['image'])
-            thumb = thumb_of(it)
-            if thumb:
-                it['thumb'] = thumb
+            if it.get('video'):
+                f = bring_film(it['video'])
+                it['video'] = f['src']
+                if not it.get('image') and f.get('poster'):
+                    it['image'] = f['poster']  # its poster is the picture a board shows and the pen draws on
+            if it.get('image'):
+                it['image'] = bring(it['image'])
+                thumb = thumb_of(it)
+                if thumb:
+                    it['thumb'] = thumb
         if items:
             size = lambda key: sum((DATA / 'packs' / pack / it[key]).stat().st_size for it in items if it.get(key))
-            print(f'  {c.get("id")}: {len(items)} pictures, {size("thumb") / 1e6:.1f} MB of thumbnails up front, and {size("image") / len(items) / 1e6:.2f} MB for each one looked at')
+            n_films = sum(1 for it in items if it.get('video'))
+            print(f'  {c.get("id")}: {len(items)} pictures{f", {n_films} of them films" if n_films else ""}, {size("thumb") / 1e6:.1f} MB of thumbnails up front, and {(size("image") + size("video")) / len(items) / 1e6:.2f} MB for each one looked at')
     return made
 
 
@@ -571,8 +739,7 @@ def cmd_deck(a):
     if made or file.resolve() != target.resolve():
         save_json(target, d)
     if publish(f'Deck in {pack}: {d["title"]} ({len(d["cards"])} cards)', target, *made) and not a.quiet:
-        owed = sum(1 for c in d['cards'] if not c.get('handled'))
-        notify_once(f'{d["title"]}: {owed} card{"" if owed == 1 else "s"}')
+        notice(pack, deck_id, 'deck')
 
 
 def cmd_misc(a):
@@ -594,7 +761,8 @@ def cmd_misc(a):
     made = bring_images(new, file.parent, pack, 'misc')
     deck['cards'].extend(new)
     save_json(target, deck)
-    publish(f'Misc in {pack}: {len(new)} more', target, *made)
+    if publish(f'Misc in {pack}: {len(new)} more', target, *made) and not a.quiet:
+        notice(pack, 'misc', 'misc', cards=[c['id'] for c in new])
 
 
 def cmd_icons(a):
@@ -650,13 +818,15 @@ def summarise(events):
     decks, thoughts, thought_drafts = {}, {}, {}
 
     def deck(e):
-        return decks.setdefault((e.get('pack'), e.get('deck')), {'answers': {}, 'drafts': {}, 'notes': None, 'verdict': None, 'earlier': [], 'resets': [], 'topic': e.get('topic')})
+        return decks.setdefault((e.get('pack'), e.get('deck')), {'answers': {}, 'drafts': {}, 'parts': {}, 'notes': None, 'verdict': None, 'earlier': [], 'resets': [], 'topic': e.get('topic')})
     for e in events:
         t = e.get('type')
         if t == 'answer' and e.get('eid') not in undone:
             d = deck(e)
             d['answers'][e['card']] = e
             d['drafts'].pop(e['card'], None)
+        elif t == 'part':
+            deck(e)['parts'].setdefault(e.get('card'), {})[e.get('part')] = e
         elif t == 'draft' and e.get('thought'):
             thought_drafts[e.get('pack')] = e
         elif t == 'draft':
@@ -672,7 +842,9 @@ def summarise(events):
         elif t == 'deck-reset':
             d = deck(e)
             d['earlier'].extend(a for a in d['answers'].values() if a.get('comment'))
+            d['earlier'].extend(p for parts in d['parts'].values() for p in parts.values() if p.get('comment'))
             d['answers'] = {}
+            d['parts'] = {card: {pid: {**p, 'mark': None} for pid, p in parts.items() if p.get('comment') or p.get('images')} for card, parts in d['parts'].items()}
             d['verdict'] = None
             d['resets'].append(e)
         elif t == 'thought':
@@ -694,13 +866,36 @@ def word_for(answer, card):
 
 
 def pictures(event):
-    """Where an event's pictures are, in the clone. One still uploading isn't there yet."""
-    return ', '.join(f'{p}{"" if (DATA / p).exists() else " (still uploading)"}' for p in event.get('images') or [])
+    """Where an event's pictures are, in the clone. One still uploading isn't there yet. A drawing says what it's over."""
+    drawn = event.get('drawings') or {}
+    out = []
+    for p in event.get('images') or []:
+        line = p + ('' if (DATA / p).exists() else ' (still uploading)')
+        if p in drawn:
+            line += f' (their drawing over {drawn[p] or "a picture"})'
+        out.append(line)
+    return ', '.join(out)
 
 
 def names_of(card, ids):
     labels = {o['id']: o.get('label', o['id']) for o in [*((card or {}).get('options') or []), *((card or {}).get('items') or [])]}
     return ', '.join(labels.get(i, i) for i in ids)
+
+
+def part_word(e):
+    table = WORDS.get(e.get('kind', 'question'), WORDS['question'])
+    return table.get(e.get('mark'), '') if e.get('mark') else ''
+
+
+def part_line(e, card):
+    title = e.get('partTitle') or next((p.get('title') for p in (card or {}).get('parts') or [] if p.get('id') == e.get('part')), '') or e.get('part')
+    said = part_word(e) or 'no mark'
+    line = f'      part {e.get("part")} ({title}): {said}'
+    if e.get('comment'):
+        line += f', "{e["comment"]}"'
+    if e.get('images'):
+        line += f'\n          pictures: {pictures(e)}'
+    return line
 
 
 def answer_line(a, card):
@@ -743,16 +938,24 @@ def cmd_answers(a):
             tag = ' [Feel test: test answers, but their words]' if pack == 'feel-test' else ''
             print(f'\n{pack} / {d.get("topic") or "misc"} / {deck_id}{tag}')
             for card_id in sorted(c for c in cards if c):
+                card = card_in(pack, deck_id, card_id)
                 if card_id in d['answers']:
-                    print(answer_line(d['answers'][card_id], card_in(pack, deck_id, card_id)))
+                    print(answer_line(d['answers'][card_id], card))
                 elif card_id in d['drafts']:
                     dr = d['drafts'][card_id]
                     if dr.get('text'):
                         print(f'  {card_id}: still writing: "{dr["text"]}"')
                     if dr.get('selected'):
-                        print(f'  {card_id}: still choosing: {names_of(card_in(pack, deck_id, card_id), dr["selected"])}')
+                        print(f'  {card_id}: still choosing: {names_of(card, dr["selected"])}')
                     if dr.get('images'):
                         print(f'      pictures: {pictures(dr)}')
+                parts_here = [p for p in d['parts'].get(card_id, {}).values() if p in shown]
+                if parts_here:
+                    if card_id not in d['answers'] and card_id not in d['drafts']:
+                        print(f'  {card_id} ({(card or {}).get("title") or parts_here[0].get("title") or card_id}): not swiped yet. On its parts:')
+                    order = [p.get('id') for p in (card or {}).get('parts') or []]
+                    for p in sorted(parts_here, key=lambda e: order.index(e.get('part')) if e.get('part') in order else 99):
+                        print(part_line(p, card))
             if d['notes'] and d['notes'] in shown:
                 print(f'  Deck notes: "{d["notes"].get("text", "")}"')
                 if d['notes'].get('images'):
@@ -762,7 +965,8 @@ def cmd_answers(a):
                     print(f'  They started this deck over ({"kept" if r.get("keptNotes") else "cleared"} notes and comments).')
             for old in d['earlier']:
                 if old in shown:
-                    print(f'  Said before starting over, on {old["card"]}: "{old["comment"]}"')
+                    on = f'{old["card"]}, part {old["part"]}' if old.get('type') == 'part' else old['card']
+                    print(f'  Said before starting over, on {on}: "{old["comment"]}"')
             if d['verdict'] and d['verdict'] in shown:
                 v = d['verdict']
                 print(f'  DECK: {"done" if v.get("verdict") == "done" else "REPLAN FROM THE BASE"} ({v.get("answered")} of {v.get("total")} answered)')
@@ -791,7 +995,7 @@ def cmd_redeal(a):
     sync()
     decks, _, _ = summarise(read_events())
     pack_filter = pack_from(a)
-    groups = {'Handled, and they answered': [], 'Handled, no answer yet': [], 'Sent to workshop': [], 'Need more context': [], 'Comment only, to read': [], 'Deck sent back to replan': []}
+    groups = {'Handled, and they answered': [], 'Handled, no answer yet': [], 'Sent to workshop': [], 'Need more context': [], 'Comment only, to read': [], 'Parts with a problem or a question': [], 'Deck sent back to replan': []}
     for pack in packs():
         if pack_filter and pack != pack_filter:
             continue
@@ -818,6 +1022,9 @@ def cmd_redeal(a):
                         groups['Need more context'].append(line)
                     elif ans.get('swipe') == 'up':
                         groups['Comment only, to read'].append(line)
+                for p in d.get('parts', {}).get(c['id'], {}).values():
+                    if p.get('mark') in ('left', 'down') and p.get('cardVersion', 1) >= c.get('version', 1):
+                        groups['Parts with a problem or a question'].append(f'{ref} part {p.get("part")}: {part_word(p)}' + (f', "{p["comment"]}"' if p.get('comment') else ''))
     any_shown = False
     for name, lines in groups.items():
         if lines:
@@ -843,7 +1050,7 @@ def edit_card(pack, deck_id, card_id, change, message):
     if not report_check(*check_cards(deck['cards'], path.parent, pack)):
         die('Not changed. Fix the errors above.')
     save_json(path, deck)
-    publish(message, path)
+    return publish(message, path)
 
 
 def cmd_handled(a):
@@ -855,7 +1062,8 @@ def cmd_handled(a):
             card.pop('handled', None)
         else:
             card['handled'] = {'how': a.how, 'at': now()}
-    edit_card(a.pack_id, a.deck, a.card, change, f'{"Unmarked" if a.undo else "Handled"}: {a.pack_id}/{a.deck}/{a.card}')
+    if edit_card(a.pack_id, a.deck, a.card, change, f'{"Unmarked" if a.undo else "Handled"}: {a.pack_id}/{a.deck}/{a.card}') and not a.undo and not a.quiet:
+        notice(a.pack_id, a.deck, 'handled', cards=[a.card])
 
 
 def cmd_second_try(a):
@@ -874,7 +1082,8 @@ def cmd_second_try(a):
             value = getattr(a, field)
             if value is not None:
                 card[field] = value
-    edit_card(a.pack_id, a.deck, a.card, change, f'Second try: {a.pack_id}/{a.deck}/{a.card}')
+    if edit_card(a.pack_id, a.deck, a.card, change, f'Second try: {a.pack_id}/{a.deck}/{a.card}') and not a.quiet:
+        notice(a.pack_id, a.deck, 'second-try', cards=[a.card])
 
 
 def cmd_thought(a):
@@ -921,31 +1130,209 @@ def cmd_status(a):
             print(f'  {len(thoughts[pack])} thoughts')
 
 
-def send_notification(title, body, badge=None, tag='riffle'):
+def send_notification(title, body, badge=None, tag='riffle', url=''):
+    OWN_FILES.mkdir(parents=True, exist_ok=True)
+    try:  # what was sent, newest last, so it can be checked later
+        old = NOTIFY_LOG.read_text(encoding='utf-8').splitlines()[-49:] if NOTIFY_LOG.exists() else []
+        NOTIFY_LOG.write_text('\n'.join([*old, json.dumps({'at': now(), 'title': title, 'body': body, 'badge': badge, 'tag': tag, 'url': url}, ensure_ascii=False)]) + '\n', encoding='utf-8')
+    except OSError:
+        pass
     if not shutil.which('node'):
         print('Node is not installed here, so no notification was sent.')
         return
     args = ['node', str(HERE / 'notify.mjs'), str(DATA), '--title', title, '--body', body or '', '--tag', tag]
     if badge is not None:
         args += ['--badge', str(badge)]
+    if url:
+        args += ['--url', url]
     subprocess.run(args)
 
 
-def notify_once(body):
-    """One notification for a run of new decks, however many land together."""
+# ---------- notifications that say where they're from
+
+def notify_gap():
+    try:
+        return float(os.environ.get('RIFFLE_NOTIFY_GAP', NOTIFY_GAP))
+    except ValueError:
+        return NOTIFY_GAP
+
+
+def last_notified():
+    try:
+        return float(LAST_NOTIFY.read_text())
+    except (OSError, ValueError):
+        return 0
+
+
+def deck_kind(deck):
+    """A deck is a report, questions, or a board of results, by what it says or what its cards are."""
+    if deck.get('kind') in ('report', 'questions', 'board'):
+        return deck['kind']
+    cards = [c for c in deck.get('cards', []) if not c.get('handled')] or deck.get('cards', [])
+    kinds = [c.get('kind', 'question') for c in cards]
+    if kinds and all(k == 'report' for k in kinds):
+        return 'report'
+    if kinds and sum(k == 'board' for k in kinds) * 2 >= len(kinds):
+        return 'board'
+    return 'questions'
+
+
+def address_url(*parts):
+    """Where a tap on a notification goes: the app, at this pack, deck or card."""
+    path = '/'.join(urllib.parse.quote(str(p), safe='') for p in parts if p)
+    return f'./#open={urllib.parse.quote(path, safe="")}' if path else './'
+
+
+def plural(n, word):
+    return f'{n} {word}{"" if n == 1 else "s"}'
+
+
+def about(pack, deck_id, what, cards):
+    """One line's worth of what was sent, read from the files as they are now."""
+    p = load_json(DATA / 'packs' / pack / 'pack.json') if (DATA / 'packs' / pack / 'pack.json').exists() else {}
+    f = DATA / 'packs' / pack / 'decks' / f'{deck_id}.json'
+    deck = load_json(f) if f.exists() else {'title': deck_id, 'cards': []}
+    topic = next((t for t in p.get('topics', []) if t.get('id') == deck.get('topic')), None)
+    where = ' › '.join(x for x in [p.get('title') or pack, (topic or {}).get('title') or ('Misc' if not deck.get('topic') else deck.get('topic'))] if x)
+    titles = {c.get('id'): c.get('title') or c.get('id') for c in deck.get('cards', [])}
+    owed = sum(1 for c in deck.get('cards', []) if not c.get('handled'))
+    return {'pack': pack, 'deck': deck_id, 'what': what, 'cards': list(cards or []), 'where': where, 'packTitle': p.get('title') or pack,
+            'title': deck.get('title') or deck_id, 'kind': deck_kind(deck), 'owed': owed, 'cardTitles': [titles.get(c, c) for c in cards or []], 'at': now()}
+
+
+def item_words(i, whole=False):
+    """What a notification says about one thing sent: whole for a notification of its own, short in a list."""
+    first = (i.get('cardTitles') or [''])[0]
+    if i['what'] == 'misc':
+        n = len(i.get('cards') or [])
+        return f'{plural(n, "new card")} in Misc: {first}' if whole else f'Misc: {plural(n, "new card")}'
+    if i['what'] == 'second-try':
+        return f'Second try on "{first}", in {i["title"]}' if whole else f'Second try: {first}'
+    if i['what'] == 'handled':
+        return f'My conclusion on "{first}", in {i["title"]}' if whole else f'Handled: {first}'
+    return f'{i["title"]}: {i["kind"]}, {plural(i["owed"], "card")}' if whole else f'{i["title"]} ({i["owed"]})'
+
+
+def notice_words(items):
+    """The title, body and address of one notification naming everything in it."""
+    if len(items) == 1:
+        i = items[0]
+        card = i['cards'][0] if i['what'] in ('second-try', 'handled') and i.get('cards') else None
+        return i['where'], item_words(i, whole=True), address_url(i['pack'], i['deck'], card)
+    packs_in = {i['pack'] for i in items}
+    wheres = {i['where'] for i in items}
+    title = wheres.pop() if len(wheres) == 1 else items[0]['packTitle'] if len(packs_in) == 1 else 'Riffle'
+    decks = all(i['what'] == 'deck' for i in items)
+    lead = f'{len(items)} new decks' if decks else f'{len(items)} new things'
+    shown, room = [], 150
+    for i in items:
+        w = item_words(i)
+        if shown and len(', '.join([*shown, w])) > room:
+            break
+        shown.append(w)
+    more = len(items) - len(shown)
+    body = f'{lead}: {", ".join(shown)}' + (f', +{more} more' if more else '')
+    return title, body, address_url(items[0]['pack']) if len(packs_in) == 1 else './'
+
+
+def read_pending():
+    try:
+        items = json.loads(NOTIFY_PENDING.read_text(encoding='utf-8'))
+        return items if isinstance(items, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def notice(pack, deck_id, what='deck', cards=None):
+    """Tells the phone what was just sent. At most one notification every NOTIFY_GAP: anything sent sooner
+    waits, and the next one names it too. A small process stays behind to send that one when the gap ends,
+    and the next send flushes it if that process didn't get to, so nothing lands silently."""
     OWN_FILES.mkdir(parents=True, exist_ok=True)
-    last = float(LAST_NOTIFY.read_text()) if LAST_NOTIFY.exists() else 0
-    if time.time() - last < NOTIFY_GAP:
-        print(f'No notification: one went out {int((time.time() - last) / 60)} minutes ago. riffle notify sends one by hand.')
+    item = about(pack, deck_id, what, cards)
+    items = [i for i in read_pending() if not (i.get('pack') == pack and i.get('deck') == deck_id and i.get('what') == what and (i.get('cards') == item['cards'] or what == 'deck'))]
+    items.append(item)
+    NOTIFY_PENDING.write_text(json.dumps(items, ensure_ascii=False, indent=1), encoding='utf-8')
+    since = time.time() - last_notified()
+    if since >= notify_gap():
+        flush_notices()
         return
+    wait = notify_gap() - since
+    print(f'No notification yet: one went out {int(since / 60)} minutes ago. This joins the next one, in about {max(1, round(wait / 60))} minute{"" if round(wait / 60) <= 1 else "s"}, which names everything sent till then.')
+    start_waiter(wait)
+
+
+def flush_notices(only_if_due=False):
+    """Sends one notification naming everything waiting, if anything is."""
+    if not NOTIFY_PENDING.exists() or (only_if_due and time.time() - last_notified() < notify_gap()):
+        return False
+    taking = OWN_FILES / f'notify-sending-{os.getpid()}.json'
+    try:  # only one of the waiting process and a later command gets the list, so nothing goes twice
+        os.replace(NOTIFY_PENDING, taking)
+    except OSError:
+        return False
+    try:
+        items = json.loads(taking.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        items = []
+    taking.unlink(missing_ok=True)
+    if not isinstance(items, list) or not items:
+        return False
     LAST_NOTIFY.write_text(str(time.time()))
-    send_notification('New deck in Riffle', body, owed_cards(summarise(read_events())[0]), 'new-deck')
+    title, body, url = notice_words(items)
+    send_notification(title, body, owed_cards(summarise(read_events())[0]), 'new-deck', url)
+    return True
+
+
+def start_waiter(wait):
+    """A small process that sends the waiting notification once the gap is over. One at a time."""
+    try:
+        if NOTIFY_WAITER.exists() and float(NOTIFY_WAITER.read_text()) > time.time() - 120:
+            return
+    except (OSError, ValueError):
+        pass
+    if os.environ.get('RIFFLE_NO_WAITER'):
+        return
+    NOTIFY_WAITER.write_text(str(time.time() + wait))
+    args = [sys.executable, str(pathlib.Path(__file__).resolve()), 'notify-flush', '--wait', str(int(wait) + 2)]
+    env = {**os.environ, 'RIFFLE_DATA': str(DATA)}
+    quiet = {'stdin': subprocess.DEVNULL, 'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL, 'close_fds': True, 'env': env, 'cwd': str(OWN_FILES)}
+    try:
+        if os.name == 'nt':
+            detached, group, no_window, breakaway = 0x00000008, 0x00000200, 0x08000000, 0x01000000
+            try:
+                subprocess.Popen(args, creationflags=detached | group | no_window | breakaway, **quiet)
+            except OSError:
+                subprocess.Popen(args, creationflags=detached | group | no_window, **quiet)
+        else:
+            subprocess.Popen(args, start_new_session=True, **quiet)
+    except OSError as e:
+        NOTIFY_WAITER.unlink(missing_ok=True)
+        print(f'  warning: could not leave a process to send it later ({e}). The next send will.')
+
+
+def cmd_notify_flush(a):
+    """The process start_waiter leaves behind: waits out the gap, then sends what's waiting."""
+    try:
+        time.sleep(max(0, a.wait))
+        while True:
+            left = notify_gap() - (time.time() - last_notified())
+            if left <= 1:
+                break
+            time.sleep(left)
+        sync()
+        flush_notices()
+    finally:
+        try:
+            if float(NOTIFY_WAITER.read_text()) <= time.time() + 5:
+                NOTIFY_WAITER.unlink()
+        except (OSError, ValueError):
+            pass
 
 
 def cmd_notify(a):
     sync()
     badge = a.badge if a.badge is not None else owed_cards(summarise(read_events())[0])
-    send_notification(a.title, a.body, badge, a.tag)
+    send_notification(a.title, a.body, badge, a.tag, a.url or '')
 
 
 def main():
@@ -980,7 +1367,7 @@ def main():
     s.set_defaults(fn=cmd_deck)
 
     s = sub.add_parser('misc', help='add one-off cards to the pack\'s Misc deck')
-    s.add_argument('file'); s.add_argument('--pack')
+    s.add_argument('file'); s.add_argument('--pack'); s.add_argument('--quiet', action='store_true', help='no notification')
     s.set_defaults(fn=cmd_misc)
 
     s = sub.add_parser('icons', help='search the icon library by word')
@@ -998,10 +1385,12 @@ def main():
 
     s = sub.add_parser('handled', help='mark a card handled, with how')
     s.add_argument('pack_id'); s.add_argument('deck'); s.add_argument('card'); s.add_argument('--how'); s.add_argument('--undo', action='store_true')
+    s.add_argument('--quiet', action='store_true', help='no notification')
     s.set_defaults(fn=cmd_handled)
 
     s = sub.add_parser('second-try', help='deal a card back as a new version')
     s.add_argument('pack_id'); s.add_argument('deck'); s.add_argument('card'); s.add_argument('--file')
+    s.add_argument('--quiet', action='store_true', help='no notification')
     for field in ('text', 'why', 'pick', 'details'):
         s.add_argument(f'--{field}')
     s.set_defaults(fn=cmd_second_try)
@@ -1012,12 +1401,19 @@ def main():
 
     s = sub.add_parser('notify', help='send a notification to the phone by hand')
     s.add_argument('--title', default='Riffle'); s.add_argument('--body', default=''); s.add_argument('--badge', type=int); s.add_argument('--tag', default='riffle')
+    s.add_argument('--url', help='where a tap goes, like ./#open=pack/deck/card')
     s.set_defaults(fn=cmd_notify)
+
+    s = sub.add_parser('notify-flush', help=argparse.SUPPRESS)
+    s.add_argument('--wait', type=float, default=0)
+    s.set_defaults(fn=cmd_notify_flush)
 
     a = p.parse_args()
     if a.fn is not cmd_fit:  # that one needs no repo
         DATA = data_repo()
     a.fn(a)
+    if a.fn not in (cmd_fit, cmd_notify_flush, cmd_check):
+        flush_notices(only_if_due=True)  # one left waiting, if the process meant to send it didn't
 
 
 if __name__ == '__main__':

@@ -63,6 +63,18 @@ The file format is in `format.md`, next to this file. A deck looks like this:
 
 Add `"stack": "some-name"` to decks in a topic that should be dealt one after another, a report first. `order` sets which comes first. Picture paths are relative to the deck file, and `riffle deck` shrinks and copies them, keeping up to 2000 pixels so they can be zoomed into. A path starting `img/` that isn't beside the deck file means a picture already in the pack.
 
+**Films.** `"videos": ["clips/walk.mp4"]` sits beside `images`, on a card or a part, and a board item can have `"video"` instead of `"image"`. They play muted and looping on the phone, and can be scrubbed, slowed down and drawn on. `riffle deck` keeps a small H.264 mp4 as it is, turns anything else into one under 2 MB with no sound, and makes a poster from it, all with ffmpeg. Give `{"src": "...", "poster": "..."}` to choose the poster. Without ffmpeg only mp4s go, with no poster. Use films for motion that a still can't show, and keep them short: a few seconds that loop.
+
+**Parts.** A report, question or design can be in `parts`, each with its own `id`, a `title` and its own `text`, `images` or `videos`. They mark and comment on each part by itself, apart from their swipe on the whole card. Use them for a stage of work with several things in it, so they can point at the one that's off instead of writing which. The face lists the first four titles, so keep them short.
+
+```json
+{ "id": "walk", "kind": "report", "title": "The walk", "text": "The walk, in three parts.", "why": "Mark any part that's off.",
+  "parts": [
+    { "id": "feet", "title": "Feet", "text": "They stay planted now.", "videos": ["clips/feet.mp4"] },
+    { "id": "hips", "title": "Hips", "text": "A little sway.", "images": ["pictures/hips.png"] }
+  ] }
+```
+
 ### Writing cards
 
 If a card is technical with no context, they'll send it back. So:
@@ -99,6 +111,8 @@ If a card is technical with no context, they'll send it back. So:
 - **idk, huh:** they need more context. Add it and deal it back, or decide it yourself if it's technical. If they say idk twice on the same card, decide it yourself and say so.
 - **comment on its own:** their own suggestion. Read it.
 - **Comments and notes** are often the most useful part. Read every one. Pictures are listed with their path in the clone: open them.
+- **Drawings** are pictures they drew on, to circle or arrow what they mean. `riffle answers` lists each with what it was drawn over. Open it: the circle is the point of the comment.
+- **Parts** show under their card: `part feet (Feet): PROBLEM, "they slide"`. A part can be marked or commented on without the card being swiped. `riffle redeal` lists parts marked problem or huh.
 - **Deck: replan** means the whole deck's premise is off. Rethink it from the base. **Started over** means they want to go through it again.
 - **Feel test** lines are test answers, but they're still their words. See them with `riffle answers --pack feel-test`.
 
@@ -119,6 +133,6 @@ riffle thought <pack> <thought-id> --how "One or two plain sentences."
 
 ## Notifications
 
-They turn these on in the app's settings. `riffle deck` then notifies the phone, at most once every 10 minutes, so a run of new decks makes one notification, and sets the number on its icon to the cards owed. `--quiet` skips it, and `riffle notify --title "..." --body "..."` sends one by hand.
+They turn these on in the app's settings. `riffle deck`, `misc`, `second-try` and `handled` then notify the phone. Each says where it's from (the pack and topic), the deck's title, its kind and its cards, or the card dealt back, and a tap on it opens that deck or card. At most one goes every 10 minutes. Anything sent sooner waits and is named in the next one, which a small process left behind sends when the 10 minutes are up, so nothing lands silently. The number on the icon is the cards owed. `--quiet` skips it, and `riffle notify --title "..." --body "..." [--url ./#open=pack/deck]` sends one by hand.
 
 The signing key lives in `~/.riffle/vapid.json`, on this machine only, outside every repo. Never copy it into a repo. Without it, notifications don't send and everything else still works.

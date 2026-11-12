@@ -8,7 +8,7 @@ import * as sync from './sync.js';
 import * as push from './push.js';
 import { countWords } from './photos.js';
 
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -294,10 +294,14 @@ function topicsOf(pack) {
   return { topics: [...groups.values()].filter(g => g.decks.length), misc };
 }
 
-// The pictures a deck shows on its cards. Boards fetch their own, as they're looked at.
+// The pictures and films a deck shows on its cards and their parts. Boards fetch their own, as they're looked at.
+const filmPaths = list => (list || []).flatMap(v => (typeof v === 'string' ? [v] : v ? [v.src, v.poster] : [])).filter(Boolean);
 const imagesFor = async (pack, deck) => {
   const urls = new Map();
-  const wanted = deck.cards.flatMap(c => [...(c.images || []), ...(c.options || []).map(o => o.image)]).filter(Boolean);
+  const wanted = deck.cards.flatMap(c => [
+    ...(c.images || []), ...(c.options || []).map(o => o.image), ...filmPaths(c.videos),
+    ...(c.parts || []).flatMap(pt => [...(pt.images || []), ...filmPaths(pt.videos)]),
+  ]).filter(Boolean);
   for (const p of new Set(wanted)) urls.set(p, await sync.pictureUrl(pack.id, p, { get: false }));
   return p => urls.get(p) || null;
 };
@@ -535,8 +539,9 @@ async function openThoughts(pack) {
   }
 }
 
-async function openDeck(pack, deckId) {
+async function openDeck(pack, deckId, at = null) {
   const deck = pack.decks.find(d => d.id === deckId);
+  if (!deck) { showPack(pack.id); return; }
   const images = await imagesFor(pack, deck);
   current = new DeckView({
     host: app, pack, deck, images,
@@ -546,12 +551,33 @@ async function openDeck(pack, deckId) {
   render = () => {};
   try {
     await current.open();
+    if (at && at.card && current.cards.has(at.card)) current.jump(at.card, at.part);
   } catch {
     current = null;
     setNotice({ text: 'Not saving on this phone', act: showSettings });
     showPack(pack.id, "Couldn't read this deck's saved progress just now. Close Riffle and open it again.");
   }
 }
+
+// ---------- addresses: pack/deck/card/part, from a notification or a link
+
+// Goes to a pack, a deck, a card or a part of one. Anything that no longer exists stops at the level above.
+async function openAddress(address) {
+  const [packId, deckId, cardId, partId] = String(address || '').split('/').map(x => decodeURIComponent(x || ''));
+  if (!packId) { showHome(); return; }
+  const pack = (await library()).find(p => p.id === packId);
+  if (!pack) { showHome(); return; }
+  if (current && current.close) current.close();
+  current = null;
+  if (!deckId || !pack.decks.some(d => d.id === deckId)) { showPack(pack.id); return; }
+  await openDeck(pack, deckId, cardId ? { card: cardId, part: partId || null } : null);
+}
+
+// A notification's address rides in the page's hash: #open=pack/deck/card.
+const addressIn = url => {
+  const m = String(url || '').match(/#open=([^&]*)/);
+  return m ? decodeURIComponent(m[1]) : null;
+};
 
 // What comes after a deck: the next one in its stack, or the reward for what was just cleared.
 async function afterVerdict(pack, deck, which) {
@@ -755,14 +781,34 @@ async function start() {
   });
   setDirs((await store.get('swipe-dirs').catch(() => null)) || DEFAULT_DIRS);
   const lib = await library();
-  await queueUnsentWords((packId, deckId) => {
+  const deckIn = (packId, deckId) => {
     const p = lib.find(x => x.id === packId);
-    const d = p && p.decks.find(x => x.id === deckId);
-    return (d && d.topic) || null;
-  });
+    return p && p.decks.find(x => x.id === deckId);
+  };
+  await queueUnsentWords(
+    (packId, deckId) => (deckIn(packId, deckId) || {}).topic || null,
+    (packId, deckId, cardId) => ((deckIn(packId, deckId) || {}).cards || []).find(c => c.id === cardId) || null,
+  );
   navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(() => {});
   sync.onChange(() => { refreshNotice(); refreshStatusLine(); });
-  await showHome();
+  const opening = addressIn(location.hash);
+  if (opening) {
+    history.replaceState(null, '', location.pathname + location.search);
+    await openAddress(opening);
+  } else await showHome();
+  // An address put in the page's hash while it's open, and a tapped notification while the app is open.
+  addEventListener('hashchange', () => {
+    const a = addressIn(location.hash);
+    if (a === null) return;
+    history.replaceState(null, '', location.pathname + location.search);
+    openAddress(a);
+  });
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', e => {
+      const a = e.data && e.data.type === 'open' ? addressIn(e.data.url) : null;
+      if (a !== null) openAddress(a);
+    });
+  }
   pullNow = await sync.start(() => render());
   refreshNotice();
   registerWorker();
@@ -773,5 +819,5 @@ start();
 
 // For the tests in tests/, on a local test server only.
 if (isLocalHost) {
-  window.__riffle = { get current() { return current; }, showHome, showPack, showConnect, showSettings, showStyle, showDirections, setStyle, setDirs, getDirs, setNotice, onHide, openThoughts, library, sync, store };
+  window.__riffle = { get current() { return current; }, showHome, showPack, showConnect, showSettings, showStyle, showDirections, setStyle, setDirs, getDirs, setNotice, onHide, openThoughts, openAddress, library, sync, store };
 }

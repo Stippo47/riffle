@@ -450,9 +450,12 @@ svg{display:block}
 /* Looking at a picture */
 .viewer{position:fixed;inset:0;z-index:200;display:flex;flex-direction:column;background:#000;color:#fff;font-family:var(--font);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
 .viewer-stage{position:relative;flex:1 1 0;min-height:0;overflow:hidden;touch-action:none}
-.viewer-stage img{position:absolute;left:0;top:0;max-width:none;transform-origin:0 0;will-change:transform;pointer-events:none;-webkit-user-drag:none;opacity:0}
-.viewer-stage img.ready{opacity:1}
-.viewer-stage img.anim{transition:transform .18s ease-out}
+.viewer-media{position:absolute;left:0;top:0;transform-origin:0 0;will-change:transform;pointer-events:none}
+.viewer-media.anim{transition:transform .18s ease-out}
+.viewer-media img,.viewer-media video{position:absolute;left:0;top:0;width:100%;height:100%;max-width:none;display:block;-webkit-user-drag:none}
+.viewer-media img{opacity:0}
+.viewer-media img.ready{opacity:1}
+.viewer-ink{position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible}
 .viewer-x{position:absolute;right:10px;top:calc(var(--sat) + 8px);width:46px;height:46px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:rgba(40,40,44,.78);color:#fff}
 .viewer-x svg{width:24px;height:24px;fill:none;stroke:currentColor}
 .viewer-note{position:absolute;left:14px;right:66px;top:calc(var(--sat) + 12px);padding:7px 10px;border-radius:8px;background:rgba(40,40,44,.84);font-size:13.5px;line-height:1.25;pointer-events:none}
@@ -714,3 +717,82 @@ canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:
   .pick{font-size:14.5px}
   .tools button{min-height:44px;font-size:11px}
 }
+
+/* ---------- films: on a card's back, in a part, on a board */
+.clip{position:relative;margin-bottom:12px;border-radius:10px;overflow:hidden;background:#000;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.clip video{display:block;width:100%;max-height:62vh;background:#000;pointer-events:none}
+.clip-play{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;display:none;align-items:center;justify-content:center;pointer-events:none}
+.clip-play svg{width:26px;height:26px;fill:currentColor;stroke:none;margin-left:3px}
+.clip.paused .clip-play{display:flex}
+.clip-big{position:absolute;right:6px;bottom:6px;width:42px;height:42px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;display:flex;align-items:center;justify-content:center}
+.clip-big svg{width:20px;height:20px;fill:none;stroke:currentColor}
+.clip.missing::after{content:"This film comes down when there is signal.";position:absolute;left:8px;right:56px;bottom:10px;font-size:13px;line-height:1.25;color:#fff;background:rgba(0,0,0,.6);padding:5px 8px;border-radius:6px}
+.bp-film,.bt-film{position:absolute;left:4px;bottom:4px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.62);color:#fff;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.bp-film svg,.bt-film svg{width:11px;height:11px;fill:currentColor;stroke:none;margin-left:1px}
+.bt-film{left:6px;bottom:6px;width:28px;height:28px}
+.bt-film svg{width:14px;height:14px}
+
+/* Films and the pen in the viewer */
+.viewer-film{display:flex;align-items:center;gap:8px}
+.viewer-play,.viewer-speed{flex:none;height:44px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:rgba(255,255,255,.12);color:#fff}
+.viewer-play{width:52px}
+.viewer-play svg{width:22px;height:22px;fill:currentColor;stroke:none}
+.viewer-speed{width:54px;font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+input.viewer-scrub{flex:1;min-width:0;height:44px;padding:0;margin:0;border:0;background:none;accent-color:#fff;-webkit-user-select:none;user-select:none}
+.viewer-pen{flex:none;display:flex;align-items:center;justify-content:center;gap:6px;min-width:84px;height:48px;padding:0 12px;border-radius:12px;background:rgba(255,255,255,.12);color:#fff;font-size:15px;font-weight:700}
+.viewer-pen svg{width:20px;height:20px;fill:none;stroke:currentColor}
+.viewer-pens{display:flex;align-items:center;gap:6px}
+.pen-colour{flex:none;width:40px;height:44px;display:flex;align-items:center;justify-content:center}
+.pen-colour i{display:block;width:26px;height:26px;border-radius:50%;background:var(--pen);box-shadow:0 0 0 2px rgba(255,255,255,.35)}
+.pen-colour.on i{box-shadow:0 0 0 3px #17181b,0 0 0 5px #fff}
+.pen-undo,.pen-clear{flex:none;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:rgba(255,255,255,.12);color:#fff}
+.pen-undo svg,.pen-clear svg{width:21px;height:21px;fill:none;stroke:currentColor}
+.pen-undo:disabled,.pen-clear:disabled{opacity:.3}
+.pen-done{flex:1;min-width:0;height:48px;border-radius:12px;background:#15803f;color:#fff;font-size:16px;font-weight:700}
+
+/* ---------- parts: a few titles on the card's face, and their own screen */
+.parts-preview{display:grid;gap:4px;margin-top:10px;flex:none}
+.pp{display:flex;align-items:center;gap:8px;min-height:30px;padding:3px 9px 3px 4px;border-radius:8px;background:rgba(23,22,28,.06);font-size:14.5px;font-weight:600;line-height:1.2;min-width:0}
+.pp>span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-n{flex:none;width:22px;height:22px;border-radius:6px;background:rgba(23,22,28,.12);display:flex;align-items:center;justify-content:center;font-style:normal;font-size:12px;font-weight:800}
+.pp-mark{flex:none;font-style:normal;font-size:12px;font-weight:800;letter-spacing:.02em}
+.pp[data-mark=right] .pp-mark{color:#0d8146}.pp[data-mark=left] .pp-mark{color:#bd5608}.pp[data-mark=down] .pp-mark{color:#1c63b0}
+.pp[data-mark=right] .pp-n{background:#15803f;color:#fff}.pp[data-mark=left] .pp-n{background:#d8650f;color:#fff}.pp[data-mark=down] .pp-n{background:#2d7fd6;color:#fff}
+.pp.said::after{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:#a87c00}
+.pp-more{justify-content:center;font-size:13px;color:var(--card-dim);background:none;min-height:22px}
+.tight .pp{min-height:26px;font-size:13.5px}
+.deck.composing .parts-preview{display:none}
+[data-look=inventory] .pp,[data-look=inventory] .pp-n{border-radius:0}
+
+.partsview{padding-bottom:0}
+.parts-scroll{flex:1;min-height:0;padding:2px 0 16px;touch-action:pan-y}
+.parts-lead{padding:2px 2px 4px;font-size:16px;line-height:1.4}
+.parts-lead .parts-text{font-family:var(--display);font-size:20px;font-weight:700;line-height:1.2;margin-bottom:6px;color:var(--ink)}
+.parts-lead .parts-why,.parts-lead p{color:var(--dim);margin-bottom:8px}
+.parts-lead img.mpic,.part img.mpic{display:block;width:100%;border-radius:10px;margin-bottom:10px;cursor:zoom-in;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.part{margin-top:12px;padding:12px 14px 10px;border-radius:min(var(--radius),14px);background:#fff;color:var(--card-ink);box-shadow:0 0 0 1px rgba(0,0,0,.08)}
+.part[data-mark=right]{box-shadow:inset 5px 0 0 #15803f,0 0 0 1px rgba(0,0,0,.08)}
+.part[data-mark=left]{box-shadow:inset 5px 0 0 #d8650f,0 0 0 1px rgba(0,0,0,.08)}
+.part[data-mark=down]{box-shadow:inset 5px 0 0 #2d7fd6,0 0 0 1px rgba(0,0,0,.08)}
+.part h3{display:flex;align-items:center;gap:9px;font-family:var(--card-display);font-size:18px;line-height:1.2;margin-bottom:7px}
+.part h3 b{flex:none;width:26px;height:26px;border-radius:7px;background:rgba(23,22,28,.1);display:flex;align-items:center;justify-content:center;font-family:var(--font);font-size:13px}
+.part-body{font-size:16px;line-height:1.42;-webkit-user-select:text;user-select:text}
+.part-body p{margin-bottom:9px;color:#2c2b33}
+.part-acts{display:flex;align-items:center;gap:6px;margin-top:4px}
+.part-mark{flex:1;min-width:0;min-height:42px;padding:0 6px;border-radius:999px;box-shadow:inset 0 0 0 1.5px rgba(23,22,28,.22);font-size:14.5px;font-weight:700;color:var(--card-ink)}
+.part-mark.on[data-mark=right]{background:#15803f;box-shadow:none;color:#fff}
+.part-mark.on[data-mark=left]{background:#d8650f;box-shadow:none;color:#fff}
+.part-mark.on[data-mark=down]{background:#2d7fd6;box-shadow:none;color:#fff}
+.part-say{flex:none;width:46px;height:42px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(23,22,28,.08);color:var(--card-ink)}
+.part-say svg{width:21px;height:21px;fill:none;stroke:currentColor}
+.part .part-chip{margin-top:8px}
+.part-pad{margin-top:8px}
+.part-pad .padwrap{height:150px}
+.part-pad .pad{color:var(--card-ink);background:rgba(23,22,28,.05);box-shadow:inset 0 0 0 1.5px rgba(23,22,28,.2)}
+.part-pad .pad.is-empty::before{color:var(--card-dim)}
+.part-pad .photobtn{color:var(--card-dim)}
+.part-done{width:100%;min-height:40px;color:var(--card-dim)}
+.partsview.typing .board-bar{display:none}
+[data-look=inventory] .part,[data-look=inventory] .part-mark,[data-look=inventory] .part-say,[data-look=inventory] .part h3 b{border-radius:0}
+[data-look=inventory] .part{box-shadow:0 0 0 3px #1d1d1d}
+[data-look=inventory] .part-pad .pad{color:var(--card-ink);box-shadow:inset 0 0 0 2px #1d1d1d}

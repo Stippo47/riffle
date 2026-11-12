@@ -183,6 +183,31 @@ export const DEMO_PACK = {
       ],
     },
     {
+      id: 'pointing',
+      topic: 'pictures',
+      order: 2,
+      title: 'Pointing at things',
+      cards: [
+        {
+          id: 'parts', kind: 'report', rarity: 'common', title: 'A report in parts',
+          text: 'This report has three parts. Tap it to read them.',
+          why: 'Each part can be marked and commented on by itself, apart from your swipe on the whole card.',
+          parts: [
+            { id: 'one', title: 'Marking a part', text: 'Under each part are Good, Problem and Huh?. Tap one to mark this part. Tap it again to take it back.' },
+            { id: 'two', title: 'Commenting on a part', text: 'The speech bubble opens a box under this part. What you type there is about this part only. Tap Done, or drag the box down, to close it.' },
+            { id: 'three', title: 'Drawing on a part\'s picture', text: 'Tap the picture, then Draw. Circle something with one finger, and pinch with two to zoom while you do. Done puts the drawing on this part\'s comment.', images: [picture(3, 120)] },
+          ],
+        },
+        {
+          id: 'draw', kind: 'report', rarity: 'common', title: 'Drawing on a picture',
+          text: 'Tap this card, tap the picture, then tap Draw.',
+          why: 'Circle or arrow what you mean. Two fingers still zoom and move. Done closes the picture and opens your comment with the drawing on it.',
+          details: 'The pen has four colours, an undo and a clear. What you draw is kept as you go, so closing the app doesn\'t lose it.\n\nLeaving the picture any way at all puts the drawing on your comment for this card. You can take it off there with its little cross.',
+          images: [picture(4, 320)],
+        },
+      ],
+    },
+    {
       id: 'misc',
       misc: true,
       order: 99,

@@ -6,7 +6,8 @@ import * as store from './store.js';
 export const OWNER = 'Stippo47', REPO = 'riffle-data', BRANCH = 'main';
 const FULL = `${OWNER}/${REPO}`;
 const SEND_EVERY = 15000, MAX_BATCH = 200, KEEPALIVE_LIMIT = 40000, PULL_EVERY = 30000;
-const PICTURE_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif' };
+const PICTURE_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
+const isFilm = path => /\.(mp4|m4v|mov|webm)$/i.test(path);
 const CALL_TIMEOUT = 25000, STUCK_AFTER = 40000, STREAK_LIMIT = 3;
 const PHOTO_TIMEOUT = 120000, PHOTO_KEEP_DAYS = 30, PICTURE_TIMEOUT = 60000;
 
@@ -373,7 +374,11 @@ export async function pictureUrl(packId, rel, { get = true } = {}) {
   return url;
 }
 
-// The full pictures of every board. These wait until they're looked at, unless a plain card uses one too.
+// Every path a card, a part or a board item names for its films: the film, and its poster.
+const filmPaths = list => (list || []).flatMap(v => (typeof v === 'string' ? [v] : v ? [v.src, v.poster] : [])).filter(Boolean);
+
+// The full pictures and films of every board. These wait until they're looked at, unless a plain card
+// uses one too. A card's own pictures and films, and its parts', all come down ahead, to work offline.
 async function boardPictures() {
   const out = new Set(), onCards = new Set();
   for (const f of await store.files.words()) {
@@ -381,8 +386,10 @@ async function boardPictures() {
     if (!m) continue;
     try {
       for (const c of JSON.parse(f.data).cards || []) {
-        for (const it of c.items || []) if (it.image) out.add(`packs/${m[1]}/${it.image}`);
-        for (const p of [...(c.images || []), ...(c.options || []).map(o => o.image)]) if (p) onCards.add(`packs/${m[1]}/${p}`);
+        for (const it of c.items || []) for (const p of [it.image, ...filmPaths([it.video])]) if (p) out.add(`packs/${m[1]}/${p}`);
+        const own = [...(c.images || []), ...(c.options || []).map(o => o.image), ...filmPaths(c.videos)];
+        for (const pt of c.parts || []) own.push(...(pt.images || []), ...filmPaths(pt.videos));
+        for (const p of own) if (p) onCards.add(`packs/${m[1]}/${p}`);
       }
     } catch { /* a broken file is the deck's own problem */ }
   }
@@ -428,7 +435,10 @@ export async function pull(onWords = () => {}) {
   for (const t of pictures) {
     if (later.has(t.path) && have.has(t.path)) { await store.files.del(t.path); pictureUrls.delete(t.path); } // it changed, so it comes again when looked at
   }
-  await eachAtOnce(pictures.filter(t => !t.path.includes('/img/thumb/') && !later.has(t.path)), 3, bring);
+  // Pictures before films: a film is a few of them in size, and its poster already stands in for it.
+  const ahead = pictures.filter(t => !t.path.includes('/img/thumb/') && !later.has(t.path));
+  await eachAtOnce(ahead.filter(t => !isFilm(t.path)), 3, bring);
+  await eachAtOnce(ahead.filter(t => isFilm(t.path)), 2, bring);
   await readWhen();
   state.pulledAt = Date.now();
   state.pullProblem = missed ? `${missed} file${missed === 1 ? '' : 's'} didn't come down. It will try again.` : null;

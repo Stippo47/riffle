@@ -22,6 +22,8 @@ Riffle is a phone web app for answering questions and reading reports one card a
 
 Comment always opens the comment box. These words live in `js/ui.js`. The table names the default directions; see Swipe directions below.
 
+**Cards in parts.** A report, question or design can be in parts: a few sections, each read, marked and commented on by itself. See Parts below.
+
 **Handled cards.** A card can be marked as settled, with one or two sentences on how, by whoever writes the deck. It stays in the deck. It has a green band and tick, with the conclusion as the main text and the question smaller above it, so it can be recognised without reading it. Right is FINE, left is WORKSHOP (they don't like the conclusion), down is IDK, and comments work as usual. It isn't owed: counts leave it out, the pack's page shows a quiet "2 handled", and a deck can finish without it. It's still dealt, after everything owed. Skipping it with nothing else owed ends the deck. A new conclusion deals it again, showing what they said last time. Epic and legendary ones still need the hold.
 
 ## Importance
@@ -109,7 +111,15 @@ Pictures go when what they're attached to goes: the answer, the thought, or the 
 
 From the Home Screen icon, on iOS 16.4 or newer. Settings has one button, which is the only thing that ever asks for permission, and is also the off switch. The phone writes its subscription to the data repo, and each start checks it's still the one on file. The writer's machine signs and sends, with a signing key that lives only there, in `~/.riffle/vapid.json`, outside every repo. The public half is in `js/push.js`. If that key is ever replaced, change the public half and turn notifications off and on again on the phone.
 
-A new deck makes one notification, not one per card, and a run of new decks makes one. The number on the icon is the cards owed, leaving out the Feel test. Tapping a notification opens the app, which checks for new decks each time it's opened.
+**What one says.** Its title is where it's from, the pack and topic, like "Golem Forest › Body and motion". Its body is the deck's title, its kind (report, questions or board) and the cards in it. A second try names the card and its deck, and so does a newly handled card. Tapping one opens the app at that deck, or that card.
+
+**Calm, but nothing silent.** At most one every 10 minutes. Anything sent sooner waits, and the next one names it too: "13 new decks: Faces and camera (6), Calls from your words (16), +11 more". A small process on the writer's machine sends that one when the 10 minutes are up, and the next send flushes it if that process didn't get to. A tap on one that names several opens their pack. iPhones don't reliably replace a notification that has the same tag ([WebKit bug 258922](https://bugs.webkit.org/show_bug.cgi?id=258922)), so this never relies on it.
+
+The number on the icon is the cards owed, leaving out the Feel test. The app checks for new decks each time it's opened.
+
+## Addresses
+
+Any pack, deck, card or part has an address, `pack/deck/card/part`. Opening the app with `#open=` and an address goes straight there: a notification's tap does this. Anything no longer there stops at the level above, so a deck that's gone opens its pack.
 
 ## The buttons
 
@@ -130,6 +140,30 @@ Pinching a card, or Grid, lays out every card in the deck on a grid: its short t
 ## Thoughts
 
 A row at the top of every pack's page, always there, needing no deck file. It isn't a deck, because decks end and this doesn't. It opens a screen with a pad on top and earlier thoughts below, newest first, each with its time. Filing one sends it. What's being typed has the same protection as a comment. The writer can answer a thought through a file, and the answer shows on it with the handled look.
+
+## Films
+
+A card or a part can carry films beside its pictures, and a board can mix films and pictures. On a card's back they play by themselves, muted, looping and inline, once the card is flipped, and stop when it's flipped back. A tap pauses or plays one. In parts, a film plays while it's on screen. Each has a poster for before it plays and for tiles, and a board marks its films with a small play sign.
+
+The corner button opens a film full screen, like a picture: pinch to zoom, double tap, drag down to go back. Under it is a bar: play or pause, a slider to scrub through it, and a speed button that goes 1×, ½×, ¼×. A tap on the film plays or pauses it, just after a double tap would have counted.
+
+A card's films come down ahead, after its pictures. A board's come when they're looked at, like its full pictures.
+
+## Drawing on pictures
+
+Any picture or film opened full screen can be drawn on: on a card's back, a part, an option or a board, and a paused frame of a film. Draw turns the pen on, which brings out four colours (red, yellow, blue, white), undo, clear, and Done.
+
+- With the pen on, one finger draws and two still pinch and move. A second finger landing just after a line starts takes that line back, since a pinch was meant.
+- Lines are as wide on screen at any zoom, and drawn in the picture's own pixels, so zooming never moves them.
+- Every line is kept on the phone as it ends, so closing the app keeps the drawing, and it's there when the picture opens again.
+- Leaving the picture any way at all (Done, the X, next, or dragging down) turns the drawing into a photo: the picture at full size with the lines on it. It goes on the comment it belongs to: the card's, or the part's. Done also opens that comment, so the words can go with it. It's an ordinary photo from then on, so its little cross takes it off.
+- The answer says what it was drawn over.
+
+## Parts
+
+A card in parts shows the titles of its first four parts on its face, each with its mark once it has one, and a dot if it has words. "Tap to read the 3 parts" says how many. A tap, even mid-comment, opens them on their own screen, scrolling: the card's own words, details, pictures and films on top, then each part as a section with its title, words, pictures and films.
+
+Under each part are three marks in the card's own words (Good, Problem, Huh? on a report), and a speech bubble. A mark goes as soon as it's tapped, and tapping it again takes it back. The bubble opens a comment box under that part only, with its own photo button. Its words go a few seconds after typing stops, and its new pictures when it closes, with Done or a drag down. A part's words keep the same protection as a comment. The card's own swipe and comment are separate from all of this. A second try of the card clears its parts' marks, and keeps their words.
 
 ## Looking at pictures
 
@@ -195,4 +229,4 @@ On a local test server only: `?api=` points the app at a stand-in for GitHub, an
 
 ## The writer's side
 
-`skill/` holds a Claude Code skill, installed with `python skill/install.py`. It makes decks from files, with checks first; shrinks pictures; finds icons; reads answers; deals cards back; marks cards handled; answers thoughts; and lists what needs a second look. `skill/SKILL.md` has the commands. Its estimate of what fits the smallest iPhone is checked against real rendering in the app's tests, and must never be the optimist.
+`skill/` holds a Claude Code skill, installed with `python skill/install.py`. It makes decks from files, with checks first; shrinks pictures and films and makes posters; finds icons; reads answers, parts and drawings; deals cards back; marks cards handled; answers thoughts; lists what needs a second look; and sends notifications that say where they're from. `skill/SKILL.md` has the commands. Its estimate of what fits the smallest iPhone is checked against real rendering in the app's tests, and must never be the optimist.

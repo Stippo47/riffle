@@ -1,7 +1,9 @@
 // Sends one Web Push notification to every phone subscribed in the data repo, with nothing but
 // Node's built-in crypto. The signing key lives in ~/.riffle/vapid.json, outside every repo.
 //
-//   node notify.mjs <data repo> --title "New deck" --body "Water: 9 cards" [--badge 12] [--tag new-deck]
+//   node notify.mjs <data repo> --title "New deck" --body "Water: 9 cards" [--badge 12] [--tag new-deck] [--url ./#open=pack/deck]
+//
+// A tap on it opens `url` in the app, relative to where the app lives.
 //
 // Payload encryption is RFC 8291 (aes128gcm), and the signature is RFC 8292 (VAPID).
 import { createECDH, createCipheriv, createPrivateKey, hkdfSync, randomBytes, sign } from 'node:crypto';
@@ -83,7 +85,7 @@ async function main() {
   const keys = JSON.parse(readFileSync(keyFile, 'utf8'));
   const subs = subscriptions(dataRepo);
   if (!subs.length) { console.log('No phone has notifications turned on, so nothing was sent.'); return; }
-  const payload = JSON.stringify({ title: arg('title') || 'Riffle', body: arg('body') || '', tag: arg('tag') || 'riffle', ...(arg('badge') !== undefined ? { badge: +arg('badge') } : {}) });
+  const payload = JSON.stringify({ title: arg('title') || 'Riffle', body: arg('body') || '', tag: arg('tag') || 'riffle', ...(arg('badge') !== undefined ? { badge: +arg('badge') } : {}), ...(arg('url') ? { url: arg('url') } : {}) });
   for (const rec of subs) {
     try {
       const r = await pushOne(rec.subscription, payload, keys);

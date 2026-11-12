@@ -46,6 +46,13 @@ export async function savePhoto(file) {
   return id;
 }
 
+// A drawing over a picture, already a JPEG of a sensible size. `on` says what it was drawn on.
+export async function saveDrawing(blob, on = '') {
+  const id = newId();
+  await store.photos.set(id, { id, type: blob.type || 'image/jpeg', bytes: await blob.arrayBuffer(), at: Date.now(), drawing: true, on });
+  return id;
+}
+
 async function thumb(id) {
   if (urls.has(id)) return urls.get(id);
   const rec = await store.photos.get(id).catch(() => null);

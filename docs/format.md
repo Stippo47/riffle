@@ -57,7 +57,8 @@ read.json
   "why": "What it changes, in plain words.",
   "pick": "The writer's pick. Leave it out on a report.",
   "details": "Longer text for the back.\n\nBlank lines make paragraphs.",
-  "images": ["img/rivers.jpg"]
+  "images": ["img/rivers.jpg"],
+  "videos": [{ "src": "img/rivers-flow.mp4", "poster": "img/poster/rivers-flow.jpg" }]
 }
 ```
 
@@ -70,6 +71,37 @@ read.json
 A card's face reads at a glance, so as a guide: `title` 26 characters, `text` 110, `why` 300, `pick` 150, and a handled card's `how` 300. Anything longer goes in `details`, which has no limit. What fits depends on the whole card: `riffle check` estimates it on the smallest iPhone and warns. If a card still doesn't fit, the app cuts the end of its description, with a fade, and puts the whole of it on the back.
 
 **Never name a direction on a card.** People can swap what each way of swiping does, so "swipe right" may be wrong for them. Say "add a comment", or say nothing.
+
+### Films
+
+`videos` sits beside `images`, on a card or a part. Each is a path, or `{ "src": ..., "poster": ... }`. They play on the card's back muted, looping and inline, and a tap pauses or plays one. The corner button opens one full screen, where it can be scrubbed, slowed to a half or a quarter, zoomed into and drawn on.
+
+- **src** is the film. The phone wants a small H.264 mp4. `riffle deck` keeps one that's already that and under 2 MB, and turns anything else into one, with no sound, using ffmpeg.
+- **poster** is a still for before it plays, and for tiles. `riffle deck` makes one from early in the film, in `img/poster/`, or shrinks one you give like any picture. Without ffmpeg there's no poster, and the phone shows the film's first frame.
+- A card's films come down ahead, like its pictures, after them. A board's come when they're looked at.
+
+### Parts
+
+A report, question or design can be in **parts**: sections that are each read, marked and commented on by themselves, apart from the card's own swipe.
+
+```json
+{
+  "id": "walk",
+  "kind": "report",
+  "title": "The walk",
+  "text": "The walk, in three parts.",
+  "why": "Mark any part that's off.",
+  "parts": [
+    { "id": "feet", "title": "Feet", "text": "They stay planted now.", "images": ["img/feet.jpg"] },
+    { "id": "hips", "title": "Hips", "text": "A little sway.", "videos": ["img/hips.mp4"] },
+    { "id": "head", "title": "Head", "text": "It stays level." }
+  ]
+}
+```
+
+- Each part needs its own `id` and a `title`, and some `text`, `images` or `videos`. The face shows the first four titles, each on one line, so keep them under 40 characters. Twelve parts is a lot for one card.
+- A tap on the card opens its parts on their own scrolling screen: the card's words, details and pictures on top, then each part with Good, Problem and Huh? (the card's own words for go, workshop and idk) and a comment box of its own.
+- Parts don't go on option cards or boards.
 
 ### Option cards
 
@@ -104,13 +136,15 @@ Picking from many pictures, with any number of items.
   "items": [
     { "id": "g1", "label": "Plain", "image": "pictures/plain.png" },
     { "id": "g2", "label": "Arched", "image": "pictures/arched.png", "text": "A longer note, shown when it's looked at." },
-    { "id": "g3", "label": "Stacked views", "image": "pictures/stacked.png", "thumb": "pictures/stacked-square.png" }
+    { "id": "g3", "label": "Stacked views", "image": "pictures/stacked.png", "thumb": "pictures/stacked-square.png" },
+    { "id": "g4", "label": "Swinging", "video": "pictures/swing.mp4" }
   ]
 }
 ```
 
 - **pick** lists the writer's marked items, and can be left out. With nothing ticked, going takes these. If there are none, it just bounces.
 - **image** is the picture.
+- **video** makes the item a film. `riffle deck` gives it its poster as its `image`, and a thumbnail from that, so a board of films and pictures looks the same in the grid, with a play mark on the films. Looking at one plays it.
 - **thumb** is the small one the grid loads first, and can be left out. Give your own when the whole picture won't read at that size, like two views stacked in one tall image: a square of the part that matters. `riffle deck` shrinks yours to 360 pixels if it's over, and keeps it. If there's none, it makes one from the whole picture. A deck file put in the repo by hand with no `thumb` loads the full pictures in the grid, slowly.
 - Tiles are square and never crop. A thumbnail that isn't square shows whole, with space beside it. So a square one fills its tile.
 - The phone brings down a board's thumbnails ahead of time. Its full pictures come one at a time, when they're looked at.
@@ -167,9 +201,12 @@ Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typ
 | `draft` with `thought: true` | `text`, with `deck` and `card` null | A thought being typed, not filed yet. The latest wins, and filing replaces it |
 | `thought` | `id`, `text`, with `deck` null | A general thought about the pack |
 | `deck` | `verdict` (`done`, `replan`), `tally`, `answered`, `total` | The deck as a whole. `replan` means rethink it from the base; the answers still stand |
+| `part` | `card`, `cardVersion`, `title`, `kind`, `part`, `partTitle`, `mark`, `stamp`, `comment` | What's said about one part of a card. `mark` is a meaning like `swipe` (`right`, `left` or `down`), or null for none. The latest for a part stands, whether or not the card is answered |
 | `deck-reset` | `keptNotes` | They started the deck over. Answers on this deck from before this no longer stand, though anything they typed was still said. If `keptNotes`, comments came back as drafts on their cards, and the notes stayed |
 
-**Pictures.** An `answer`, `notes`, `thought` or `draft` event can carry `images`, a list of paths like `answers/img/<id>.jpg`. Pictures upload apart from the words, so one can arrive a little after the event that names it. Only the event that stands counts: a picture named by nothing that stands was taken back.
+**Pictures.** An `answer`, `part`, `notes`, `thought` or `draft` event can carry `images`, a list of paths like `answers/img/<id>.jpg`. Pictures upload apart from the words, so one can arrive a little after the event that names it. Only the event that stands counts: a picture named by nothing that stands was taken back.
+
+**Drawings.** A picture they drew on is one of those `images`, with the drawing over the picture. The event then also has `drawings`, which maps its path to what it was drawn over: a picture's path in the pack, or a board item's or option's label with its path.
 
 **`swipe` is the meaning, not the direction.** `right` is go, good, yes or fine. `left` is workshop, problem, rethink or redo. `down` is idk. `up` is a comment on its own. Someone may have swapped which way of swiping does which, and that never shows here.
 

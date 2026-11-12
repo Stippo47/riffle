@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 RIFFLE = ROOT / 'skill' / 'riffle.py'
@@ -32,9 +33,25 @@ def git(where, *args):
 
 
 def run(*args, cwd=None):
-    env = {**os.environ, 'RIFFLE_DATA': str(clone), 'HOME': str(home), 'USERPROFILE': str(home), 'PYTHONIOENCODING': 'utf-8'}
+    env = {**os.environ, 'RIFFLE_DATA': str(clone), 'HOME': str(home), 'USERPROFILE': str(home), 'PYTHONIOENCODING': 'utf-8', 'RIFFLE_NOTIFY_GAP': str(GAP)}
     r = subprocess.run([sys.executable, str(RIFFLE), *args], cwd=cwd or work, capture_output=True, text=True, encoding='utf-8', env=env)
     return r.returncode, r.stdout + r.stderr
+
+
+GAP = 4  # seconds between notifications here, instead of ten minutes
+
+
+def sent_notices():
+    log = home / '.riffle' / 'notify-log.jsonl'
+    return [json.loads(l) for l in log.read_text(encoding='utf-8').splitlines() if l.strip()] if log.exists() else []
+
+
+def wait_for_notices(n, most=20):
+    for _ in range(most * 4):
+        if len(sent_notices()) >= n:
+            return True
+        time.sleep(0.25)
+    return False
 
 
 def write(name, value):
@@ -134,8 +151,19 @@ ok(code == 0 and 'Pushed' in out and 'No signing key' in out, 'deck sends, and t
 sent = json.loads((clone / 'packs/proj/decks/first.json').read_text(encoding='utf-8'))
 ok(sent['cards'][0]['images'] == ['img/first-big.jpg'], 'pictures get copied in')
 ok(max(Image.open(clone / 'packs/proj/img/first-big.jpg').size) == 2000, 'and shrunk, keeping enough to zoom into')
+first_notice = sent_notices()[-1] if sent_notices() else {}
+ok(first_notice.get('title') == 'A project › First' and first_notice.get('body') == 'A deck: questions, 3 cards', 'its notification says the pack and topic, then the deck, its kind and the cards', first_notice)
+ok(first_notice.get('url') == './#open=proj%2Ffirst', 'and a tap on it opens that deck', first_notice)
 code, out = run('deck', str(write('d/second.json', deck(good_card(), order=2))), '--pack', 'proj')
 ok('one went out' in out, 'a second deck straight after makes no second notification', out)
+ok('joins the next one' in out and len(sent_notices()) == 1, 'it waits to join the next one instead of being dropped', out)
+code, out = run('deck', str(write('d/third.json', {**deck(good_card(), order=3), 'title': 'Third deck'})), '--pack', 'proj')
+ok(wait_for_notices(2), 'once the gap is over, the one waiting goes by itself')
+batch = sent_notices()[-1] if sent_notices() else {}
+ok(batch.get('body', '').startswith('2 new decks: ') and 'A deck (1)' in batch.get('body', '') and 'Third deck (1)' in batch.get('body', ''), 'naming every deck sent in the meantime', batch)
+ok(batch.get('title') == 'A project › First' and batch.get('url') == './#open=proj', 'with where they are from, and a tap opens the pack', batch)
+ok(not (home / '.riffle' / 'notify-pending.json').exists(), 'and nothing is left waiting', list((home / '.riffle').iterdir()))
+time.sleep(GAP + 0.5)
 ok(git(clone, 'log', '-1', '--format=%B').stdout.strip().endswith('<noreply@anthropic.com>'), 'commits carry the attribution')
 fresh = work / 'fresh'
 subprocess.run(['git', 'clone', '-q', str(bare), str(fresh)], capture_output=True, check=True)
@@ -208,6 +236,71 @@ ok(clash[0]['image'] != clash[1]['image'], 'two pictures with the same name stay
 code, out = run('deck', str(clone / 'packs/proj/decks/forest.json'), '--pack', 'proj', '--quiet')
 ok(code == 0 and 'Nothing changed' in out, 'sending it again from where it is changes nothing', out)
 
+print('Films')
+have_ffmpeg = bool(shutil.which('ffmpeg'))
+if have_ffmpeg:
+    def film(name, *extra, seconds=2, size='480x270'):
+        subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', f'testsrc2=size={size}:rate=24', '-t', str(seconds), *extra, str(work / 'd' / name)], check=True)
+    film('walk.mp4', '-pix_fmt', 'yuv420p', '-c:v', 'libx264')
+    film('turn.mov', '-c:v', 'mpeg4', '-q:v', '2', size='1920x1080', seconds=3)
+    film('idle.mp4', '-pix_fmt', 'yuv420p', '-c:v', 'libx264')
+    Image.new('RGB', (480, 270), (250, 200, 0)).save(work / 'd' / 'my-poster.png')
+    films_card = {**good_card('films'), 'kind': 'report', 'pick': None, 'videos': ['walk.mp4', {'src': 'turn.mov'}, {'src': 'idle.mp4', 'poster': 'my-poster.png'}]}
+    film_board = {**board, 'id': 'clips', 'pick': ['w'], 'items': [{'id': 'w', 'label': 'Walk', 'video': 'walk.mp4'}, {'id': 'p', 'label': 'A picture', 'image': 'tree1.png'}]}
+    code, out = run('check', str(write('d/films.json', deck(films_card, film_board))), '--pack', 'proj')
+    ok(code == 0 and 'warning' not in out, 'a card with films, and a board mixing films and pictures, pass the check', out)
+    code, out = run('deck', str(work / 'd/films.json'), '--pack', 'proj', '--quiet')
+    sentf = json.loads((clone / 'packs/proj/decks/films.json').read_text(encoding='utf-8'))['cards']
+    vids = sentf[0]['videos']
+    ok(code == 0 and vids[0] == {'src': 'img/films-walk.mp4', 'poster': 'img/poster/films-walk.jpg'}, 'a film comes in with a poster made from it', (out, vids))
+    ok((clone / 'packs/proj/img/films-walk.mp4').read_bytes() == (work / 'd/walk.mp4').read_bytes(), 'a small mp4 is left as it is')
+    turned = clone / 'packs/proj/img/films-turn.mp4'
+    ok(vids[1]['src'] == 'img/films-turn.mp4' and turned.exists() and turned.stat().st_size <= 2_000_000, 'another kind of film becomes a small mp4', vids[1])
+    probed = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'stream=codec_name,width,height,codec_type', '-of', 'json', str(turned)], capture_output=True, text=True).stdout
+    streams = json.loads(probed)['streams']
+    ok(all(st['codec_type'] == 'video' for st in streams) and streams[0]['codec_name'] == 'h264' and max(streams[0]['width'], streams[0]['height']) <= 1280, 'H.264, with no sound, no bigger than a phone needs', streams)
+    ok(vids[2]['poster'] == 'img/films-my-poster.jpg', 'a poster of its own is kept, like a picture', vids[2])
+    with Image.open(clone / 'packs/proj/img/poster/films-walk.jpg') as im:
+        ok(im.size == (480, 270), 'the poster is a full frame of the film', im.size)
+    items_f = sentf[1]['items']
+    ok(items_f[0]['video'] == 'img/films-walk.mp4' and items_f[0]['image'] == 'img/poster/films-walk.jpg' and items_f[0]['thumb'].startswith('img/thumb/'), 'on a board, a film gets its poster as its picture, and a thumbnail', items_f[0])
+    ok('1 of them films' in out, 'and riffle deck says how many are films', out)
+    code, out = run('deck', str(clone / 'packs/proj/decks/films.json'), '--pack', 'proj', '--quiet')
+    ok(code == 0 and 'Nothing changed' in out, 'sending it again from where it is changes nothing', out)
+    code, out = run('fit', str(work / 'd/films.json'))
+    ok('films: fits' in out, 'a card with films still fits', out)
+else:
+    print('  (ffmpeg is not installed here, so the film tests were skipped)')
+write('d/notafilm.txt', 'x')
+code, out = run('check', str(write('d/badfilm.json', deck({**good_card('bf'), 'videos': ['notafilm.txt', 7]}))), '--pack', 'proj')
+ok(code == 1 and 'not a film the app can play' in out and 'neither a path' in out, 'something that is not a film is refused', out)
+code, out = run('check', str(write('d/nofilm.json', deck({**good_card('nf'), 'videos': ['nope.mp4']}))), '--pack', 'proj')
+ok(code == 1 and "can't find the picture nope.mp4" in out, 'a missing film is refused', out)
+
+print('Parts')
+Image.new('RGB', (1200, 800), (40, 160, 90)).save(work / 'd' / 'part-pic.png')
+parts_card = {**good_card('walk', kind='report', pick=None), 'text': 'The walk, in four parts.', 'parts': [
+    {'id': 'feet', 'title': 'Feet', 'text': 'The feet stay planted now.', 'images': ['part-pic.png']},
+    {'id': 'hips', 'title': 'Hips', 'text': 'The hips sway a little.'},
+    {'id': 'arms', 'title': 'Arms', 'text': 'The arms swing opposite the legs.'},
+    {'id': 'head', 'title': 'Head', 'text': 'The head stays level.'},
+    {'id': 'tail', 'title': 'Tail', 'text': 'The tail follows.'},
+]}
+code, out = run('check', str(write('d/parts.json', deck(parts_card))), '--pack', 'proj')
+ok(code == 0 and 'warning' not in out, 'a card in parts passes the check', out)
+code, out = run('fit', str(work / 'd/parts.json'))
+ok('walk: fits' in out or 'shrinks a little' in out, 'and fits, with its part titles on the face', out)
+bad_parts = {**parts_card, 'parts': [{'id': 'a', 'text': 'No title'}, {'id': 'a', 'title': 'Twice'}, {'id': 'b', 'title': 'Empty'}, {'id': 'c', 'title': 'Swipe left on this one', 'text': 'x'}]}
+code, out = run('check', str(write('d/badparts.json', deck(bad_parts))), '--pack', 'proj')
+ok(code == 1 and 'each part needs its own id' in out and 'needs a short title' in out and 'needs text, pictures or films' in out and 'part c names a swipe direction' in out, 'parts need an id, a title and something in them, and name no direction', out)
+code, out = run('check', str(write('d/optparts.json', deck({**opt, 'options': [{'id': 'a', 'label': 'One'}, {'id': 'b', 'label': 'Two'}], 'parts': [{'id': 'x', 'title': 'X', 'text': 'y'}]}))), '--pack', 'proj')
+ok(code == 1 and 'not on options cards' in out, 'and go only on questions, reports and designs', out)
+code, out = run('check', str(write('d/longpart.json', deck({**parts_card, 'parts': [{'id': 'x', 'title': 'A title for a part that runs far too long for one line', 'text': 'y'}]}))), '--pack', 'proj')
+ok(code == 0 and 'over 40' in out, 'a long part title gets a warning', out)
+code, out = run('deck', str(work / 'd/parts.json'), '--pack', 'proj', '--quiet')
+sentp = json.loads((clone / 'packs/proj/decks/parts.json').read_text(encoding='utf-8'))['cards'][0]['parts']
+ok(code == 0 and sentp[0]['images'] == ['img/parts-part-pic.jpg'] and (clone / 'packs/proj/img/parts-part-pic.jpg').exists(), "a part's pictures are brought in too", (out, sentp[0]))
+
 print('Null fields')
 nulls = {'id': 'n', 'kind': 'question', 'title': 'Nulls', 'text': 'Any?', 'why': 'To check.', 'pick': 'Yes.', 'options': None, 'images': None, 'items': None, 'details': None, 'handled': None}
 code, out = run('check', str(write('d/nulls.json', deck(nulls))), '--pack', 'proj')
@@ -221,6 +314,10 @@ ok(code == 1 and '2 to 4 options' in out and 'at least 2 items' in out and 'Trac
 
 code, out = run('misc', str(write('d/one.json', good_card('m1'))), '--pack', 'proj')
 ok(code == 0 and json.loads((clone / 'packs/proj/decks/misc.json').read_text(encoding='utf-8'))['misc'] is True, 'misc makes the Misc deck', out)
+wait_for_notices(1)
+misc_notice = next((n for n in reversed(sent_notices()) if 'Misc' in n.get('body', '')), {})
+ok(misc_notice.get('title') == 'A project › Misc' and misc_notice.get('body') == '1 new card in Misc: A title' and misc_notice.get('url') == './#open=proj%2Fmisc', 'and its notification says so, and opens Misc', misc_notice)
+time.sleep(GAP + 0.5)
 code, out = run('misc', str(write('d/two.json', [good_card('m2')])), '--pack', 'proj')
 ok(len(json.loads((clone / 'packs/proj/decks/misc.json').read_text(encoding='utf-8'))['cards']) == 2, 'and adds to it', out)
 code, out = run('misc', str(write('d/three.json', good_card('m2'))), '--pack', 'proj')
@@ -253,6 +350,18 @@ phone_sends('2026-11-02T12-00-30-000Z-brd.json',
             {'eid': 'b1', 'deck': 'forest', 'at': '2026-11-02T12:00:30.000Z', 'type': 'answer', 'card': 'trees', 'cardVersion': 1, 'title': 'Trees', 'kind': 'board', 'swipe': 'right', 'stamp': 'GO', 'comment': '', 'selected': ['t3', 't7']},
             {'eid': 'b2', 'deck': 'nulls', 'at': '2026-11-02T12:00:31.000Z', 'type': 'answer', 'card': 'n', 'cardVersion': 1, 'title': 'Nulls', 'kind': 'question', 'swipe': 'right', 'stamp': 'GO', 'comment': '', 'selected': ['x']},
             {'eid': 'b3', 'deck': 'clash', 'at': '2026-11-02T12:00:32.000Z', 'type': 'draft', 'card': 'trees', 'text': '', 'selected': ['a']})
+phone_sends('2026-11-02T12-00-40-000Z-prt.json',
+            {'eid': 'q1', 'deck': 'parts', 'at': '2026-11-02T12:00:40.000Z', 'type': 'part', 'card': 'walk', 'cardVersion': 1, 'title': 'A title', 'kind': 'report', 'part': 'feet', 'partTitle': 'Feet', 'mark': 'left', 'stamp': 'PROBLEM', 'comment': 'They slide', 'images': ['answers/img/drawn.jpg'], 'drawings': {'answers/img/drawn.jpg': 'img/parts-part-pic.jpg'}},
+            {'eid': 'q2', 'deck': 'parts', 'at': '2026-11-02T12:00:41.000Z', 'type': 'part', 'card': 'walk', 'cardVersion': 1, 'title': 'A title', 'kind': 'report', 'part': 'hips', 'partTitle': 'Hips', 'mark': 'right', 'stamp': 'GOOD', 'comment': ''},
+            {'eid': 'q3', 'deck': 'parts', 'at': '2026-11-02T12:00:42.000Z', 'type': 'part', 'card': 'walk', 'cardVersion': 1, 'title': 'A title', 'kind': 'report', 'part': 'hips', 'partTitle': 'Hips', 'mark': 'down', 'stamp': 'HUH?', 'comment': 'Changed my mind'},
+            {'eid': 'q4', 'deck': 'inpack', 'at': '2026-11-02T12:00:43.000Z', 'type': 'answer', 'card': 'a', 'cardVersion': 1, 'title': 'A title', 'kind': 'question', 'swipe': 'left', 'stamp': 'WORKSHOP', 'comment': 'See my drawing', 'images': ['answers/img/d2.jpg'], 'drawings': {'answers/img/d2.jpg': 'img/first-big.jpg'}})
+code, out = run('answers', '--pack', 'proj')
+ok('walk (A title): not swiped yet. On its parts:' in out and 'part feet (Feet): PROBLEM, "They slide"' in out, 'a part answer shows under its card, with its mark and comment', out)
+ok('part hips (Hips): HUH?, "Changed my mind"' in out and 'GOOD' not in out.split('part hips')[1].split('\n')[0], 'the latest on a part stands', out)
+ok('answers/img/drawn.jpg (still uploading) (their drawing over img/parts-part-pic.jpg)' in out, 'a drawing is listed with its path and what it was drawn over', out)
+ok('a (A title): WORKSHOP' in out and '(their drawing over img/first-big.jpg)' in out, 'on a card comment too', out)
+code, out = run('redeal', '--pack', 'proj')
+ok('Parts with a problem or a question' in out and 'proj parts walk part feet: PROBLEM, "They slide"' in out and 'part hips: HUH?' in out, 'redeal lists parts with a problem or a question', out)
 code, out = run('answers', '--pack', 'proj')
 ok(code == 0 and 'GO' in out and '“but”' in out, 'an answer with its comment, curly quotes and all', out)
 ok('picked: Tree 3, Tree 7' in out, 'a board answer gives its picks by name', out)
@@ -278,6 +387,7 @@ phone_sends('2026-11-02T12-01-00-000Z-bbb.json',
             {'eid': 'e9', 'at': '2026-11-02T12:01:01.000Z', 'type': 'deck', 'verdict': 'replan', 'answered': 2, 'total': 3})
 code, out = run('answers', '--pack', 'proj')
 ok('REPLAN FROM THE BASE' in out and 'c (A title): IDK' in out, 'new ones show after that, and a replan stands out', out)
+ok('walk' not in out, 'parts already read do not show again', out)
 ok('still writing' not in out, 'an answer replaces its draft', out)
 code, out = run('status', '--pack', 'proj')
 ok('first / first: 1 of 3 owed' in out and 'replan' in out, 'status counts what is owed', out)
@@ -293,8 +403,13 @@ ok('answers/img/nope.jpg (still uploading)' in out, 'pictures are listed, and on
 print('Dealing back')
 code, out = run('redeal', '--pack', 'proj')
 ok('Need more context' in out and 'proj first c' in out and 'Deck sent back to replan' in out, 'the re-deal list shows what came back', out)
+time.sleep(GAP + 0.5)
+before = len(sent_notices())
 code, out = run('second-try', 'proj', 'first', 'c', '--why', 'Plainer words now.')
 ok(code == 0, 'second-try', out)
+wait_for_notices(before + 1)
+again = sent_notices()[-1] if len(sent_notices()) > before else {}
+ok(again.get('title') == 'A project › First' and again.get('body') == 'Second try on "A title", in A deck' and again.get('url') == './#open=proj%2Ffirst%2Fc', 'a second try notifies, naming the card, and opens it', again)
 card = next(c for c in json.loads((clone / 'packs/proj/decks/first.json').read_text(encoding='utf-8'))['cards'] if c['id'] == 'c')
 ok(card['version'] == 2 and card['why'] == 'Plainer words now.', 'bumps the version and changes the words')
 code, out = run('status', '--pack', 'proj')
@@ -304,8 +419,13 @@ ok('proj first c' not in out, 'and leaves the re-deal list', out)
 code, out = run('second-try', 'proj', 'first', 'c', '--why', 'Swipe left on this.')
 ok(code == 1 and 'Not changed' in out, 'the checks apply here too', out)
 git(clone, 'checkout', '-q', '--', '.')
+time.sleep(GAP + 0.5)
+before = len(sent_notices())
 code, out = run('handled', 'proj', 'first', 'b', '--how', 'Settled by the other work.')
 ok(code == 0, 'handled', out)
+wait_for_notices(before + 1)
+settled = sent_notices()[-1] if len(sent_notices()) > before else {}
+ok(settled.get('body') == 'My conclusion on "A title", in A deck' and settled.get('url') == './#open=proj%2Ffirst%2Fb', 'so does marking one handled', settled)
 card = next(c for c in json.loads((clone / 'packs/proj/decks/first.json').read_text(encoding='utf-8'))['cards'] if c['id'] == 'b')
 ok(card['handled']['how'] == 'Settled by the other work.' and card['handled']['at'].endswith('Z'), 'marks it, with the time')
 code, out = run('status', '--pack', 'proj')
@@ -317,7 +437,10 @@ phone_sends('2026-11-02T12-02-00-000Z-ccc.json',
             {'eid': 'e10', 'at': later, 'type': 'answer', 'card': 'b', 'cardVersion': 1, 'handledAt': card['handled']['at'], 'title': 'A title', 'kind': 'question', 'swipe': 'left', 'stamp': 'WORKSHOP', 'comment': 'I disagree'})
 code, out = run('redeal', '--pack', 'proj')
 ok('Handled, and they answered' in out and 'WORKSHOP' in out and 'I disagree' in out, 'and then with their answer', out)
+before = len(sent_notices())
 code, out = run('handled', 'proj', 'first', 'b', '--undo')
+time.sleep(0.5)
+ok(len(sent_notices()) == before and not (home / '.riffle' / 'notify-pending.json').exists(), 'but taking it back makes no notification', sent_notices()[-1:])
 ok(code == 0 and 'handled' not in next(c for c in json.loads((clone / 'packs/proj/decks/first.json').read_text(encoding='utf-8'))['cards'] if c['id'] == 'b'), 'it can be undone', out)
 code, out = run('thought', 'proj', 'th1', '--how', 'Done in the next round.')
 ok(code == 0 and json.loads((clone / 'packs/proj/thoughts.json').read_text(encoding='utf-8'))['th1']['handled']['how'] == 'Done in the next round.', 'answering a thought', out)

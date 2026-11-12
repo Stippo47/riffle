@@ -1,6 +1,6 @@
 // Keeps the whole app on the phone, so it opens with no signal. Each release gets its own cache:
 // change VERSION when anything here changes, and the phone moves to the new set in one step.
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 const CACHE = `riffle-${VERSION}`;
 const FILES = [
   './',
@@ -38,20 +38,26 @@ self.addEventListener('activate', e => {
     .then(() => self.clients.claim()));
 });
 
-// A notification from the writer's machine. The number on the icon is the cards owed.
+// A notification from the writer's machine. The number on the icon is the cards owed, and `url`
+// says where a tap goes: the app's address with #open=pack/deck/card.
 self.addEventListener('push', e => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { /* a plain message still shows */ }
-  const jobs = [self.registration.showNotification(d.title || 'Riffle', { body: d.body || '', tag: d.tag || 'riffle', icon: 'icons/icon-192.png' })];
+  const jobs = [self.registration.showNotification(d.title || 'Riffle', { body: d.body || '', tag: d.tag || 'riffle', icon: 'icons/icon-192.png', data: { url: d.url || '' } })];
   if (typeof d.badge === 'number' && self.navigator.setAppBadge) jobs.push(d.badge ? self.navigator.setAppBadge(d.badge) : self.navigator.clearAppBadge());
   e.waitUntil(Promise.allSettled(jobs));
 });
 
+// A tap opens the app at what the notification was about. An app already open is told where to go.
 self.addEventListener('notificationclick', e => {
   e.notification.close();
-  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+  const where = (e.notification.data && e.notification.data.url) || '';
+  const url = new URL(where || './', self.registration.scope).href;
+  e.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async list => {
     const open = list.find(c => 'focus' in c);
-    return open ? open.focus() : self.clients.openWindow('./');
+    if (!open) return self.clients.openWindow(url);
+    await open.focus();
+    if (where) open.postMessage({ type: 'open', url });
   }));
 });
 

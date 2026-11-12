@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Makes a made-up board through the real `riffle deck`, in a throwaway repo, and prints the clone's
-path. It never touches the real data repo. Run by tests/e2e.mjs: make_board.py <folder> <count>"""
+path. It never touches the real data repo. Run by tests/e2e.mjs: make_board.py <folder> <count> [media]
+With `media` it makes a pack of films, parts and a board mixing films and pictures instead. That needs ffmpeg."""
 import json
 import os
 import pathlib
@@ -13,6 +14,7 @@ from PIL import Image, ImageDraw
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 work = pathlib.Path(sys.argv[1])
 count = int(sys.argv[2])
+media = len(sys.argv) > 3 and sys.argv[3] == 'media'
 source = work / 'source'
 source.mkdir(parents=True)
 bare, clone, home = work / 'data.git', work / 'clone', work / 'home'
@@ -77,12 +79,45 @@ deck = {
 }
 deck_file = work / 'boards.json'
 deck_file.write_text(json.dumps(deck), encoding='utf-8')
+steps = (['pack', 'bp', '--title', 'Picture pack', '--color', '#2f8fe0'],
+         ['topic', 'looking', '--pack', 'bp', '--title', 'Looking closely'],
+         ['deck', str(deck_file), '--pack', 'bp', '--quiet'])
+
+if media:
+    # A made-up film: moving test bars, two seconds, the size of a small render.
+    def film(name, seconds=2, size='640x360', pattern='testsrc2'):
+        subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', f'{pattern}=size={size}:rate=24', '-t', str(seconds), '-pix_fmt', 'yuv420p', '-c:v', 'libx264', str(source / name)], check=True)
+    film('walk.mp4')
+    film('turn.mp4', pattern='smptebars', size='480x480')
+    film('spin.mp4', pattern='testsrc', size='400x400')
+    film('bars.mp4', pattern='rgbtestsrc', size='320x240')
+    films = {
+        'title': 'Films and parts',
+        'topic': 'films',
+        'order': 1,
+        'cards': [
+            {'id': 'clip', 'kind': 'report', 'title': 'A film', 'text': 'This card has a film on its back.', 'why': 'Flip it to watch.',
+             'videos': ['source/walk.mp4'], 'images': ['source/wide.png'], 'details': 'A few words under the film.'},
+            {'id': 'parts', 'kind': 'report', 'title': 'In parts', 'text': 'This report has three parts.', 'why': 'Each can be marked and commented on.',
+             'parts': [
+                 {'id': 'p1', 'title': 'First part', 'text': 'Words only.'},
+                 {'id': 'p2', 'title': 'With a picture', 'text': 'A picture to draw on.', 'images': ['source/item-01.png']},
+                 {'id': 'p3', 'title': 'With a film', 'text': 'A film to watch.', 'videos': ['source/turn.mp4']},
+             ]},
+            {'id': 'filmboard', 'kind': 'board', 'title': 'Films and pictures', 'text': 'Which of these do you like?', 'why': 'A board can mix films and pictures.', 'pick': ['f2'],
+             'items': [{'id': 'f1', 'label': 'Spinning', 'video': 'source/spin.mp4'}, {'id': 'f2', 'label': 'A picture', 'image': 'source/item-02.png'}, {'id': 'f3', 'label': 'Bars', 'video': 'source/bars.mp4'}]},
+            {'id': 'after', 'kind': 'question', 'title': 'After', 'text': 'A plain card after the films.', 'why': 'To show nothing else changed.', 'pick': 'Yes.'},
+        ],
+    }
+    films_file = work / 'media.json'
+    films_file.write_text(json.dumps(films), encoding='utf-8')
+    steps = (['pack', 'mp', '--title', 'Film pack', '--color', '#d9622b'],
+             ['topic', 'films', '--pack', 'mp', '--title', 'Films'],
+             ['deck', str(films_file), '--pack', 'mp', '--quiet'])
 
 env = {**os.environ, 'RIFFLE_DATA': str(clone), 'HOME': str(home), 'USERPROFILE': str(home), 'PYTHONIOENCODING': 'utf-8'}
 riffle = ROOT / 'skill' / 'riffle.py'
-for args in (['pack', 'bp', '--title', 'Picture pack', '--color', '#2f8fe0'],
-             ['topic', 'looking', '--pack', 'bp', '--title', 'Looking closely'],
-             ['deck', str(deck_file), '--pack', 'bp', '--quiet']):
+for args in steps:
     r = subprocess.run([sys.executable, str(riffle), *args], cwd=work, capture_output=True, text=True, encoding='utf-8', env=env)
     if r.returncode:
         sys.exit(r.stdout + r.stderr)
