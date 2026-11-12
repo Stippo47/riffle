@@ -166,8 +166,17 @@ createServer(async (req, res) => {
     if (who.readOnly) { send(403, { message: 'Resource not accessible by personal access token' }); return; }
     if (fail) { send(fail.code, { message: fail.message }); return; }
     const path = decodeURIComponent(url.pathname.slice(`${REPO}/contents/`.length));
-    const { content } = JSON.parse(body);
-    if (files.has(path)) { send(422, { message: '"sha" wasn\'t supplied.' }); return; } // as GitHub does
+    const { content, sha } = JSON.parse(body);
+    // As GitHub does: changing a file takes the sha it has now, and a stale one is a conflict.
+    if (files.has(path) && !sha) { send(422, { message: '"sha" wasn\'t supplied.' }); return; }
+    if (files.has(path) && sha !== shaOf(path)) { send(409, { message: `${path} does not match ${sha}` }); return; }
+    if (!files.has(path) && sha) { send(404, { message: 'Not Found' }); return; }
+    if (path.startsWith('packs/')) {
+      files.set(path, Buffer.from(content, 'base64').toString());
+      writes++;
+      send(sha ? 200 : 201, { content: { path, sha: shaOf(path) } });
+      return;
+    }
     if (path.startsWith('answers/img/')) {
       if (slowImg) await new Promise(r => setTimeout(r, slowImg));
       if (failImg) { send(failImg, { message: 'Refused the picture' }); return; }
@@ -179,6 +188,12 @@ createServer(async (req, res) => {
     files.set(path, Buffer.from(content, 'base64').toString());
     writes++;
     send(201, { content: { path } });
+    return;
+  }
+  if (url.pathname.startsWith(`${REPO}/contents/`) && req.method === 'GET') {
+    const path = decodeURIComponent(url.pathname.slice(`${REPO}/contents/`.length));
+    if (!files.has(path)) { send(404, { message: 'Not Found' }); return; }
+    send(200, { path, sha: shaOf(path), content: Buffer.from(files.get(path)).toString('base64'), encoding: 'base64' });
     return;
   }
   if (url.pathname === `${REPO}/git/trees/main`) {

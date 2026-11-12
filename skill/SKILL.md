@@ -18,11 +18,40 @@ A project names its pack with one line in a `.riffle-pack` file at its root. Wor
 ## Every session
 
 ```
-riffle answers              what came back since you last read
+riffle answers              what came back since you last read, their own decks included
 riffle answers --mark-read  the same, and records it as read, which the app's settings show
 riffle redeal               handled cards they answered, and cards sent back to you
-riffle status               every deck, and what's owed
+riffle status               every deck, what's owed, its kind, priority, tags, and whether it's archived
+riffle mine                 their own decks, changed since you last read them (--every for all)
 ```
+
+## What to answer first, and archiving
+
+Their pack's page sorts decks for them. Tell them what to answer first:
+
+```
+riffle order <pack> <deck> --priority 1         answered first; 2 next, and so on
+riffle order <pack> <deck> --tag first          also: waiting (on them), working (on it yourself)
+riffle order <pack> <deck> --untag working --no-priority --kind report
+riffle archive <pack> <deck>                    out of the way, at the end of the page. --undo brings it back
+```
+
+- Give the deck that unblocks your work priority 1, and tag what you're waiting on them for `waiting`. Tag a deck you're still adding to `working`.
+- `kind` (report, questions, board) is worked out from the cards; set it when that's wrong.
+- **Archive** decks that are fully answered or handled, once a session is over and they've left the app for a while. They have said they don't mind. Nothing is deleted, an archived deck's cards stop counting as owed, and they can bring it back. They can archive one themselves too, which `riffle answers` reports.
+- These live in `packs/<pack>/order.json`, so sending a deck again doesn't undo them. A deck file can also carry `priority`, `tags` and `kind`.
+
+## Their own decks
+
+They can make decks of their own in a pack, for feedback and requests: ideas in words, pictures (with drawing), web links, and links to Riffle cards. They're written to `packs/<pack>/mine/`, which only the phone writes: never edit those files.
+
+```
+riffle mine [--pack p] [--every] [--all]        read them. --all includes cards they removed
+riffle mine --mark-read                         and record them as read
+riffle reply <pack> <deck> [card] --how "..."   answer the deck, or one card. --undo takes it back
+```
+
+Read them like comments: they're requests. Reply on a card when you've acted on it, so they see it's done, the way a handled card shows a conclusion.
 
 ## Making a deck
 

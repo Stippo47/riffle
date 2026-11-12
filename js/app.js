@@ -9,8 +9,9 @@ import * as push from './push.js';
 import { countWords } from './photos.js';
 import { addressOf, linkify, linkText, plainLinks, splitAddress } from './links.js';
 import { initIsland, islandNow, setIsland } from './island.js';
+import { MineView, deckFromFile, fileOf, liveCards, liveDecks, mergeDecks, mineKey, mineOf } from './mine.js';
 
-const VERSION = '0.7.0';
+const VERSION = '0.8.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -266,11 +267,17 @@ async function library() {
     const m = f.path.match(/^packs\/([^/]+)\/decks\/([^/]+)\.json$/);
     if (!m || !packs.has(m[1])) continue;
     const d = json(f);
-    if (d && Array.isArray(d.cards)) packs.get(m[1]).decks.push({ ...d, id: m[2] });
+    if (d && Array.isArray(d.cards)) packs.get(m[1]).decks.push({ ...d, id: m[2], seen: f.seen || 0, changed: f.changed || 0 });
   }
   for (const f of files) {
-    const m = f.path.match(/^packs\/([^/]+)\/thoughts\.json$/);
-    if (m && packs.has(m[1])) packs.get(m[1]).thoughtAnswers = json(f) || {};
+    let m = f.path.match(/^packs\/([^/]+)\/thoughts\.json$/);
+    if (m && packs.has(m[1])) { packs.get(m[1]).thoughtAnswers = json(f) || {}; continue; }
+    m = f.path.match(/^packs\/([^/]+)\/order\.json$/); // the writer's order, tags and archiving
+    if (m && packs.has(m[1])) { packs.get(m[1]).orderFile = json(f) || {}; continue; }
+    m = f.path.match(/^packs\/([^/]+)\/mine-replies\.json$/); // the writer's replies on their own decks
+    if (m && packs.has(m[1])) { packs.get(m[1]).mineReplies = json(f) || {}; continue; }
+    m = f.path.match(/^packs\/([^/]+)\/mine\/[^/]+\.json$/); // their own decks, as last written
+    if (m && packs.has(m[1])) { const j = json(f); if (j && j.id) (packs.get(m[1]).mineFiles = packs.get(m[1]).mineFiles || []).push(j); }
   }
   const list = [...packs.values()].sort((a, b) => (a.order ?? 50) - (b.order ?? 50) || a.title.localeCompare(b.title));
   list.push(DEMO_PACK);
@@ -279,11 +286,36 @@ async function library() {
 
 async function summaries(pack) {
   const out = new Map();
-  for (const d of pack.decks) out.set(d.id, deckSummary(d, await store.get(deckKey(pack, d)).catch(() => null)));
+  const mine = (await store.get(archiveKey(pack.id)).catch(() => null)) || {};
+  for (const d of pack.decks) {
+    const s = deckSummary(d, await store.get(deckKey(pack, d)).catch(() => null));
+    s.archived = isArchived(metaOf(pack, d), mine[d.id]);
+    out.set(d.id, s);
+  }
   return out;
 }
 
-const packLeft = sums => [...sums.values()].reduce((n, s) => n + s.left, 0);
+// What's owed leaves out archived decks: they're handled, as far as the writer or the reader is concerned.
+const packLeft = sums => [...sums.values()].reduce((n, s) => n + (s.archived ? 0 : s.left), 0);
+
+// Their own decks, with any copy written from another phone merged in. Nothing either holds is lost.
+async function mergeMine(pack) {
+  const data = await mineOf(pack.id);
+  let changed = false;
+  for (const f of pack.mineFiles || []) {
+    const remote = deckFromFile(f);
+    const local = data.decks[f.id];
+    if (!local) { data.decks[f.id] = remote; changed = true; continue; }
+    if (remote.updated === local.updated || String(remote.updated) <= String(local.pushed || '')) continue;
+    const clean = local.updated === local.pushed;
+    const merged = mergeDecks(local, remote);
+    merged.pushed = clean ? merged.updated : local.pushed;
+    data.decks[f.id] = merged;
+    changed = true;
+  }
+  if (changed) await store.set(mineKey(pack.id), data);
+  return data;
+}
 
 // A pack's decks grouped by topic. Misc decks sit apart at the end.
 function topicsOf(pack) {
@@ -350,10 +382,11 @@ async function showHome() {
     const sums = await summaries(p);
     const all = [...sums.values()];
     if (!p.demo) owed += packLeft(sums);
+    const kept = all.filter(s => !s.archived);
     rows.push({
       p, left: packLeft(sums),
-      count: all.reduce((n, s) => n + s.total, 0),
-      big: all.reduce((n, s) => n + s.big, 0),
+      count: kept.reduce((n, s) => n + s.total, 0),
+      big: kept.reduce((n, s) => n + s.big, 0),
     });
   }
   app.innerHTML = `
@@ -396,6 +429,75 @@ function packTile(p, left, count, big = 0) {
 
 // ---------- a pack's page
 
+// What the writer says about a deck: its answer-first priority, tags, kind and archiving. From
+// packs/<pack>/order.json, which `riffle order` and `riffle archive` write, or the deck's own file.
+const TAGS = { working: 'Being worked on', first: 'Answer first', waiting: 'Waiting on you' };
+const KIND_WORD = { report: 'Report', questions: 'Questions', board: 'Board' };
+const RANK = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5 };
+const SORTS = [['suggested', 'Suggested'], ['importance', 'Importance'], ['date', 'Newest'], ['topics', 'Topics']];
+
+function kindOfDeck(d) {
+  if (KIND_WORD[d.kind]) return d.kind;
+  const cards = d.cards.filter(c => !c.handled);
+  const kinds = (cards.length ? cards : d.cards).map(c => c.kind || 'question');
+  if (kinds.length && kinds.every(k => k === 'report')) return 'report';
+  if (kinds.length && kinds.filter(k => k === 'board').length * 2 >= kinds.length) return 'board';
+  return 'questions';
+}
+
+function metaOf(pack, d) {
+  const o = (((pack.orderFile || {}).decks) || {})[d.id] || {};
+  const pick = (k, dflt) => (o[k] !== undefined ? o[k] : d[k] !== undefined ? d[k] : dflt);
+  const tags = [].concat(pick('tags', []) || []).filter(t => typeof t === 'string' && t);
+  return {
+    priority: Number.isFinite(+pick('priority', NaN)) && pick('priority', null) !== null ? +pick('priority', null) : null,
+    tags, kind: KIND_WORD[pick('kind', '')] ? pick('kind', '') : kindOfDeck(d),
+    archivedAt: pick('archived', null) || null,
+    date: Date.parse(d.updated) || d.changed || d.seen || 0,
+  };
+}
+
+// Archived by the writer, or by them on this phone: whichever was said last stands.
+const archiveKey = packId => `archive:${packId}`;
+function isArchived(meta, mine) {
+  if (mine && (!meta.archivedAt || String(mine.at) > String(meta.archivedAt))) return !!mine.archived;
+  return !!meta.archivedAt;
+}
+
+async function setArchived(pack, deck, archived) {
+  const k = archiveKey(pack.id);
+  const a = (await store.get(k).catch(() => null)) || {};
+  a[deck.id] = { archived, at: new Date().toISOString() };
+  await store.set(k, a);
+  if (!pack.demo) sync.enqueue({ pack: pack.id, topic: deck.topic || null, deck: deck.id, type: 'archive', archived });
+  tick();
+}
+
+const ago = t => {
+  if (!t) return '';
+  const m = Math.round((Date.now() - t) / 60000);
+  if (m < 60) return m <= 1 ? 'just now' : `${m} minutes ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`;
+  const d = Math.round(h / 24);
+  return d < 14 ? `${d} day${d === 1 ? '' : 's'} ago` : new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' });
+};
+
+// The order a flat list goes in. Suggested is the writer's priority, then what's owed, then the rest.
+function sortDecks(decks, sort, sums, metas, topicRank) {
+  const s = d => sums.get(d.id), m = d => metas.get(d.id);
+  const done = d => (s(d).finished || !s(d).left ? 1 : 0);
+  const keys = {
+    suggested: d => [done(d), m(d).priority !== null ? 0 : m(d).tags.includes('first') ? 1 : m(d).tags.includes('waiting') ? 2 : 3, m(d).priority ?? 0, topicRank(d), d.order ?? 50],
+    importance: d => [done(d), -s(d).top, -s(d).big, -s(d).left, topicRank(d), d.order ?? 50],
+    date: d => [-m(d).date, topicRank(d), d.order ?? 50],
+  }[sort];
+  const cmp = (a, b) => { const x = keys(a), y = keys(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] < y[i] ? -1 : 1; return 0; };
+  return decks.slice().sort(cmp);
+}
+
+let archivedOpen = new Set();
+
 async function showPack(id, message = '', { topic = null, keepTrail = false } = {}) {
   current = null;
   const pack = (await library()).find(p => p.id === id);
@@ -404,14 +506,40 @@ async function showPack(id, message = '', { topic = null, keepTrail = false } = 
   screen = { kind: 'pack', pack: id };
   if (!keepTrail) trail = [];
   const sums = await summaries(pack);
-  const { topics, misc } = topicsOf(pack);
+  const metas = new Map(pack.decks.map(d => [d.id, metaOf(pack, d)]));
+  const sort = topic ? 'topics' : (await store.get('pack-sort').catch(() => null)) || 'suggested';
+  const live = pack.decks.filter(d => !sums.get(d.id).archived);
+  const gone = pack.decks.filter(d => sums.get(d.id).archived);
+  const { topics, misc } = topicsOf({ ...pack, decks: live });
+  // The first deck of each stack, which is the one to read first.
+  const stackHeads = new Set(topics.flatMap(t => t.decks.filter((d, i) => d.stack && (i === 0 || t.decks[i - 1].stack !== d.stack)).map(d => d.id)));
+  const topicById = new Map((pack.topics || []).map((t, i) => [t.id, { ...t, rank: t.order ?? 50 + i }]));
+  const topicRank = d => (d.misc || !d.topic ? 999 : (topicById.get(d.topic) || { rank: 500 }).rank);
+  const artOf = d => (d.misc || !d.topic ? safeIcon(pack.icon) : safeIcon((topicById.get(d.topic) || {}).icon) || safeIcon(pack.icon)) || icon('card-random');
+  const tagsHTML = m => (m.tags.length ? `<span class="fr-tags">${m.tags.map(t => `<i class="tag tag-${esc(t)}">${esc(TAGS[t] || t)}</i>`).join('')}</span>` : '');
+  // In topics, as before, with the deck's kind and tags under its title where a row has room for them.
   const deckRow = (d, inStack, art) => {
-    const s = sums.get(d.id);
+    const s = sums.get(d.id), m = metas.get(d.id);
     const main = s.finished ? (s.verdict === 'replan' ? 'Sent back' : 'Done') : s.left ? `${s.left} left` : 'At the end';
     return `<button class="deckrow ${s.finished ? 'finished' : ''} ${inStack ? 'instack' : ''}" data-deck="${esc(d.id)}">
       <span class="art">${art}</span>
-      <span class="deckrow-title">${d.stack && !inStack && !s.finished ? '<small class="readfirst">Read first</small>' : ''}${esc(d.title)}</span>
+      <span class="deckrow-title">${d.stack && !inStack && !s.finished ? '<small class="readfirst">Read first</small>' : ''}${esc(d.title)}<small class="fr-meta"><em class="kindword k-${esc(m.kind)}">${esc(KIND_WORD[m.kind])}</em>${m.tags.map(t => `<i class="tag tag-${esc(t)}">${esc(TAGS[t] || t)}</i>`).join('')}</small></span>
       <span class="deckrow-left">${main}${s.handled ? `<small class="handledcount"><i> · </i>${s.handled} handled</small>` : ''}</span>
+    </button>`;
+  };
+  // In a sorted list: one row each, saying its kind, topic and tags, and the writer's place for it.
+  const flatRow = d => {
+    const s = sums.get(d.id), m = metas.get(d.id);
+    const main = s.finished ? (s.verdict === 'replan' ? 'Sent back' : 'Done') : s.left ? `${s.left} left` : 'At the end';
+    const topicName = d.misc || !d.topic ? 'Misc' : (topicById.get(d.topic) || { title: d.topic }).title;
+    return `<button class="flatrow ${s.finished ? 'finished' : ''}${s.archived ? ' gone' : ''}" data-deck="${esc(d.id)}" style="--pc:${esc((topicById.get(d.topic) || {}).color || pack.color || '#7b8294')}">
+      <span class="art">${artOf(d)}</span>
+      <span class="fr-body">
+        <span class="fr-title">${m.priority !== null && !s.finished && !s.archived ? `<b class="prio">${esc(m.priority)}</b>` : ''}${esc(d.title)}</span>
+        <span class="fr-meta"><em class="kindword k-${esc(m.kind)}">${esc(KIND_WORD[m.kind])}</em><span>${esc(topicName)}</span>${sort === 'date' && m.date ? `<span>${esc(ago(m.date))}</span>` : ''}${stackHeads.has(d.id) && !s.finished ? '<span>Read first</span>' : ''}</span>
+        ${tagsHTML(m)}
+      </span>
+      <span class="fr-left">${main}${s.handled ? `<small>${s.handled} handled</small>` : ''}</span>
     </button>`;
   };
   const topicBlock = t => {
@@ -427,7 +555,15 @@ async function showPack(id, message = '', { topic = null, keepTrail = false } = 
       <div class="deckrows">${t.decks.map((d, i) => deckRow(d, d.stack && i > 0 && t.decks[i - 1].stack === d.stack, art)).join('')}</div>
     </section>`;
   };
+  const flatList = () => {
+    const order = sortDecks(live, sort, sums, metas, topicRank);
+    return `<div class="flatrows">${order.map(flatRow).join('')}</div>`;
+  };
+  const mineData = await mergeMine(pack);
+  const mine = liveDecks(mineData);
+  const replies = pack.mineReplies || {};
   const thoughts = await thoughtCount(pack);
+  const open = archivedOpen.has(pack.id);
   app.innerHTML = `
     <div class="packpage screen scroll">
       <div class="deckbar">
@@ -437,8 +573,24 @@ async function showPack(id, message = '', { topic = null, keepTrail = false } = 
       </div>
       ${message ? `<div class="set-text problem">${esc(message)}</div>` : ''}
       <button class="thoughtsrow" data-go="thoughts">${icon('lightbulb')}<span><strong>Thoughts</strong><small>${thoughts ? `${thoughts} filed` : 'Anything on your mind about this project'}</small></span></button>
-      ${topics.map(topicBlock).join('')}
-      ${misc.length ? `<section class="topic misc" style="--pc:${esc(pack.color || '#7b8294')}"><div class="deckrows">${misc.map(d => deckRow(d, false, safeIcon(pack.icon) || icon('card-random'))).join('')}</div></section>` : ''}
+      ${pack.demo ? '' : `<section class="mine-block">
+        ${mine.map(d => {
+          const n = liveCards(d).length;
+          const t = d.topic && topicById.get(d.topic);
+          const answered = replies[d.id] || liveCards(d).some(c => replies[`${d.id}/${c.id}`]);
+          return `<button class="minerow" data-mine="${esc(d.id)}">${icon('notebook-pen')}<span><strong>${esc(d.title || 'Untitled')}</strong><small>Yours · ${n} card${n === 1 ? '' : 's'}${t ? ` · ${esc(t.title)}` : ''}${answered ? ' · replied' : ''}</small></span></button>`;
+        }).join('')}
+        <button class="minerow newdeck" data-go="newmine">${icon('plus')}<span><strong>New deck of your own</strong><small>Ideas, pictures and links, for the writer</small></span></button>
+      </section>`}
+      <div class="sortbar" role="group" aria-label="Order">${SORTS.map(([k, w]) => `<button data-sort="${k}" class="${k === sort ? 'on' : ''}">${w}</button>`).join('')}</div>
+      ${sort === 'topics'
+        ? `${topics.map(topicBlock).join('')}
+           ${misc.length ? `<section class="topic misc" style="--pc:${esc(pack.color || '#7b8294')}"><div class="deckrows">${misc.map(d => deckRow(d, false, safeIcon(pack.icon) || icon('card-random'))).join('')}</div></section>` : ''}`
+        : flatList()}
+      ${gone.length ? `<section class="archived">
+        <button class="arch-head" data-go="archived" aria-expanded="${open}">${icon('archive')}<span>Archived</span><small>${gone.length}</small>${icon('chevron-down')}</button>
+        <div class="arch-rows"${open ? '' : ' hidden'}>${gone.map(d => `<div class="arch-row">${flatRow(d)}<button class="ghostbtn" data-unarchive="${esc(d.id)}">${icon('archive-restore')}Bring back</button></div>`).join('')}</div>
+      </section>` : ''}
       ${pack.demo ? '<div id="feelwords"></div>' : ''}
     </div>`;
   paintNotices();
@@ -446,6 +598,15 @@ async function showPack(id, message = '', { topic = null, keepTrail = false } = 
   app.querySelector('[data-go=thoughts]').onclick = () => openThoughts(pack);
   if (pack.demo) await drawFeelWords(pack);
   app.querySelectorAll('[data-deck]').forEach(b => { b.onclick = () => openDeck(pack, b.dataset.deck); });
+  app.querySelectorAll('[data-sort]').forEach(b => { b.onclick = async () => { await store.set('pack-sort', b.dataset.sort); showPack(id); }; });
+  app.querySelectorAll('[data-mine]').forEach(b => { b.onclick = () => openMine(pack, b.dataset.mine); });
+  const nm = app.querySelector('[data-go=newmine]');
+  if (nm) nm.onclick = () => openMine(pack, null);
+  const ah = app.querySelector('[data-go=archived]');
+  if (ah) ah.onclick = () => { if (open) archivedOpen.delete(pack.id); else archivedOpen.add(pack.id); showPack(id); };
+  app.querySelectorAll('[data-unarchive]').forEach(b => {
+    b.onclick = async () => { await setArchived(pack, pack.decks.find(d => d.id === b.dataset.unarchive), false); showPack(id); };
+  });
   if (topic) {
     const section = app.querySelector(`[data-topic="${CSS.escape(topic)}"]`);
     if (section) section.scrollIntoView({ block: 'start' });
@@ -562,6 +723,7 @@ async function openDeck(pack, deckId, at = null, { keepTrail = false } = {}) {
   if (!deck) { showPack(pack.id, '', { keepTrail }); return; }
   if (!keepTrail) trail = [];
   const images = await imagesFor(pack, deck);
+  const archived = isArchived(metaOf(pack, deck), ((await store.get(archiveKey(pack.id)).catch(() => null)) || {})[deck.id]);
   current = new DeckView({
     host: app, pack, deck, images,
     onExit: () => { current && current.close(); if (trail.length) goBack(); else showPack(pack.id); },
@@ -569,6 +731,13 @@ async function openDeck(pack, deckId, at = null, { keepTrail = false } = {}) {
     nav: {
       follow, shrink, linker: showLinkSheet,
       crumb: level => { current && current.close(); showPack(pack.id, '', { topic: level === 'topic' ? deck.topic : null }); },
+      archived,
+      archive: async () => {
+        current && current.close();
+        current = null;
+        await setArchived(pack, deck, !archived);
+        showPack(pack.id, archived ? `${deck.title} is back.` : `${deck.title} is archived. It's under Archived at the end of this page, and can be brought back.`);
+      },
       backBy: trail.length ? placeLabel(trail[trail.length - 1]) : null,
     },
   });
@@ -607,6 +776,21 @@ async function openAddress(address, { linked = false } = {}) {
 // ---------- links: following one, and coming back the same way
 
 // Where things are: a deck's card with what was being typed there, thoughts, a pack's page, or home.
+// Their own deck, to write in. A new one starts empty, with its name ready to type.
+async function openMine(pack, deckId = null, { keepTrail = false } = {}) {
+  if (!keepTrail) trail = [];
+  await mergeMine(pack);
+  const view = new MineView({
+    host: app, pack, deckId: deckId || sync.newId(), replies: pack.mineReplies || {},
+    onExit: () => { current = null; sync.pushMine(); if (trail.length) goBack(); else showPack(pack.id); },
+    nav: { follow, linker: showLinkSheet, pick: showPicker, backBy: trail.length ? placeLabel(trail[trail.length - 1]) : null },
+  });
+  current = view;
+  render = () => {};
+  await view.open(!deckId);
+  paintNotices();
+}
+
 function whereNow() {
   if (current && current.place) return current.place();
   if (current instanceof ThoughtsView) return { kind: 'thoughts', pack: current.pack.id };
@@ -616,6 +800,7 @@ function whereNow() {
 function placeLabel(p) {
   if (!p) return null;
   if (p.kind === 'deck') return (p.show && (p.show.title || p.show.deckTitle)) || 'the deck';
+  if (p.kind === 'mine') return p.title || 'your deck';
   if (p.kind === 'thoughts') return 'Thoughts';
   if (p.kind === 'pack') return 'the pack';
   return 'the start';
@@ -642,6 +827,7 @@ async function restorePlace(p) {
   const pack = p.pack && (await library()).find(x => x.id === p.pack);
   if (!pack) { showHome(); return; }
   if (p.kind === 'deck') await openDeck(pack, p.deck, p, { keepTrail: true });
+  else if (p.kind === 'mine') await openMine(pack, p.deck, { keepTrail: true });
   else if (p.kind === 'thoughts') await openThoughts(pack, { keepTrail: true });
   else showPack(pack.id, '', { keepTrail: true });
 }
@@ -762,11 +948,12 @@ const addressIn = url => {
 };
 
 // What comes after a deck: the next one in its stack, or the reward for what was just cleared.
+// Archived decks don't count: they're out of the way.
 async function afterVerdict(pack, deck, which) {
   current && current.close();
   current = null;
   const sums = await summaries(pack);
-  const { topics, misc } = topicsOf(pack);
+  const { topics, misc } = topicsOf({ ...pack, decks: pack.decks.filter(d => !sums.get(d.id).archived || d === deck) });
   const topic = topics.find(t => t.decks.includes(deck));
   if (which !== 'done') { showPack(pack.id); return; }
   if (topic && deck.stack) {
@@ -947,7 +1134,7 @@ function showConnect() {
 // The one thing that runs when the app is hidden or closing: save and queue everything, then send.
 function onHide() {
   const saved = current ? current.secure() : Promise.resolve();
-  Promise.resolve(saved).catch(() => {}).finally(() => { sync.flush({ hide: true }); sync.flushPhotos(); });
+  Promise.resolve(saved).catch(() => {}).finally(() => { sync.flush({ hide: true }); sync.flushPhotos(); sync.pushMine(); });
 }
 
 async function start() {
@@ -956,6 +1143,7 @@ async function start() {
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') onHide(); });
   addEventListener('pagehide', onHide);
   await store.recover();
+  sync.setMineTools({ toFile: fileOf, fromFile: deckFromFile, merge: mergeDecks });
   setStyle({
     layout: (await store.get('style-layout').catch(() => null)) || document.documentElement.dataset.layout || DEFAULT_LAYOUT,
     look: (await store.get('style-look').catch(() => null)) || document.documentElement.dataset.look || DEFAULT_LOOK,
@@ -977,7 +1165,7 @@ async function start() {
   // A link tapped anywhere a deck isn't taking care of its own.
   app.addEventListener('click', e => {
     const l = e.target.closest('.rlink');
-    if (!l || current instanceof DeckView) return;
+    if (!l || current instanceof DeckView || current instanceof MineView) return;
     e.preventDefault();
     follow(l.dataset.addr);
   });
@@ -1009,5 +1197,5 @@ start();
 
 // For the tests in tests/, on a local test server only.
 if (isLocalHost) {
-  window.__riffle = { get current() { return current; }, get trail() { return trail; }, showHome, showPack, showConnect, showSettings, showStyle, showDirections, setStyle, setDirs, getDirs, setNotice, onHide, openThoughts, openAddress, follow, goBack, shrink, tapIsland, islandNow, setIsland, library, sync, store };
+  window.__riffle = { openMine, mergeMine, setArchived, get current() { return current; }, get trail() { return trail; }, showHome, showPack, showConnect, showSettings, showStyle, showDirections, setStyle, setDirs, getDirs, setNotice, onHide, openThoughts, openAddress, follow, goBack, shrink, tapIsland, islandNow, setIsland, library, sync, store };
 }

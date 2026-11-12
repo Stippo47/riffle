@@ -31,7 +31,10 @@ ATTRIBUTION = 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
 KINDS = {'question', 'report', 'design', 'options', 'board'}
 RARITIES = {'common', 'uncommon', 'rare', 'epic', 'legendary'}
 CARD_FIELDS = {'id', 'version', 'kind', 'rarity', 'title', 'text', 'why', 'pick', 'details', 'images', 'videos', 'parts', 'options', 'items', 'handled'}
-DECK_FIELDS = {'title', 'topic', 'stack', 'order', 'misc', 'cards'}
+DECK_FIELDS = {'title', 'topic', 'stack', 'order', 'misc', 'cards', 'kind', 'priority', 'tags', 'archived', 'updated'}
+DECK_KINDS = {'report', 'questions', 'board'}
+TAG_WORDS = {'working': 'being worked on', 'first': 'answer first', 'waiting': 'waiting on you'}
+MINE_KIND_WORDS = {'idea': 'Idea', 'picture': 'Picture', 'link': 'Web link', 'card': 'Riffle card'}
 OPTION_FIELDS = {'id', 'label', 'text', 'image'}
 ITEM_FIELDS = {'id', 'label', 'text', 'image', 'thumb', 'video'}
 PART_FIELDS = {'id', 'title', 'text', 'images', 'videos'}
@@ -437,6 +440,12 @@ def check_deck(d, base, pack):
         errors.append('stacks work inside a topic, so a stacked deck needs a topic')
     if not d.get('misc') and not d.get('topic'):
         warnings.append('no topic, so this deck lands with Misc at the bottom of the pack')
+    if d.get('kind') is not None and d.get('kind') not in DECK_KINDS:
+        errors.append(f'kind on a deck must be one of {sorted(DECK_KINDS)}')
+    if d.get('priority') is not None and (not isinstance(d['priority'], int) or d['priority'] < 1):
+        errors.append('priority must be a whole number from 1, where 1 is answered first')
+    if d.get('tags') is not None and (not isinstance(d['tags'], list) or not all(isinstance(t, str) and t for t in d['tags'])):
+        errors.append(f'tags is a list of words, like {sorted(TAG_WORDS)}')
     if d.get('topic') and pack and (DATA / 'packs' / pack / 'pack.json').exists():
         topics = {t['id'] for t in load_json(DATA / 'packs' / pack / 'pack.json').get('topics', [])}
         if d['topic'] not in topics:
@@ -775,7 +784,11 @@ def cmd_deck(a):
         die('Not sent. Fix the errors above.')
     made = bring_images(d['cards'], file.parent, pack, deck_id)
     target = DATA / 'packs' / pack / 'decks' / f'{deck_id}.json'
-    if made or file.resolve() != target.resolve():
+    # The deck's date, for the phone's Newest order: now if its cards changed, or as it was if not.
+    before = load_json(target) if target.exists() else None
+    if not d.get('updated'):
+        d['updated'] = before.get('updated') if before and before.get('updated') and before.get('cards') == d['cards'] else now()
+    if made or file.resolve() != target.resolve() or (before or {}).get('updated') != d['updated']:
         save_json(target, d)
     if publish(f'Deck in {pack}: {d["title"]} ({len(d["cards"])} cards)', target, *made) and not a.quiet:
         notice(pack, deck_id, 'deck')
@@ -889,7 +902,13 @@ def summarise(events):
         elif t == 'thought':
             thoughts.setdefault(e.get('pack'), []).append(e)
             thought_drafts.pop(e.get('pack'), None)
+        elif t == 'archive':
+            ARCHIVES[(e.get('pack'), e.get('deck'))] = e
+            deck(e)['archive'] = e
     return decks, thoughts, thought_drafts
+
+
+ARCHIVES = {}  # the latest archive or bring-back from the phone, per deck, filled in by summarise
 
 
 def card_in(pack, deck_id, card_id):
@@ -1009,6 +1028,8 @@ def cmd_answers(a):
             if d['verdict'] and d['verdict'] in shown:
                 v = d['verdict']
                 print(f'  DECK: {"done" if v.get("verdict") == "done" else "REPLAN FROM THE BASE"} ({v.get("answered")} of {v.get("total")} answered)')
+            if d.get('archive') and d['archive'] in shown:
+                print(f'  They {"archived this deck" if d["archive"].get("archived") else "brought this deck back from the archive"}.')
         for pack, items in sorted(thoughts.items(), key=lambda kv: str(kv[0])):
             new = [t for t in items if t in shown]
             if new:
@@ -1017,6 +1038,17 @@ def cmd_answers(a):
                     print(f'  {t["id"]}: "{readable(t["text"])}"')
                     if t.get('images'):
                         print(f'      pictures: {pictures(t)}')
+        for pack in sorted({e.get('pack') for e in shown if e.get('pack')} | ({pack_filter} if pack_filter else set(packs()))):
+            if pack not in packs():
+                continue
+            seen = state.get('packs', {}).get(pack, {}).get('mine', {})
+            changed = [m for m in mine_decks(pack) if str(m.get('updated', '')) > str(seen.get(m.get('id'), ''))]
+            if changed:
+                print(f'\n{pack}: their own decks, changed since you last read them')
+                replies = mine_replies(pack)
+                for m in changed:
+                    for line in mine_lines(pack, m, replies, since=str(seen.get(m.get('id'), ''))):
+                        print(line)
         for pack, t in thought_drafts.items():
             if t in shown and t.get('text'):
                 print(f'\n{pack}: a thought still being written: "{readable(t["text"])}"')
@@ -1025,6 +1057,10 @@ def cmd_answers(a):
             entry = state.setdefault('packs', {}).setdefault(pack, {'files': []})
             entry['files'] = sorted(set(entry['files']) | {e['_file'] for e in shown if e.get('pack') == pack})
             entry['at'] = now()
+        for pack in ([pack_filter] if pack_filter else packs()):
+            if pack in packs() and mine_decks(pack):
+                entry = state.setdefault('packs', {}).setdefault(pack, {'files': []})
+                entry.setdefault('mine', {}).update({m['id']: m.get('updated', '') for m in mine_decks(pack) if m.get('id')})
         save_json(DATA / 'read.json', state)
         publish('Answers read', DATA / 'read.json')
 
@@ -1125,6 +1161,188 @@ def cmd_second_try(a):
         notice(a.pack_id, a.deck, 'second-try', cards=[a.card])
 
 
+# ---------- the order decks are answered in, tags, and archiving
+
+def order_path(pack):
+    return DATA / 'packs' / pack / 'order.json'
+
+
+def load_order(pack):
+    p = order_path(pack)
+    o = load_json(p) if p.exists() else {}
+    o.setdefault('decks', {})
+    return o
+
+
+def deck_meta(pack, deck_id, deck=None, order=None):
+    """What stands for a deck: order.json first, then the deck's own file."""
+    deck = deck if deck is not None else (decks_of(pack).get(deck_id) or {})
+    o = (order if order is not None else load_order(pack))['decks'].get(deck_id, {})
+    pick = lambda k: o[k] if k in o else deck.get(k)
+    return {'priority': pick('priority'), 'tags': pick('tags') or [], 'kind': pick('kind') or deck_kind(deck), 'archived': pick('archived')}
+
+
+def archived_now(pack, deck_id, meta=None, events=None):
+    """Archived by the writer or by them on the phone, whichever was said last."""
+    meta = meta or deck_meta(pack, deck_id)
+    theirs = (events or {}).get((pack, deck_id))
+    if theirs and (not meta['archived'] or str(theirs.get('at', '')) > str(meta['archived'])):
+        return bool(theirs.get('archived'))
+    return bool(meta['archived'])
+
+
+def need_deck(pack, deck_id):
+    need_pack(pack)
+    if not (DATA / 'packs' / pack / 'decks' / f'{deck_id}.json').exists():
+        die(f'No deck {deck_id} in {pack}. Decks: {", ".join(decks_of(pack))}')
+
+
+def cmd_order(a):
+    """The writer's say on a deck: where it comes in Suggested order, its tags, its kind."""
+    sync()
+    need_deck(a.pack_id, a.deck)
+    o = load_order(a.pack_id)
+    entry = o['decks'].setdefault(a.deck, {})
+    if a.no_priority:
+        entry.pop('priority', None)
+    elif a.priority is not None:
+        if a.priority < 1:
+            die('priority is a whole number from 1, where 1 is answered first')
+        entry['priority'] = a.priority
+    tags = list(entry.get('tags') or [])
+    for t in a.tag or []:
+        if t not in tags:
+            tags.append(t)
+    tags = [t for t in tags if t not in (a.untag or [])]
+    if tags:
+        entry['tags'] = tags
+    else:
+        entry.pop('tags', None)
+    if a.kind:
+        entry['kind'] = a.kind
+    if not entry:
+        o['decks'].pop(a.deck, None)
+    save_json(order_path(a.pack_id), o)
+    m = deck_meta(a.pack_id, a.deck, order=o)
+    said = ', '.join(x for x in [f'priority {m["priority"]}' if m['priority'] else 'no priority', ', '.join(TAG_WORDS.get(t, t) for t in m['tags']), m['kind']] if x)
+    publish(f'Order in {a.pack_id}: {a.deck} ({said})', order_path(a.pack_id))
+    print(f'  {a.deck}: {said}')
+
+
+def cmd_archive(a):
+    """Moves a deck to Archived, at the end of the pack's page, or back. Nothing is deleted."""
+    sync()
+    need_deck(a.pack_id, a.deck)
+    o = load_order(a.pack_id)
+    entry = o['decks'].setdefault(a.deck, {})
+    if a.undo:
+        entry.pop('archived', None)
+    else:
+        entry['archived'] = now()
+    if not entry:
+        o['decks'].pop(a.deck, None)
+    save_json(order_path(a.pack_id), o)
+    publish(f'{"Unarchived" if a.undo else "Archived"} in {a.pack_id}: {a.deck}', order_path(a.pack_id))
+
+
+# ---------- their own decks
+
+def mine_decks(pack):
+    folder = DATA / 'packs' / pack / 'mine'
+    out = []
+    for f in sorted(folder.glob('*.json')) if folder.exists() else []:
+        try:
+            out.append(json.loads(f.read_text(encoding='utf-8')))
+        except ValueError:
+            print(f'  warning: could not read {f.name}')
+    return sorted(out, key=lambda d: str(d.get('updated', '')), reverse=True)
+
+
+def mine_replies(pack):
+    p = DATA / 'packs' / pack / 'mine-replies.json'
+    return load_json(p) if p.exists() else {}
+
+
+def mine_lines(pack, deck, replies, everything=False, since=None):
+    """Their deck as lines to read: each card, its words, links written out, pictures with their paths."""
+    topic = next((t.get('title') for t in load_json(DATA / 'packs' / pack / 'pack.json').get('topics', []) if t.get('id') == deck.get('topic')), None) if deck.get('topic') else None
+    cards = [c for c in deck.get('cards', []) if everything or not c.get('removed')]
+    head = f'  {deck.get("id")}: "{deck.get("title") or "Untitled"}"' + (f', topic {topic}' if topic else '') + f', {plural(len([c for c in cards if not c.get("removed")]), "card")}, changed {deck.get("updated", "")[:16].replace("T", " ")}'
+    lines = [head + (' [removed]' if deck.get('removed') else '')]
+    if replies.get(deck.get('id')):
+        lines.append(f'      your reply on the deck: "{replies[deck["id"]]["how"]}"')
+    for n, c in enumerate(cards, 1):
+        new = ' (new)' if since is not None and str(c.get('updated', '')) > since else ''
+        kind = MINE_KIND_WORDS.get(c.get('kind'), c.get('kind'))
+        bits = []
+        if c.get('url'):
+            bits.append(c['url'])
+        if c.get('address'):
+            bits.append(f'[{c.get("label") or "a card"} → {resolve(c["address"])}]')
+        if c.get('text'):
+            bits.append(f'"{readable(c["text"])}"')
+        lines.append(f'    {n}. {c.get("id")}: {kind}{" [removed]" if c.get("removed") else ""}{new}: ' + (' '.join(bits) or '(nothing written)'))
+        if c.get('images'):
+            lines.append(f'         pictures: {pictures(c)}')
+        reply = replies.get(f'{deck.get("id")}/{c.get("id")}')
+        if reply:
+            lines.append(f'         your reply: "{reply["how"]}"')
+    return lines
+
+
+def cmd_mine(a):
+    """Their own decks: feedback, requests and references they made themselves, in a pack."""
+    sync()
+    state = read_state()
+    only = None if a.every_pack else pack_from(a)
+    any_shown = False
+    for pack in packs():
+        if only and pack != only:
+            continue
+        seen = state.get('packs', {}).get(pack, {}).get('mine', {})
+        decks = [d for d in mine_decks(pack) if a.all or not d.get('removed')]
+        if not a.all:
+            decks = [d for d in decks if str(d.get('updated', '')) > str(seen.get(d.get('id'), ''))] if not a.every else decks
+        if not decks:
+            continue
+        any_shown = True
+        print(f'\n{pack}: their own decks')
+        replies = mine_replies(pack)
+        for d in decks:
+            for line in mine_lines(pack, d, replies, a.all, None if a.every or a.all else str(seen.get(d.get('id'), ''))):
+                print(line)
+        if a.mark_read:
+            entry = state.setdefault('packs', {}).setdefault(pack, {'files': []})
+            entry.setdefault('mine', {}).update({d['id']: d.get('updated', '') for d in decks if d.get('id')})
+    if not any_shown:
+        print('Nothing new in their own decks.' if not (a.all or a.every) else 'They have made no decks of their own.')
+    if a.mark_read and any_shown:
+        save_json(DATA / 'read.json', state)
+        publish('Their own decks read', DATA / 'read.json')
+
+
+def cmd_reply(a):
+    """Answers one of their own decks, or one card in it. The phone shows it on the card, like a handled one."""
+    sync()
+    need_pack(a.pack_id)
+    deck = next((d for d in mine_decks(a.pack_id) if d.get('id') == a.deck), None)
+    if not deck:
+        die(f'No deck of theirs called {a.deck} in {a.pack_id}. Theirs: {", ".join(d.get("id", "") for d in mine_decks(a.pack_id)) or "none"}')
+    if a.card and not any(c.get('id') == a.card for c in deck.get('cards', [])):
+        die(f'No card {a.card} in their deck {a.deck}.')
+    if not a.undo and not a.how:
+        die('Say what you did about it, with --how, in one or two plain sentences.')
+    path = DATA / 'packs' / a.pack_id / 'mine-replies.json'
+    replies = mine_replies(a.pack_id)
+    key = f'{a.deck}/{a.card}' if a.card else a.deck
+    if a.undo:
+        replies.pop(key, None)
+    else:
+        replies[key] = {'how': a.how, 'at': now()}
+    save_json(path, replies)
+    publish(f'Reply on their deck in {a.pack_id}: {key}', path)
+
+
 def cmd_thought(a):
     sync()
     need_pack(a.pack_id)
@@ -1143,7 +1361,7 @@ def owed_cards(decks):
         ans = d['answers'].get(c['id'])
         return not c.get('handled') and not (ans and ans.get('cardVersion', 1) >= c.get('version', 1))
     return sum(sum(1 for c in deck.get('cards', []) if owed(c, decks.get((pack, deck_id), {'answers': {}})))
-               for pack in packs() for deck_id, deck in decks_of(pack).items())
+               for pack in packs() for deck_id, deck in decks_of(pack).items() if not archived_now(pack, deck_id, deck_meta(pack, deck_id, deck), ARCHIVES))
 
 
 def cmd_status(a):
@@ -1158,15 +1376,26 @@ def cmd_status(a):
         p = load_json(DATA / 'packs' / pack / 'pack.json')
         waiting = len(unread(events, state, pack))
         print(f'\n{pack}: {p.get("title")}' + (f' ({waiting} new event{"" if waiting == 1 else "s"} to read)' if waiting else ''))
+        order = load_order(pack)
         for deck_id, deck in decks_of(pack).items():
             d = decks.get((pack, deck_id), {'answers': {}, 'verdict': None})
             cards = deck.get('cards', [])
             owed = [c for c in cards if not c.get('handled') and not (d['answers'].get(c['id']) and d['answers'][c['id']].get('cardVersion', 1) >= c.get('version', 1))]
             handled = sum(1 for c in cards if c.get('handled'))
             verdict = f', {d["verdict"]["verdict"]}' if d['verdict'] else ''
-            print(f'  {deck.get("topic") or "misc"} / {deck_id}: {len(owed)} of {len(cards) - handled} owed' + (f', {handled} handled' if handled else '') + verdict)
+            m = deck_meta(pack, deck_id, deck, order)
+            said = [m['kind']]
+            if m['priority']:
+                said.append(f'priority {m["priority"]}')
+            said += [TAG_WORDS.get(t, t) for t in m['tags']]
+            if archived_now(pack, deck_id, m, ARCHIVES):
+                said.append('ARCHIVED')
+            print(f'  {deck.get("topic") or "misc"} / {deck_id}: {len(owed)} of {len(cards) - handled} owed' + (f', {handled} handled' if handled else '') + verdict + f' ({", ".join(said)})')
         if thoughts.get(pack):
             print(f'  {len(thoughts[pack])} thoughts')
+        mine = [x for x in mine_decks(pack) if not x.get('removed')]
+        if mine:
+            print(f'  {plural(len(mine), "deck")} of their own: riffle mine --pack {pack} --every')
 
 
 def send_notification(title, body, badge=None, tag='riffle', url=''):
@@ -1453,6 +1682,25 @@ def main():
     s = sub.add_parser('link', help='the text of a link to a deck, card or part, to put in a card')
     s.add_argument('pack_id'); s.add_argument('deck', nargs='?'); s.add_argument('card', nargs='?'); s.add_argument('part', nargs='?'); s.add_argument('--label')
     s.set_defaults(fn=cmd_link)
+
+    s = sub.add_parser('order', help='the writer\'s say on a deck: its place in Suggested order, tags, kind')
+    s.add_argument('pack_id'); s.add_argument('deck'); s.add_argument('--priority', type=int, help='1 is answered first')
+    s.add_argument('--no-priority', action='store_true'); s.add_argument('--tag', action='append', help=f'like {", ".join(TAG_WORDS)}'); s.add_argument('--untag', action='append')
+    s.add_argument('--kind', choices=sorted(DECK_KINDS))
+    s.set_defaults(fn=cmd_order)
+
+    s = sub.add_parser('archive', help='move a deck to Archived at the end of the pack, or back with --undo')
+    s.add_argument('pack_id'); s.add_argument('deck'); s.add_argument('--undo', action='store_true')
+    s.set_defaults(fn=cmd_archive)
+
+    s = sub.add_parser('mine', help='their own decks: ideas, pictures and links they made for you')
+    s.add_argument('--pack'); s.add_argument('--every-pack', action='store_true'); s.add_argument('--every', action='store_true', help='every deck, not only changed ones')
+    s.add_argument('--all', action='store_true', help='removed ones too'); s.add_argument('--mark-read', action='store_true')
+    s.set_defaults(fn=cmd_mine)
+
+    s = sub.add_parser('reply', help='reply on one of their own decks, or a card in it')
+    s.add_argument('pack_id'); s.add_argument('deck'); s.add_argument('card', nargs='?'); s.add_argument('--how'); s.add_argument('--undo', action='store_true')
+    s.set_defaults(fn=cmd_reply)
 
     s = sub.add_parser('notify', help='send a notification to the phone by hand')
     s.add_argument('--title', default='Riffle'); s.add_argument('--body', default=''); s.add_argument('--badge', type=int); s.add_argument('--tag', default='riffle')

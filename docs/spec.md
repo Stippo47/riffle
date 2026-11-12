@@ -5,10 +5,29 @@ Riffle is a phone web app for answering questions and reading reports one card a
 ## The levels
 
 - **Dashboard:** lists every **pack**. A pack is a project.
-- **Pack:** its page has a **Thoughts** row at the top, then decks grouped under **topics**. Topics don't depend on each other. Each pack has one **Misc deck** for one-offs, which sits apart at the end.
+- **Pack:** its page has a **Thoughts** row at the top, then their **own decks**, then the writer's decks in the order chosen: Suggested, Importance, Newest, or grouped under **topics**. Topics don't depend on each other. Each pack has one **Misc deck** for one-offs, which sits apart at the end of Topics. **Archived** decks sit in a closed section at the very end.
 - **Topic:** several decks. Decks in a topic can be **stacked**: a discussion sits on the questions it leads to, and finishing one deals the next.
 - **Deck:** a run of cards.
 - **Card:** one question, report or design, seen one at a time.
+
+## A pack's page
+
+**The order.** A row of four: Suggested, Importance, Newest and Topics. The choice is kept.
+
+| Order | What comes first |
+|---|---|
+| Suggested (to start with) | The writer's priority (1 first), then decks tagged answer first, then waiting on you, then the rest by topic. Finished decks go last |
+| Importance | The deck with the most important card still owed (legendary, then epic and so on), then the most epic and legendary cards, then the most owed |
+| Newest | The deck's date, newest first, with how long ago. A deck sent before 0.8.0 has no date of its own, so it counts from when it first came to this phone |
+| Topics | The page as it was before: grouped under topics, in the layout's own style |
+
+Suggested, Importance and Newest are lists of full-width rows in every layout, each saying the deck's **kind** (Report, Questions or Board), its topic, the writer's priority as a small number, and its **tags**: "Answer first", "Waiting on you", "Being worked on", or any other word the writer uses. In Topics, rows show the kind and tags under the title where there's room, and tiles leave them out.
+
+A deck's kind is what the writer says, or else what its cards are: all reports is a report, mostly boards is a board, anything else is questions.
+
+**Archived.** A deck the writer archives, or they archive from its overview ("Archive this deck"), leaves the list for a closed Archived section at the end of the page, with a count. Opening the section lists them, each with Bring back. An archived deck can still be opened and answered. What it owes leaves every count: the pack, the first screen and the number on the icon. Whichever said it last, the writer or the phone, stands. Nothing is ever deleted.
+
+**Their own decks** are listed under Thoughts, with a row to make a new one. See Your own decks below.
 
 ## Card kinds
 
@@ -127,6 +146,21 @@ Any pack, deck, card or part has an address, `pack/deck/card/part`. Opening the 
 
 **The link button** sits beside the photo button in every place to type: a comment, a part's comment, notes and Thoughts. It offers, in this order: the card in the mini player, if there is one; this card, part or deck; or "Pick one from a list", every deck in every pack, this pack first, opening to its cards and their parts. The link goes in where the caret was, as if typed, so it's saved like anything typed.
 
+## Your own decks
+
+For feedback or requests that don't fit a card the writer made. "New deck of your own" on a pack's page opens an empty deck with its name ready to type, and a row of topics to put it under, or none. Four buttons at the bottom add a card:
+
+| Card | What it holds |
+|---|---|
+| Idea | Words: an idea, a note or a request |
+| Picture | A photo or a picture from the library, straight from the camera button, with words. Tapping a picture opens it full screen with the pen, and a drawing joins the card as a picture of its own |
+| Link | A web address, and words on what it's for |
+| Card | A card or part from Riffle, picked from the list, shown as a link to it, with words |
+
+Tapping a card opens it to change it: its words, its pictures, the link button, Move up and Move down, Delete (which asks once more), and Done. Everything is kept as it's typed, through the same backup list as a comment, so a closed app or no signal loses nothing. A deleted card leaves the list but stays in the file, marked removed. A deck left with no name and no cards was never made, and goes.
+
+They're written to `packs/<pack>/mine/<deck>.json` in the data repo, a few seconds after a change, when the app is hidden, and when signal comes back. Pictures upload like photos and stay on the phone. If another phone has written the same deck since, the two are merged card by card, newest first, before it goes up, so neither loses anything. The writer reads them with `riffle mine`, and a reply from the writer shows in green on the deck or the card, like a handled card's conclusion.
+
 ## Breadcrumbs
 
 The deck's title line reads Pack › Topic › Deck › Card, and each is a way there. Pack goes to the pack's page; Topic goes there at that topic; Deck opens the overview; Card brings the card itself back into view, from its back or its parts. The card's crumb follows the card on top. Where the line is short, the earlier crumbs give way first. In One line and Full screen, which share the line with the buttons, only the deck and the card show.
@@ -142,12 +176,13 @@ Shrink, in the buttons, puts the deck into a small floating card in a corner, sh
 
 ## The buttons
 
-Undo, Notes, Skip and Grid. They act as the finger lifts.
+Undo, Notes, Skip, Grid and Shrink. They act as the finger lifts.
 
 - **Undo:** brings back the last card, from the way it left, and takes back its answer. Also takes back a skip.
 - **Notes:** a scratchpad for the whole deck, for thoughts that don't fit the card on screen. It opens as a full sheet. Dragging it down, or tapping its head, returns to the same card. It's sent with the deck, and the same pad is on the end screen.
 - **Skip:** sends the card to the bottom of the deck.
 - **Grid:** the overview, the same as a pinch, for when only one hand is free.
+- **Shrink:** puts the deck in the mini player. See The mini player.
 
 ## The overview
 
@@ -155,6 +190,8 @@ Pinching a card, or Grid, lays out every card in the deck on a grid: its short t
 
 - **Replan this deck:** asks for it to be rethought from the base. The answers stay.
 - **Start this deck over:** clears the swipes, and every card is dealt again. The second step offers keeping notes and comments (comments come back as drafts on their cards) or clearing those too. Anything unsent goes first, and anything already sent stays with the writer.
+
+And **Archive this deck**, at once, since it's undone as easily: Bring back on the pack's page, or "Bring this deck back" here on an archived one. See A pack's page.
 
 ## Thoughts
 

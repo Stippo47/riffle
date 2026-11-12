@@ -5,7 +5,7 @@ import * as store from './store.js';
 
 export const OWNER = 'Stippo47', REPO = 'riffle-data', BRANCH = 'main';
 const FULL = `${OWNER}/${REPO}`;
-const SEND_EVERY = 15000, MAX_BATCH = 200, KEEPALIVE_LIMIT = 40000, PULL_EVERY = 30000;
+const SEND_EVERY = 15000, MAX_BATCH = 200, KEEPALIVE_LIMIT = 40000, PULL_EVERY = 30000, MINE_EVERY = 8000;
 const PICTURE_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
 const isFilm = path => /\.(mp4|m4v|mov|webm)$/i.test(path);
 const CALL_TIMEOUT = 25000, STUCK_AFTER = 40000, STREAK_LIMIT = 3;
@@ -230,14 +230,100 @@ export async function flushPhotos() {
   }
 }
 
-// Pictures already sent don't need to stay on the phone for ever.
+// Pictures already sent don't need to stay on the phone for ever. Pictures on their own cards do.
 async function purgeOldPhotos() {
   const cutoff = Date.now() - PHOTO_KEEP_DAYS * 86400000;
   for (const id of await store.photos.keys()) {
     if (parseInt(id.split('-')[0], 36) > cutoff) continue;
     const rec = await store.photos.get(id);
-    if (rec && rec.uploaded) await store.photos.del(id);
+    if (rec && rec.uploaded && !rec.keep) await store.photos.del(id);
   }
+}
+
+// Pictures that go with something other than an answer: they upload the same way, one at a time.
+export function queuePhotos(ids) {
+  for (const id of ids || []) store.set(`${DUE}${id}`, true);
+  if ((ids || []).length) setTimeout(flushPhotos, 300);
+}
+
+// ---------- their own decks, written to packs/<pack>/mine/<deck>.json, where writers never write
+
+let mineSince = 0;
+let mineAttempt = 0;
+// Writes each deck changed since it last went. One already there with a different copy (another phone)
+// is read, the two are merged card by card, and the merge goes up, so nothing either one holds is lost.
+export async function pushMine({ toFile, fromFile, merge } = mineTools) {
+  if (mineSince && Date.now() - mineSince < CALL_TIMEOUT * 3) return { ok: false, message: 'Already sending.' };
+  let key;
+  try { key = await getKey(); } catch { return { ok: false }; }
+  if (!key) return { ok: false, message: 'Not connected yet.' };
+  mineSince = Date.now();
+  mineAttempt = Date.now();
+  let sent = 0;
+  try {
+    for (const k of (await store.keys()).filter(x => x.startsWith('mine:'))) {
+      const packId = k.slice(5);
+      const data = await store.get(k);
+      for (const deck of Object.values((data && data.decks) || {})) {
+        if (deck.updated === deck.pushed || (!deck.title && !(deck.cards || []).length)) continue;
+        const path = `packs/${packId}/mine/${encodeURIComponent(deck.id)}.json`;
+        const going = deck.updated;
+        let body = deck;
+        let sha = (await shaOf(path)) || null;
+        let r = await putMine(path, toFile(body), sha, key);
+        if (r.status === 409 || r.status === 422) { // someone else's copy is there: merge, and try once more
+          const there = await call(`/repos/${FULL}/contents/${path}?ref=${BRANCH}`, key);
+          if (there.ok) {
+            const j = await there.json();
+            sha = j.sha;
+            try { body = merge(deck, fromFile(JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(j.content.replace(/\s/g, '')), c => c.charCodeAt(0)))))); } catch { /* theirs can't be read, so ours goes */ }
+            r = await putMine(path, toFile(body), sha, key);
+          }
+        }
+        if (!r.ok) {
+          const why = await refusal(r);
+          state.problem = `Your own deck "${deck.title || 'Untitled'}" didn't send. ${why.text}`;
+          continue;
+        }
+        const out = await r.json().catch(() => ({}));
+        if (out.content && out.content.sha) { fileIndex = fileIndex || {}; fileIndex[path] = out.content.sha; store.set('file-index', fileIndex); }
+        queuePhotos((body.cards || []).flatMap(c => c.photos || []));
+        // Only what went counts as sent: words typed meanwhile go next time.
+        const latest = await store.get(k);
+        const now = latest && latest.decks && latest.decks[deck.id];
+        if (now) {
+          if (body !== deck) latest.decks[deck.id] = { ...body, updated: now.updated === going ? body.updated : now.updated };
+          latest.decks[deck.id].pushed = going === now.updated ? latest.decks[deck.id].updated : going;
+          await store.set(k, latest);
+        }
+        sent++;
+      }
+    }
+  } catch {
+    // No signal. It tries again.
+  } finally {
+    mineSince = 0;
+    emit();
+  }
+  return { ok: true, sent };
+}
+const mineTools = { toFile: d => d, fromFile: d => d, merge: (a) => a };
+export const setMineTools = tools => Object.assign(mineTools, tools);
+
+async function putMine(path, record, sha, key) {
+  return call(`/repos/${FULL}/contents/${path}`, key, {
+    method: 'PUT',
+    body: { message: 'Their own deck, from the phone', content: toBase64(JSON.stringify(record, null, 1)), branch: BRANCH, ...(sha ? { sha } : {}) },
+  });
+}
+
+export async function mineWaiting() {
+  let n = 0;
+  for (const k of (await store.keys().catch(() => [])).filter(x => x.startsWith('mine:'))) {
+    const data = await store.get(k).catch(() => null);
+    for (const d of Object.values((data && data.decks) || {})) if (d.updated !== d.pushed && (d.title || (d.cards || []).length)) n++;
+  }
+  return n;
 }
 
 export const connected = async () => !!(await getKey().catch(() => null));
@@ -345,7 +431,9 @@ function fetchFile(path, sha, key) {
     if (!blob.ok) throw new Error(String(blob.status));
     // GitHub labels raw files as its own type, so a picture gets its real one back.
     const data = path.endsWith('.json') ? await blob.text() : new Blob([await blob.arrayBuffer()], { type: PICTURE_TYPES[path.split('.').pop().toLowerCase()] || 'application/octet-stream' });
-    const rec = { path, sha, data };
+    // When this file first came to this phone, and when it last changed: a deck's date, if it has none of its own.
+    const had = path.endsWith('.json') ? await store.files.get(path).catch(() => null) : null;
+    const rec = { path, sha, data, seen: (had && had.seen) || Date.now(), changed: Date.now() };
     await store.files.set(path, rec);
     pictureUrls.delete(path);
     return rec;
@@ -468,18 +556,20 @@ export async function start(onLibraryChange) {
   purgeOldPhotos().catch(() => {});
   emit();
   const tryPull = () => pull(onLibraryChange).catch(() => {});
-  setInterval(() => {
+  setInterval(async () => {
     if (document.visibilityState !== 'visible' || !state.connected) return;
     if (state.waiting && Date.now() - lastAttempt >= SEND_EVERY) flush();
     if (state.photosWaiting && Date.now() - lastPhotoAttempt >= SEND_EVERY) flushPhotos();
+    if (Date.now() - mineAttempt >= MINE_EVERY && (await mineWaiting())) pushMine();
   }, 3000);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') return;
     if (state.waiting && Date.now() - lastAttempt >= SEND_EVERY) flush();
     flushPhotos();
+    pushMine();
     if (Date.now() - state.pulledAt > PULL_EVERY) tryPull();
   });
-  addEventListener('online', () => { flush(); flushPhotos(); tryPull(); });
-  if (state.connected) { flush(); flushPhotos(); tryPull(); }
+  addEventListener('online', () => { flush(); flushPhotos(); pushMine(); tryPull(); });
+  if (state.connected) { flush(); flushPhotos(); pushMine(); tryPull(); }
   return tryPull;
 }

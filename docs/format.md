@@ -6,6 +6,9 @@ Everything the phone reads and writes lives in a private repo, branch `main`.
 packs/<pack-id>/pack.json
 packs/<pack-id>/decks/<deck-id>.json
 packs/<pack-id>/thoughts.json
+packs/<pack-id>/order.json
+packs/<pack-id>/mine/<deck-id>.json
+packs/<pack-id>/mine-replies.json
 packs/<pack-id>/img/<picture>
 answers/<time>-<random>.json
 answers/img/<id>.jpg
@@ -43,6 +46,47 @@ read.json
 
 - **topic:** which topic it sits under. A deck with `"misc": true`, or with no topic, is the pack's Misc deck.
 - **stack:** decks in a topic with the same stack name are dealt one after another, by `order`.
+- **kind:** `report`, `questions` or `board`, shown on the pack's page. Left out, it's worked out from the cards.
+- **priority:** a whole number from 1, the writer's order for answering it: 1 first, in the phone's Suggested order.
+- **tags:** words shown on the deck. `first` shows as "Answer first", `waiting` as "Waiting on you", `working` as "Being worked on"; any other word shows as it is.
+- **archived:** a time, if the writer archived it.
+- **updated:** when its cards last changed. `riffle deck` sets it, for the phone's Newest order.
+
+## order.json
+
+The writer's say on decks, written by `riffle order` and `riffle archive`, so sending a deck again never undoes it. What's here wins over the same field in the deck's file.
+
+```json
+{ "decks": { "this-week": { "priority": 1, "tags": ["first", "working"], "kind": "report", "archived": "2026-11-11T20:00:00.000Z" } } }
+```
+
+## Their own decks: mine/<deck-id>.json
+
+Written by the phone, never by the writer. One file per deck of theirs.
+
+```json
+{
+  "v": 1, "id": "mwd4...", "title": "Menu ideas", "topic": "first-topic",
+  "created": "2026-11-11T10:00:00.000Z", "updated": "2026-11-11T10:05:00.000Z",
+  "cards": [
+    { "id": "k1", "kind": "idea", "text": "The settings button is hard to reach", "created": "...", "updated": "..." },
+    { "id": "k2", "kind": "picture", "text": "Like this", "images": ["answers/img/<id>.jpg"], "drawings": { "answers/img/<id>.jpg": "their picture answers/img/<id>.jpg" } },
+    { "id": "k3", "kind": "link", "url": "https://example.com", "text": "For the colours" },
+    { "id": "k4", "kind": "card", "address": "a-project/this-week/rivers", "label": "Rivers", "text": "This one again" },
+    { "id": "k5", "kind": "idea", "text": "Never mind", "removed": "2026-11-11T10:04:00.000Z" }
+  ]
+}
+```
+
+`kind` is `idea`, `picture`, `link` or `card`. A card or deck with `removed` was deleted on the phone: it's kept, but not shown. Pictures upload like photos. `topic` can be null.
+
+## mine-replies.json
+
+The writer's replies on their own decks, written by `riffle reply`. A key is a deck id, or `deck-id/card-id`.
+
+```json
+{ "menu-ideas": { "how": "All of these are in the next round.", "at": "..." }, "menu-ideas/k1": { "how": "Moved it.", "at": "..." } }
+```
 
 ## A card
 
@@ -206,6 +250,7 @@ Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typ
 | `thought` | `id`, `text`, with `deck` null | A general thought about the pack |
 | `deck` | `verdict` (`done`, `replan`), `tally`, `answered`, `total` | The deck as a whole. `replan` means rethink it from the base; the answers still stand |
 | `part` | `card`, `cardVersion`, `title`, `kind`, `part`, `partTitle`, `mark`, `stamp`, `comment` | What's said about one part of a card. `mark` is a meaning like `swipe` (`right`, `left` or `down`), or null for none. The latest for a part stands, whether or not the card is answered |
+| `archive` | `archived` | They archived the deck on the phone (`true`), or brought it back (`false`). Whichever of this and the writer's `archived` in order.json is later stands |
 | `deck-reset` | `keptNotes` | They started the deck over. Answers on this deck from before this no longer stand, though anything they typed was still said. If `keptNotes`, comments came back as drafts on their cards, and the notes stayed |
 
 **Pictures.** An `answer`, `part`, `notes`, `thought` or `draft` event can carry `images`, a list of paths like `answers/img/<id>.jpg`. Pictures upload apart from the words, so one can arrive a little after the event that names it. Only the event that stands counts: a picture named by nothing that stands was taken back.

@@ -97,9 +97,11 @@ export function deckSummary(deck, s) {
   const handled = deck.cards.filter(c => c.handled).length;
   const nothingOwed = handled === deck.cards.length && handled > 0;
   const finished = nothingOwed || !!(s && s.verdict && s.verdictSig === deckSig(deck));
+  const RANK = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5 };
   return {
     total: deck.cards.length - handled, left: due.length, handled, finished,
     big: due.filter(c => c.rarity === 'epic' || c.rarity === 'legendary').length,
+    top: due.reduce((m, c) => Math.max(m, RANK[c.rarity] || 1), 0), // the most important card still owed
     verdict: finished && s ? s.verdict : null,
   };
 }
@@ -556,6 +558,7 @@ export class DeckView {
       gridnotes: () => { this.hideOverview(); if (this.topId()) this.toggleNotes(true); else padFocus(this.endBox.querySelector('#endnotes')); },
       gridreplan: () => { this.hideOverview(); this.showEnd('replan'); },
       gridover: () => { this.hideOverview(); this.showStartOver(); },
+      gridarchive: () => this.nav.archive && this.nav.archive(),
       overkeep: () => this.startOver(true),
       overclear: () => this.startOver(false),
       flipback: () => this.flip(false),
@@ -1834,6 +1837,7 @@ export class DeckView {
           <button class="ghostbtn" data-act="gridnotes">${icon('notebook-pen')}Deck notes</button>
           <button class="ghostbtn" data-act="gridreplan">${icon('message-square-text')}Replan this deck</button>
           <button class="ghostbtn" data-act="gridover">${icon('rotate-ccw')}Start this deck over</button>
+          ${this.nav.archive ? `<button class="ghostbtn" data-act="gridarchive">${icon(this.nav.archived ? 'archive-restore' : 'archive')}${this.nav.archived ? 'Bring this deck back' : 'Archive this deck'}</button>` : ''}
         </div>
       </div>`;
     this.overview.hidden = false;

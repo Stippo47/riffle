@@ -53,6 +53,8 @@ export async function saveDrawing(blob, on = '') {
   return id;
 }
 
+export const photoUrl = id => thumb(id);
+
 async function thumb(id) {
   if (urls.has(id)) return urls.get(id);
   const rec = await store.photos.get(id).catch(() => null);
