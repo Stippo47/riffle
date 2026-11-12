@@ -479,7 +479,26 @@ def check_deck(d, base, pack):
 
 def resolve(address):
     """A link's address as Pack › Topic › Deck › Card › Part, from the files as they are now. What no
-    longer exists says so."""
+    longer exists says so. One they brought to their notes also says which picture, which moment of a
+    film, or which drawing."""
+    base, _, query = str(address).partition('?')
+    where = resolve_place(base)
+    q = urllib.parse.parse_qs(query)
+    first = lambda k: (q.get(k) or [''])[0]
+    if first('drawing'):
+        return f'{where}, their drawing {first("drawing")} over {first("pic")}'
+    if first('film'):
+        try:
+            t = float(first('t') or 0)
+        except ValueError:
+            t = 0
+        return f'{where}, the film {first("film")} at {int(t // 60)}:{int(t % 60):02d}'
+    if first('pic'):
+        return f'{where}, the picture {first("pic")}'
+    return where
+
+
+def resolve_place(address):
     bits = [urllib.parse.unquote(x) for x in str(address).split('/')]
     pack, deck_id, card_id, part_id = (bits + [None] * 4)[:4]
     pf = DATA / 'packs' / str(pack) / 'pack.json' if DATA and pack else None

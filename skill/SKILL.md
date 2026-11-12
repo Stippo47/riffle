@@ -94,7 +94,7 @@ Add `"stack": "some-name"` to decks in a topic that should be dealt one after an
 
 **Films.** `"videos": ["clips/walk.mp4"]` sits beside `images`, on a card or a part, and a board item can have `"video"` instead of `"image"`. They play muted and looping on the phone, and can be scrubbed, slowed down and drawn on. `riffle deck` keeps a small H.264 mp4 as it is, turns anything else into one under 2 MB with no sound, and makes a poster from it, all with ffmpeg. Give `{"src": "...", "poster": "..."}` to choose the poster. Without ffmpeg only mp4s go, with no poster. Use films for motion that a still can't show, and keep them short: a few seconds that loop.
 
-**Parts.** A report, question or design can be in `parts`, each with its own `id`, a `title` and its own `text`, `images` or `videos`. They mark and comment on each part by itself, apart from their swipe on the whole card. Use them for a stage of work with several things in it, so they can point at the one that's off instead of writing which. The face lists the first four titles, so keep them short.
+**Parts.** A report, question or design can be in `parts`, each with its own `id`, a `title` and its own `text`, `images` or `videos`. They mark and comment on each part by itself, apart from their swipe on the whole card. They read the parts on the card's back. Use them for a stage of work with several things in it, so they can point at the one that's off instead of writing which. The face lists the first four titles, so keep them short.
 
 ```json
 { "id": "walk", "kind": "report", "title": "The walk", "text": "The walk, in three parts.", "why": "Mark any part that's off.",
@@ -143,6 +143,7 @@ If a card is technical with no context, they'll send it back. So:
 - **comment on its own:** their own suggestion. Read it.
 - **Comments and notes** are often the most useful part. Read every one. Pictures are listed with their path in the clone: open them.
 - **Links** in their words point at a card, like `[Gates](riffle:proj/paths/gates)`, made with the link button. `riffle answers` writes each out as where it goes: `[Gates → My project › Garden › Paths › Gates]`. "Like this one" with a link means that card.
+- **Things brought to notes**: their deck notes can hold references to a picture, a film at a moment, a drawing, or quoted words from a card, like `[Film at 0:12, The walk](riffle:...)`. `riffle answers` writes out which picture or film and when: look at it there.
 - **Drawings** are pictures they drew on, to circle or arrow what they mean. `riffle answers` lists each with what it was drawn over. Open it: the circle is the point of the comment.
 - **Parts** show under their card: `part feet (Feet): PROBLEM, "they slide"`. A part can be marked or commented on without the card being swiped. `riffle redeal` lists parts marked problem or huh.
 - **Deck: replan** means the whole deck's premise is off. Rethink it from the base. **Started over** means they want to go through it again.

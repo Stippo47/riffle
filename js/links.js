@@ -10,7 +10,8 @@ const LINK = /\[([^\]\n]{1,120})\]\(riffle:([^)\s]{1,400})\)|(https?:\/\/[^\s<>"
 
 // One address part each for the pack, the deck, the card and the part. Empty ones drop off the end.
 export const addressOf = (...parts) => parts.filter(Boolean).map(p => encodeURIComponent(p)).join('/');
-export const splitAddress = address => String(address || '').split('/').map(x => { try { return decodeURIComponent(x); } catch { return x; } });
+// An address's own parts, without what follows a ? (a picture or a moment in a film, brought to notes).
+export const splitAddress = address => String(address || '').split('?')[0].split('/').map(x => { try { return decodeURIComponent(x); } catch { return x; } });
 
 // The text a link is typed as. Square brackets in a label would end it early, so they go.
 export const linkText = (label, address) => `[${String(label || '').replace(/[[\]\n]/g, ' ').replace(/\s+/g, ' ').trim() || 'a card'}](riffle:${address})`;

@@ -242,9 +242,10 @@ export class MineView {
     const el = this.list.querySelector(`.mcard[data-card="${CSS.escape(id)}"]`);
     if (!el) return;
     const c = this.card(id);
+    // The card being changed starts at the top of the list, with nothing of the one above showing.
+    this.list.scrollTop += el.getBoundingClientRect().top - this.list.getBoundingClientRect().top - 4;
     const first = c.kind === 'link' && !c.url ? el.querySelector('.mc-url .pad') : el.querySelector('.mc-pad .pad');
     if (first) padFocus(first);
-    setTimeout(() => el.scrollIntoView({ block: 'nearest' }), 250);
   }
 
   add(kind) {

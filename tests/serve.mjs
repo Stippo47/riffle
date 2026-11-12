@@ -82,6 +82,7 @@ const shaOf = path => {
 };
 let down = false;
 let fail = null;
+let conflicts = 0; // the next writes refused as GitHub does when two land at once
 let failImg = 0;
 let slowImg = 0;
 let slowBlob = 0;
@@ -113,6 +114,7 @@ createServer(async (req, res) => {
   if (url.pathname === '/__slowblob') { slowBlob = +url.searchParams.get('ms'); send(200, { slowBlob }); return; }
   if (url.pathname === '/__failimg') { failImg = +url.searchParams.get('code'); send(200, { failImg }); return; }
   if (url.pathname === '/__slowimg') { slowImg = +url.searchParams.get('ms'); send(200, { slowImg }); return; }
+  if (url.pathname === '/__conflict') { conflicts = +url.searchParams.get('n'); send(200, { conflicts }); return; }
   if (url.pathname === '/__fail') { // makes every write refused with this status and message
     const code = +url.searchParams.get('code');
     fail = code ? { code, message: url.searchParams.get('message') || 'Refused' } : null;
@@ -122,7 +124,7 @@ createServer(async (req, res) => {
   if (url.pathname === '/__reset') { // back to how it started
     files.clear();
     for (const [k, v] of startFiles) files.set(k, v);
-    down = false; fail = null; writes = 0; failImg = 0; slowImg = 0; slowBlob = 0; served = [];
+    down = false; fail = null; conflicts = 0; writes = 0; failImg = 0; slowImg = 0; slowBlob = 0; served = [];
     send(200, { files: files.size });
     return;
   }
@@ -164,6 +166,7 @@ createServer(async (req, res) => {
   }
   if (url.pathname.startsWith(`${REPO}/contents/`) && req.method === 'PUT') {
     if (who.readOnly) { send(403, { message: 'Resource not accessible by personal access token' }); return; }
+    if (conflicts > 0) { conflicts--; send(409, { message: 'is at 4a39207fb015aacf5d7eb595e813a7119a209b58 but expected 888841dd0f4216a7ef1996bb76fb45b15e5b073e' }); return; }
     if (fail) { send(fail.code, { message: fail.message }); return; }
     const path = decodeURIComponent(url.pathname.slice(`${REPO}/contents/`.length));
     const { content, sha } = JSON.parse(body);

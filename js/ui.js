@@ -137,6 +137,59 @@ export function padBlur(el) {
   if (sel) sel.removeAllRanges();
 }
 
+// The nearest box that scrolls, around something. The app itself never scrolls, so this stops short of it.
+function scrollerOf(el) {
+  for (let p = el.parentElement; p && p.id !== 'app' && p !== document.body; p = p.parentElement) {
+    const o = getComputedStyle(p).overflowY;
+    if ((o === 'auto' || o === 'scroll') && p.scrollHeight > p.clientHeight + 1) return p;
+  }
+  return null;
+}
+
+// Brings a box being typed in into view above the keyboard, in whatever scrolls around it, and again once
+// the keyboard has finished coming up. Only that box scrolls: never the app, which would shift the screen.
+export function revealPad(el) {
+  if (!el) return;
+  const go = () => {
+    if (document.activeElement !== el) return;
+    const sc = scrollerOf(el);
+    if (!sc) return;
+    const vv = window.visualViewport;
+    const r = el.getBoundingClientRect(), b = sc.getBoundingClientRect();
+    const bottom = Math.min(b.bottom, vv ? vv.offsetTop + vv.height : innerHeight) - 10;
+    if (r.bottom > bottom) sc.scrollTop += Math.min(r.bottom - bottom, r.top - b.top - 10);
+    else if (r.top < b.top + 10) sc.scrollTop -= b.top + 10 - r.top;
+  };
+  requestAnimationFrame(go);
+  setTimeout(go, 320);
+  setTimeout(go, 650);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', go, { once: true });
+}
+
+// iPhones keep drawing a focused box's caret even when the box has been hidden, turned away or scrolled
+// out of sight, so it shows over things that aren't for typing. A box like that loses focus instead.
+export function blurHidden() {
+  const a = document.activeElement;
+  if (!a || a === document.body || !(a.isContentEditable || /^(INPUT|TEXTAREA)$/.test(a.tagName))) return;
+  const r = a.getBoundingClientRect();
+  let gone = !r.width || !r.height || !!a.closest('[hidden]') || getComputedStyle(a).visibility === 'hidden';
+  const flip = a.closest('.flip');
+  if (!gone && flip) gone = a.closest('.face') ? flip.classList.contains('flipped') : !flip.classList.contains('flipped');
+  const sc = !gone && scrollerOf(a);
+  if (sc) { const b = sc.getBoundingClientRect(); gone = r.bottom < b.top + 4 || r.top > b.bottom - 4; }
+  if (gone) padBlur(a);
+}
+let blurQueued = false;
+const blurSoon = () => {
+  if (blurQueued) return;
+  blurQueued = true;
+  requestAnimationFrame(() => { blurQueued = false; blurHidden(); });
+};
+document.addEventListener('scroll', blurSoon, { capture: true, passive: true });
+document.addEventListener('pointerup', () => setTimeout(blurHidden, 60), { capture: true });
+// Any box that's focused is brought into view above the keyboard, wherever it is.
+document.addEventListener('focusin', e => { if (e.target && e.target.classList && e.target.classList.contains('pad')) revealPad(e.target); });
+
 // Where the caret was in each pad, so something put in later lands there, even after the pad lost focus.
 document.addEventListener('selectionchange', () => {
   const sel = getSelection();

@@ -84,10 +84,10 @@ export const DEMO_PACK = {
           why: 'It is a scratchpad for the whole deck, for thoughts that don\'t fit the card you\'re on. Drag it down and you\'re back on this card. The same pad is at the deck\'s end.',
         },
         {
-          id: 'pinch', kind: 'question', rarity: 'common', title: 'Overview',
-          text: 'Pinch this card to see the whole deck.',
-          why: 'Every card is laid out with its short title and how you answered it. Tap one to go to it. The Grid button does the same, for when you only have one hand free.',
-          pick: 'Keep both the pinch and the button.',
+          id: 'pinch', kind: 'question', rarity: 'common', title: 'Mini player',
+          text: 'Pinch this card to shrink the deck into a corner.',
+          why: 'It becomes a small card you can drag to any corner. Open another deck, even write a comment there, then tap the small card to swap back. The Grid button shows the whole deck.',
+          pick: 'A pinch shrinks the deck, and Grid shows all of it.',
         },
         {
           id: 'speed', kind: 'question', rarity: 'common', title: 'Speed',

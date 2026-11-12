@@ -244,7 +244,7 @@ svg{display:block}
 .deck .deckbar{order:1}
 .progress{order:2;height:3px;background:var(--line);overflow:hidden;flex:none}
 .progress b{display:block;height:100%;width:0;background:var(--ink);transition:width .2s}
-.tools{order:3;display:grid;grid-template-columns:repeat(5,1fr);background:var(--rail);box-shadow:inset 0 0 0 1px var(--rail-line);border-radius:var(--rail-radius);color:var(--rail-ink);flex:none}
+.tools{order:3;display:grid;grid-template-columns:repeat(4,1fr);background:var(--rail);box-shadow:inset 0 0 0 1px var(--rail-line);border-radius:var(--rail-radius);color:var(--rail-ink);flex:none}
 .tools button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:12px;min-height:48px;border-radius:var(--rail-radius)}
 .tools button svg{width:22px;height:22px;fill:none;stroke:currentColor}
 .tablewrap{order:4;position:relative;flex:1 1 0;min-height:0;margin-bottom:12px}
@@ -355,12 +355,22 @@ svg{display:block}
 .card[data-pos="1"] .face{filter:brightness(calc(.93 + .07*var(--rise)))}
 .card[data-pos="2"] .face{filter:brightness(.86)}
 .card[data-pos="1"] .stamp,.card[data-pos="2"] .stamp{display:none}
-.flip{position:absolute;inset:0;transform-style:preserve-3d;-webkit-transform-style:preserve-3d;transition:transform .34s cubic-bezier(.3,.9,.3,1);perspective:1400px}
-.flip.flipped{transform:rotateY(180deg)}
+/* The turn eases in to edge-on at exactly halfway and out from there, and the hidden side swaps at that
+   moment, when neither side can be seen. Easing the whole turn in one curve put edge-on early, with both
+   sides hidden for a while: the flicker. Once turned, the back is drawn flat. See flip() in js/deck.js. */
+.flip{position:absolute;inset:0;transform-style:preserve-3d;-webkit-transform-style:preserve-3d}
+.flip.flipped{transform:perspective(1400px) rotateY(180deg)}
+.flip.turn-in{animation:turnIn .34s both}
+.flip.turn-out{animation:turnOut .34s both}
+@keyframes turnIn{0%{transform:perspective(1400px) rotateY(0deg);animation-timing-function:cubic-bezier(.45,0,.95,.6)}50%{transform:perspective(1400px) rotateY(90deg);animation-timing-function:cubic-bezier(.05,.4,.55,1)}100%{transform:perspective(1400px) rotateY(180deg)}}
+@keyframes turnOut{0%{transform:perspective(1400px) rotateY(180deg);animation-timing-function:cubic-bezier(.45,0,.95,.6)}50%{transform:perspective(1400px) rotateY(90deg);animation-timing-function:cubic-bezier(.05,.4,.55,1)}100%{transform:perspective(1400px) rotateY(0deg)}}
+.flip.flat{transform:none;-webkit-transform-style:flat;transform-style:flat}
+.flip.flat>.back{transform:none;visibility:visible;transition:none}
+.flip.flat>.face{display:none}
 /* The hidden side goes away halfway through the turn, so it can't catch a touch or show through. */
 .face,.back{transition:visibility 0s .17s}
 .flip.flipped>.face,.flip:not(.flipped)>.back{visibility:hidden}
-.face,.back{position:absolute;inset:0;border-radius:var(--radius);-webkit-backface-visibility:hidden;backface-visibility:hidden;overflow:hidden;background:var(--tint);color:var(--card-ink);box-shadow:var(--shadow),inset 0 0 0 2px var(--rim,transparent);font-family:var(--font)}
+.face,.back{position:absolute;inset:0;border-radius:var(--radius);overflow:hidden;background:var(--tint);color:var(--card-ink);box-shadow:var(--shadow),inset 0 0 0 2px var(--rim,transparent);font-family:var(--font)}
 .face{display:flex;flex-direction:column;padding:16px 18px 12px}
 .back{transform:rotateY(180deg);display:flex;flex-direction:column}
 .common{--tint:var(--card-common);--rim:var(--edge-common)}
@@ -840,14 +850,15 @@ input.viewer-scrub{flex:1;min-width:0;height:44px;padding:0;margin:0;border:0;ba
 /* ---------- breadcrumbs: Pack › Topic › Deck › Card, each one tappable */
 .crumbs{display:flex;align-items:center;min-width:0;gap:0;font-family:var(--font)}
 .deckbar .crumbs.t{font-size:15px;font-weight:600}
-.crumb{flex:0 1 auto;min-width:1.6em;max-width:max-content;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:10px 2px;color:var(--dim);font-weight:600}
-.crumb-pack{flex-shrink:6}
-.crumb-topic{flex-shrink:4}
-.crumb-deck{flex-shrink:2;color:var(--ink)}
-.crumb-card{flex-shrink:1;color:var(--ink);font-weight:800;min-width:3em}
+/* One row, full names, scrolling sideways, kept at its end: where this is. A fade says there's more. */
+.deckbar .crumbs.t{overflow-x:auto;overflow-y:hidden;text-overflow:clip;scrollbar-width:none;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;touch-action:pan-x}
+.crumbs::-webkit-scrollbar{display:none}
+.crumbs.scrolled{-webkit-mask-image:linear-gradient(90deg,transparent,#000 18px);mask-image:linear-gradient(90deg,transparent,#000 18px)}
+.crumb{flex:none;white-space:nowrap;padding:10px 2px;color:var(--dim);font-weight:600}
+.crumb-deck{color:var(--ink)}
+.crumb-card{color:var(--ink);font-weight:800;padding-right:6px}
 .crumbs i{flex:none;font-style:normal;color:var(--dim);padding:0 3px;opacity:.7}
-[data-layout=one] .deck .crumb-pack,[data-layout=one] .deck .crumb-topic,[data-layout=one] .deck .crumbs .c-pack,[data-layout=one] .deck .crumbs .c-topic,
-[data-layout=story] .deck:not(.composing):not(.ended) .crumb-pack,[data-layout=story] .deck:not(.composing):not(.ended) .crumb-topic,[data-layout=story] .deck:not(.composing):not(.ended) .crumbs .c-pack,[data-layout=story] .deck:not(.composing):not(.ended) .crumbs .c-topic{display:none}
+/* Every layout shows every crumb, in a row that scrolls. */
 [data-layout=story] .deck:not(.composing):not(.ended) .crumb{color:var(--card-dim)}
 [data-layout=story] .deck:not(.composing):not(.ended) .crumb-deck,[data-layout=story] .deck:not(.composing):not(.ended) .crumb-card{color:var(--card-ink)}
 [data-layout=story] .deck:not(.composing):not(.ended) .crumbs i{color:var(--card-dim)}
@@ -857,7 +868,7 @@ input.viewer-scrub{flex:1;min-width:0;height:44px;padding:0;margin:0;border:0;ba
 /* ---------- the mini player: one deck, small, floating in a corner */
 body.covered .island-layer{display:none}
 .island-layer{position:fixed;left:0;right:0;top:0;height:var(--vvh,100dvh);transform:translateY(var(--vvt,0px));pointer-events:none;z-index:150}
-.island{position:absolute;width:96px;height:128px;display:flex;flex-direction:column;gap:3px;padding:8px 8px 7px;border-radius:12px;background:var(--tint,#fff);color:var(--card-ink);text-align:left;box-shadow:0 8px 22px rgba(0,0,0,.5),0 0 0 2px rgba(255,255,255,.85),inset 0 0 0 2px var(--rim,transparent);pointer-events:auto;touch-action:none;transition:left .22s cubic-bezier(.2,.9,.3,1),right .22s cubic-bezier(.2,.9,.3,1),top .22s cubic-bezier(.2,.9,.3,1),bottom .22s cubic-bezier(.2,.9,.3,1);overflow:hidden;font-family:var(--font)}
+.island{position:absolute;width:122px;height:156px;display:flex;flex-direction:column;gap:4px;padding:9px 10px 8px;border-radius:12px;background:var(--tint,#fff);color:var(--card-ink);text-align:left;box-shadow:0 8px 22px rgba(0,0,0,.5),0 0 0 2px rgba(255,255,255,.85),inset 0 0 0 2px var(--rim,transparent);pointer-events:auto;touch-action:none;transition:left .22s cubic-bezier(.2,.9,.3,1),right .22s cubic-bezier(.2,.9,.3,1),top .22s cubic-bezier(.2,.9,.3,1),bottom .22s cubic-bezier(.2,.9,.3,1);overflow:hidden;font-family:var(--font)}
 .island.dragging{transition:none;opacity:.92;box-shadow:0 14px 30px rgba(0,0,0,.55),0 0 0 2px #fff}
 .island[data-corner=tl],.island[data-corner=bl]{left:10px}
 .island[data-corner=tr],.island[data-corner=br]{right:10px}
@@ -866,7 +877,13 @@ body.covered .island-layer{display:none}
 .island-layer.typing .island[data-corner=bl],.island-layer.typing .island[data-corner=br]{bottom:auto;top:calc(var(--sat) + 10px)}
 .island-layer.typing .island[data-corner=tl],.island-layer.typing .island[data-corner=tr]{top:calc(var(--sat) + 10px)}
 .isl-deck{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--card-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
-.isl-text{flex:1;min-height:0;font-size:12.5px;font-weight:700;line-height:1.18;overflow:hidden;display:-webkit-box;-webkit-line-clamp:5;-webkit-box-orient:vertical}
+.isl-title{flex:none;font-family:var(--card-display);font-size:14px;font-weight:800;line-height:1.15;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.isl-text{flex:1;min-height:0;font-size:12px;font-weight:500;line-height:1.22;color:var(--card-dim);overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
+.isl-title+.isl-text{-webkit-line-clamp:3}
+/* A finished deck looks like the end of a deck. */
+.island.is-done{background-color:var(--bg);background-image:var(--bg-art);color:var(--ink);box-shadow:0 8px 22px rgba(0,0,0,.5),0 0 0 2px var(--dim)}
+.island.is-done .isl-title{font-family:var(--display);font-size:17px}
+.island.is-done .isl-deck,.island.is-done .isl-text,.island.is-done .isl-kind{color:var(--dim)}
 .isl-kind{flex:none;font-size:10px;font-weight:700;color:var(--card-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 [data-look=inventory] .island{border-radius:0;box-shadow:0 0 0 3px #1d1d1d,6px 6px 0 3px rgba(0,0,0,.28)}
 
@@ -975,3 +992,59 @@ body.covered .island-layer{display:none}
 [data-look=inventory] .mcard,[data-look=inventory] .mine-add button,[data-look=inventory] .mine-topics button,[data-look=inventory] .mc-pic{border-radius:0}
 [data-look=inventory] .mcard{box-shadow:0 0 0 3px #1d1d1d}
 [data-look=inventory] .mine-add button{box-shadow:var(--bevel-up);background:#c6c6c6;color:#1d1d1d}
+
+/* ---------- 0.9.0 */
+/* A card in parts, turned over: its back takes the room the buttons had, and the parts are read there. */
+.deck.reading .tools,.deck.reading .progress{display:none}
+.deck.reading .tablewrap{margin-bottom:6px}
+.back .parts-count{margin:4px 0 2px;font-size:12.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--card-dim)}
+.back .part{margin-top:10px;background:rgba(23,22,28,.035);box-shadow:inset 0 0 0 1px rgba(23,22,28,.1)}
+.back .part[data-mark=right]{box-shadow:inset 5px 0 0 #15803f,inset 0 0 0 1px rgba(23,22,28,.1)}
+.back .part[data-mark=left]{box-shadow:inset 5px 0 0 #d8650f,inset 0 0 0 1px rgba(23,22,28,.1)}
+.back .part[data-mark=down]{box-shadow:inset 5px 0 0 #2d7fd6,inset 0 0 0 1px rgba(23,22,28,.1)}
+.back-scroll .part h3{font-size:17.5px;margin-bottom:6px}
+.back-scroll .part p{margin-bottom:8px}
+.back .part-pad .padwrap{height:140px}
+[data-look=inventory] .back .part{box-shadow:0 0 0 2px #1d1d1d}
+
+/* Pictures and films on a back can be held: no picture menu, no callout. */
+.back-scroll img.mpic,.back-scroll .clip,.viewer-stage{-webkit-touch-callout:none}
+
+/* Bring to notes: low on the screen, clear of the menu iPhones put over selected words. */
+.bringpill{position:fixed;left:50%;bottom:calc(var(--sab) + 18px);transform:translateX(-50%);z-index:260;display:flex;align-items:center;gap:8px;min-height:48px;padding:0 20px;border-radius:999px;background:#17181b;color:#fff;font-family:var(--font);font-size:15.5px;font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.45),0 0 0 1.5px rgba(255,255,255,.25);animation:pillIn .16s ease-out;white-space:nowrap}
+.bringpill svg{width:20px;height:20px;fill:none;stroke:currentColor}
+.bringpill.done{background:#15803f}
+@keyframes pillIn{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
+
+/* What's been brought to the notes, as chips that reopen it. */
+.noterefs{flex:none;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px 0 4px;touch-action:pan-x}
+.noterefs::-webkit-scrollbar{display:none}
+.noteref{flex:none;display:flex;align-items:center;gap:6px;max-width:240px;min-height:36px;padding:0 12px;border-radius:999px;background:var(--row-bg);box-shadow:inset 0 0 0 1px var(--row-line);font-size:13.5px;font-weight:600;color:var(--ink)}
+.noteref span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.noteref svg{width:16px;height:16px;fill:none;stroke:currentColor;flex:none}
+.endbox .noterefs{margin-bottom:6px}
+[data-look=inventory] .noteref{border-radius:0;box-shadow:var(--tile-shadow);color:#fff}
+
+/* Searching for a card to link. */
+input.pk-search{flex:none;margin:4px 0 6px;font-size:16px;border-radius:12px;min-height:44px}
+.pk-found{margin-top:6px}
+.pk-found b{display:block;font-size:15px}
+.pk-found small{margin-top:2px}
+
+/* Their own decks: no sliver of the card above peeking over the top while one is changed. */
+.mine-list{-webkit-mask-image:linear-gradient(transparent 0,#000 8px);mask-image:linear-gradient(transparent 0,#000 8px)}
+
+/* The Feel test says only what's waiting, if anything is. */
+.feel-waiting{margin:12px 2px 4px;text-align:center}
+.feel-waiting.problem{color:#ffb0a6}
+[data-look=paper] .feel-waiting.problem,[data-look=inventory] .feel-waiting.problem{color:var(--bad)}
+.reward .ghostbtn{margin-top:4px}
+.endbox{touch-action:pan-y}
+/* The glow rides on the card: same box, same turning point, so the same transform puts it on the card. */
+.glow{transform-origin:50% 112%}
+/* A card's own Done reads on the white card in every look. */
+.mcard .mc-done{background:var(--card-ink);color:#fff;box-shadow:none}
+/* With the mini player out, a list can scroll its last rows up clear of it. */
+body.has-island .screen.scroll{padding-bottom:calc(var(--sab) + 190px)}
+/* On a finished deck the last crumb is just words: The end. */
+.crumb-card:disabled{opacity:1;color:var(--dim);font-weight:600}

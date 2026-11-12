@@ -365,6 +365,11 @@ phone_sends('2026-11-02T12-00-45-000Z-lnk.json',
 code, out = run('answers', '--pack', 'proj')
 ok('[A title → A project › First › A deck › A title]' in out, 'a link in their words is written out as where it goes', out)
 ok('[gone → A project › nope (no such deck)]' in out, 'and one to something gone says so', out)
+phone_sends('2026-11-02T12-00-46-000Z-ref.json',
+            {'eid': 'k2', 'deck': 'beside', 'at': '2026-11-02T12:00:46.000Z', 'type': 'notes', 'text': 'Look: [Film at 0:12, A title](riffle:proj/first/a?film=img%2Fwalk.mp4&t=12.4)\n[Drawing, A title](riffle:proj/first/a?pic=img%2Fx.jpg&drawing=answers%2Fimg%2Fd9.jpg)\n[Picture, A title](riffle:proj/first/a?pic=img%2Fx.jpg)'})
+code, out = run('answers', '--pack', 'proj')
+ok('[Film at 0:12, A title → A project › First › A deck › A title, the film img/walk.mp4 at 0:12]' in out, 'a moment of a film brought to their notes reads as which film and when', out)
+ok('their drawing answers/img/d9.jpg over img/x.jpg]' in out and '[Picture, A title → A project › First › A deck › A title, the picture img/x.jpg]' in out, 'and a drawing or a picture says which', out)
 code, out = run('link', 'proj', 'first', 'a')
 ok(code == 0 and out.startswith('[A title](riffle:proj/first/a)') and 'goes to A project › First › A deck › A title' in out, 'riffle link prints a link to paste into a card', out)
 code, out = run('link', 'proj', 'first', 'zz')

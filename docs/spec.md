@@ -27,7 +27,7 @@ A deck's kind is what the writer says, or else what its cards are: all reports i
 
 **Archived.** A deck the writer archives, or they archive from its overview ("Archive this deck"), leaves the list for a closed Archived section at the end of the page, with a count. Opening the section lists them, each with Bring back. An archived deck can still be opened and answered. What it owes leaves every count: the pack, the first screen and the number on the icon. Whichever said it last, the writer or the phone, stands. Nothing is ever deleted.
 
-**Their own decks** are listed under Thoughts, with a row to make a new one. See Your own decks below.
+**Their own decks** are listed under Thoughts, with a row to make a new one, in every pack and the Feel test. The screen for a cleared pack or topic has "New deck of your own" too. See Your own decks below.
 
 ## Card kinds
 
@@ -136,6 +136,10 @@ From the Home Screen icon, on iOS 16.4 or newer. Settings has one button, which 
 
 The number on the icon is the cards owed, leaving out the Feel test. The app checks for new decks each time it's opened.
 
+## Typing
+
+A box being typed in is brought into view above the keyboard, in whatever scrolls around it, as it's focused and again once the keyboard is up. A box that's hidden, turned away or scrolled out of sight lets go of its focus, because iPhones otherwise keep drawing its caret over whatever is there. While the keyboard is up, nothing keeps room for the home bar under it.
+
 ## Addresses and links
 
 Any pack, deck, card or part has an address, `pack/deck/card/part`. Opening the app with `#open=` and an address goes straight there: a notification's tap does this. Anything no longer there stops at the level above, so a deck that's gone opens its pack.
@@ -144,7 +148,7 @@ Any pack, deck, card or part has an address, `pack/deck/card/part`. Opening the 
 
 **Following one** goes to that card, its parts open if it names a part. The back button turns into a curved arrow, says where it goes ("Back to Has a link"), and returns to the card the link was on, as it was: its parts open, its comment box open with the words in it. Several links in a row come back one at a time. Going anywhere by any other way, the pack's page or a deck's tile, starts the trail again.
 
-**The link button** sits beside the photo button in every place to type: a comment, a part's comment, notes and Thoughts. It offers, in this order: the card in the mini player, if there is one; this card, part or deck; or "Pick one from a list", every deck in every pack, this pack first, opening to its cards and their parts. The link goes in where the caret was, as if typed, so it's saved like anything typed.
+**The link button** sits beside the photo button in every place to type: a comment, a part's comment, notes and Thoughts. It offers, in this order: the card in the mini player, if there is one; this card, part or deck; or "Pick one from a list", every deck in every pack, this pack first, opening to its cards and their parts, with a search box over all of them: packs, decks, cards and parts, by their words. The link goes in where the caret was, as if typed, so it's saved like anything typed.
 
 ## Your own decks
 
@@ -163,11 +167,11 @@ They're written to `packs/<pack>/mine/<deck>.json` in the data repo, a few secon
 
 ## Breadcrumbs
 
-The deck's title line reads Pack › Topic › Deck › Card, and each is a way there. Pack goes to the pack's page; Topic goes there at that topic; Deck opens the overview; Card brings the card itself back into view, from its back or its parts. The card's crumb follows the card on top. Where the line is short, the earlier crumbs give way first. In One line and Full screen, which share the line with the buttons, only the deck and the card show.
+The deck's title line reads Pack › Topic › Deck › Card, and each is a way there. Pack goes to the pack's page; Topic goes there at that topic; Deck opens the overview; Card brings the card itself back into view, from its back. The card's crumb follows the card on top. Every crumb shows in full, in one row that scrolls sideways, kept scrolled to its end, where this is; a fade at its left says there's more. That's the same in all four layouts.
 
 ## The mini player
 
-Shrink, in the buttons, puts the deck into a small floating card in a corner, showing the card it was on, and goes to the pack's page. It stays over every screen. Any other deck can be opened and used as usual, comment box and all.
+A pinch on a card puts the deck into a small floating card in a corner and goes to the pack's page. A pinch on a picture or a film, open full screen, still zooms. At the end of a deck, a pinch anywhere on the end does it too. The small card shows the deck's name, the card's title and what's on it, and its kind; a deck finished when it was shrunk shows dark, like the end of a deck, with "Deck done" and how many were answered. It stays over every screen. Any other deck can be opened and used as usual, comment box and all.
 
 - **Tapping it** brings its deck back full size, at the same card, with its parts or comment box open if they were. If another deck was open, that one goes into the corner in its place, so they swap. Drafts in both are kept, because each deck saves its own as ever.
 - **Dragging it** to any corner moves it there, and it stays there. Dragging it never reaches the card underneath.
@@ -176,17 +180,17 @@ Shrink, in the buttons, puts the deck into a small floating card in a corner, sh
 
 ## The buttons
 
-Undo, Notes, Skip, Grid and Shrink. They act as the finger lifts.
+Undo, Notes, Skip and Grid. They act as the finger lifts.
 
 - **Undo:** brings back the last card, from the way it left, and takes back its answer. Also takes back a skip.
 - **Notes:** a scratchpad for the whole deck, for thoughts that don't fit the card on screen. It opens as a full sheet. Dragging it down, or tapping its head, returns to the same card. It's sent with the deck, and the same pad is on the end screen.
 - **Skip:** sends the card to the bottom of the deck.
 - **Grid:** the overview, the same as a pinch, for when only one hand is free.
-- **Shrink:** puts the deck in the mini player. See The mini player.
+- A pinch on the card puts the deck in the mini player. See The mini player.
 
 ## The overview
 
-Pinching a card, or Grid, lays out every card in the deck on a grid: its short title, its importance colour, and whether and how it was answered, with a mark if there's a comment. Handled cards have a green tick. Tapping one goes to it. An answered card shows what was said, and swiping it again changes the answer. It also has a way to the deck's notes, and two actions on the whole deck, each with a clear second step:
+Grid lays out every card in the deck on a grid: its short title, its importance colour, and whether and how it was answered, with a mark if there's a comment. Handled cards have a green tick. Tapping one goes to it. An answered card shows what was said, and swiping it again changes the answer. It also has a way to the deck's notes, and two actions on the whole deck, each with a clear second step:
 
 - **Replan this deck:** asks for it to be rethought from the base. The answers stay.
 - **Start this deck over:** clears the swipes, and every card is dealt again. The second step offers keeping notes and comments (comments come back as drafts on their cards) or clearing those too. Anything unsent goes first, and anything already sent stays with the writer.
@@ -217,7 +221,7 @@ Any picture or film opened full screen can be drawn on: on a card's back, a part
 
 ## Parts
 
-A card in parts shows the titles of its first four parts on its face, each with its mark once it has one, and a dot if it has words. "Tap to read the 3 parts" says how many. A tap, even mid-comment, opens them on their own screen, scrolling: the card's own words, details, pictures and films on top, then each part as a section with its title, words, pictures and films.
+A card in parts shows the titles of its first four parts on its face, each with its mark once it has one, and a dot if it has words. "Tap to read the 3 parts" says how many. A tap turns it over, like any card with more on its back, even mid-comment, and its back holds everything: the card's own words, details, pictures and films on top, then how many parts have been answered, then each part as a section with its title, words, pictures and films. While a card in parts is turned over, its back takes the room the buttons had. A tap on a part's title on the face turns it over at that part.
 
 Under each part are three marks in the card's own words (Good, Problem, Huh? on a report), and a speech bubble. A mark goes as soon as it's tapped, and tapping it again takes it back. The bubble opens a comment box under that part only, with its own photo button. Its words go a few seconds after typing stops, and its new pictures when it closes, with Done or a drag down. A part's words keep the same protection as a comment. The card's own swipe and comment are separate from all of this. A second try of the card clears its parts' marks, and keeps their words.
 
@@ -240,9 +244,22 @@ For picking from many pictures, where one big picture of them all can't be seen 
 
 The phone brings words down first, then thumbnails, then card pictures. A board's full pictures come one at a time as they're looked at, with the next and previous ones fetched ahead, because all of them could be a lot of data on a phone connection. So thumbnails work offline, and full pictures only once seen.
 
+## Bring to notes
+
+Holding still on a picture or a film on a card's back (or its parts) for about half a second, or selecting words there, brings up a small "Bring to notes" button low on the screen, clear of the menu iPhones put over selected words (pages can't add to that menu). Holding still on a picture or film open full screen does the same, with the pen on or off. The system's own picture menu doesn't take these long presses.
+
+Tapping it puts a reference into the deck's notes where the caret last was in them, on a line of its own, and says "In your notes". The notes show every reference as a chip above the pad, and a tap on one reopens it:
+
+- **A picture** opens full screen.
+- **A film** opens full screen at the moment it was stopped at, paused there.
+- **Words** are quoted, with a link to their card; the chip goes to that card.
+- **A drawing**: brought from full screen with lines drawn on the picture, the drawing comes along as a picture on the notes, instead of going onto the comment.
+
+A reference is a link with a little more on it, so the writer reads it like any link: `[Film at 0:12, The walk](riffle:pack/deck/card?film=img/walk.mp4&t=12.4)`.
+
 ## Details
 
-Up and down are swipes, so a card can't scroll. The face has a size limit, and tapping flips the card to its back: longer explanation, numbers and pictures, scrolling, with swipes off. The back has its own Comment button, which opens the comment box with the back still showing above it. So they can read, scroll and open pictures while they write, and flip back to swipe. Going to a picture and back keeps what's typed. If a card doesn't fit its face on a small phone, the type steps down. If it still doesn't fit, the end of its description is cut with a fade and "Tap to read the rest", and the whole of it is on the back, so no words are lost.
+Up and down are swipes, so a card can't scroll. The face has a size limit, and tapping flips the card to its back: longer explanation, numbers and pictures, and a card's parts, scrolling, with swipes off. The turn eases in to edge-on at exactly halfway and out from there, and the hidden side swaps at that moment, so one side always shows. Once turned, the back is drawn flat, with nothing 3D about it, so typing and scrolling on it behave as anywhere else. The back has its own Comment button, which opens the comment box with the back still showing above it. So they can read, scroll and open pictures while they write, and flip back to swipe. Going to a picture and back keeps what's typed. If a card doesn't fit its face on a small phone, the type steps down. If it still doesn't fit, the end of its description is cut with a fade and "Tap to read the rest", and the whole of it is on the back, so no words are lost.
 
 ## Endings and rewards
 
@@ -266,7 +283,8 @@ Nothing floats over the screen, so nothing can cover the buttons or a card's wor
 - **Read:** settings says when the writer last read the answers, from a note they leave in the repo.
 - **Sending:** at most one batch every 15 seconds, plus when the app is hidden, comes back or signal returns. Each batch is a new file, so nothing can collide with whoever is writing decks.
 - **When sending fails, it says why.** A refusal from GitHub gives the status code and what to do, on the first screen, in the title line ("Not sending") and in settings. One miss counts as no signal; three in a row while the phone says it's online counts as a problem and says so. Settings shows how many have been sent and when, and has Send now, which reports what happened. Every call gives up after 25 seconds, so a call frozen with the page can't hold up the ones after it.
-- **The built-in Feel test** needs no key. Anything typed in it (comments, notes, drafts) is sent, tagged `demo: true`. Plain swipes with no words stay on the phone. Its page lists everything written there, with Send these and Copy, and each word is marked once sent, so nothing goes twice. "Start the Feel test again" takes two steps, says what it clears, queues any unsent words first and keeps them listed.
+- **The built-in Feel test** needs no key. Anything typed in it (comments, notes, drafts) is sent by itself, tagged `demo: true`, like anything typed anywhere. Plain swipes with no words stay on the phone. Its page says nothing about it unless something is waiting to send, and then one plain line says how many and when they go. "Start the Feel test again" takes two steps, says what it clears, and sends anything not sent yet first. Their own decks can be tried there too, and stay on the phone.
+- **Writes wait their turn.** Every write the phone makes waits in one of two lines, one at a time in each: words (answers, records, their own decks) and pictures. Two at once each made a commit on the same branch, and GitHub refused the second (409). Words keep their own line so a big picture on a slow connection never holds them back; a rare clash between the two lines is tried again quietly a few times before anything is said, and then in plain words, never with GitHub's codes.
 
 ## Nothing typed gets lost
 

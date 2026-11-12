@@ -1,13 +1,14 @@
 // One deck on the table: the card stack, the swipes, the comment box, notes, the overview and the end.
 // A card's answer is recorded by what it means. `swipe` is logical: right is go, left is workshop,
 // down is idk, up is comment. Which way the finger goes for each is the map in ui.js.
-import { TUNE, decide, dominant, progress, track } from './gesture.js';
-import { clamp, dragToClose, esc, fillDirs, icon, KINDS, kindOf, logicalOf, MARK_ICON, padBlur, padFocus, padHTML, padReady, padSet, paintNotices, paras, physicalOf, plainSlot, RARITY, stampWord, tick } from './ui.js';
+import { TUNE, decide, dominant, progress, track, watchPinch } from './gesture.js';
+import { blurHidden, clamp, dragToClose, esc, fillDirs, icon, KINDS, kindOf, logicalOf, MARK_ICON, padBlur, padFocus, padHTML, padReady, padSet, paintNotices, paras, physicalOf, plainSlot, RARITY, revealPad, stampWord, tick } from './ui.js';
 import * as store from './store.js';
 import { eachAtOnce, enqueue, newId, photoPath, pictureUrl } from './sync.js';
 import { openViewer } from './viewer.js';
 import { countWords, discardPhoto, drawStrip, photoButton, saveDrawing, savePhoto, stripError } from './photos.js';
-import { addressOf, linkButton, linkify, paraLinks, plainLinks } from './links.js';
+import { addressOf, linkButton, linkify, linksIn, linkText, paraLinks, plainLinks, splitAddress } from './links.js';
+import { photoUrl } from './photos.js';
 
 const DIRS = ['right', 'left', 'down', 'up'];
 const UNIT = { right: [1, 0], left: [-1, 0], up: [0, -1], down: [0, 1] };
@@ -56,6 +57,61 @@ export function mediaHTML(holder, images = () => null) {
 }
 
 const countOf = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
+const clock = t => `${Math.floor((t || 0) / 60)}:${String(Math.floor((t || 0) % 60)).padStart(2, '0')}`;
+
+// "Bring to notes": a small button at the bottom of the screen, well away from the menu iPhones show over
+// selected text, which pages can't add to. It goes by itself after a few seconds.
+let pill = null, pillTimer = 0;
+function hidePill() {
+  clearTimeout(pillTimer);
+  if (pill) pill.remove();
+  pill = null;
+}
+function offerPill(kind, onTap) {
+  hidePill();
+  pill = document.createElement('button');
+  pill.className = 'bringpill';
+  pill.dataset.kind = kind;
+  pill.innerHTML = `${icon('notebook-pen')}<span>Bring to notes</span>`;
+  const foot = document.querySelector('.viewer .viewer-foot');
+  if (foot) pill.style.bottom = `${foot.offsetHeight + 14}px`;
+  document.body.append(pill);
+  // Stopping the touch's own default keeps a text selection alive while the button is tapped.
+  pill.addEventListener('touchstart', e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
+  pill.addEventListener('pointerdown', e => e.preventDefault());
+  let done = false;
+  const act = e => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    if (done) return;
+    done = true;
+    onTap();
+    tick();
+    pill.classList.add('done');
+    pill.innerHTML = `${icon('check')}<span>In your notes</span>`;
+    clearTimeout(pillTimer);
+    pillTimer = setTimeout(hidePill, 1400);
+  };
+  pill.addEventListener('pointerup', act);
+  pill.addEventListener('click', act);
+  pillTimer = setTimeout(hidePill, 6000);
+}
+
+// One part, on its card's back: its words, pictures and films, its marks, and a comment box of its own.
+function partHTML(card, pt, n, images, fill) {
+  return `<section class="part" data-part="${esc(pt.id)}">
+    <h3><b>${n + 1}</b><span>${esc(fill(pt.title || ''))}</span></h3>
+    <div class="part-body">${paraLinks(pt.text || '', fill)}${mediaHTML(pt, images)}</div>
+    <div class="part-acts">
+      ${PART_MARKS.map(m => `<button class="part-mark" data-act="partmark" data-part="${esc(pt.id)}" data-mark="${m}">${esc(partWord(card, m))}</button>`).join('')}
+      <button class="part-say" data-act="partcomment" data-part="${esc(pt.id)}" aria-label="Comment on this part">${icon('message-square-text')}</button>
+    </div>
+    <button class="attached part-chip" data-act="partcomment" data-part="${esc(pt.id)}" hidden>${icon('message-square-text')}<span></span></button>
+    <div class="part-pad" hidden>
+      <div class="padwrap">${padHTML(`partpad-${String(card.id).replace(/[^\w-]/g, '')}-${n}`, 'Your comment on this part. Drag down to close.')}<div class="photostrip" hidden></div>${linkButton('part')}${photoButton('part')}</div>
+      <button class="ghostbtn part-done" data-act="partdone">Done</button>
+    </div>
+  </section>`;
+}
 
 // Steps the type down if a card doesn't fit its face on a small phone. If it still doesn't, the
 // description is cut with a fade and the whole of it moves to the back, so no words are ever lost.
@@ -286,7 +342,6 @@ export const toolsHTML = (ids = true) => {
     <button data-act="notes"${id('notesbtn')}>${icon('notebook-pen')}<span>Notes</span></button>
     <button data-act="skip"${id('skip')}>${icon('skip-forward')}<span>Skip</span></button>
     <button data-act="grid">${icon('layout-grid')}<span>Grid</span></button>
-    <button data-act="shrink"${id('shrinkbtn')}>${icon('minimize-2')}<span>Shrink</span></button>
   </div>`;
 };
 
@@ -354,6 +409,7 @@ export function cardHTML(card, images = () => null, fill = t => t) {
           <p class="back-why" hidden>${linkify(card.handled ? card.handled.how || '' : card.why || '', fill)}</p>
           ${mediaHTML(card, images)}
           ${paraLinks(card.details || '', fill)}
+          ${parts.length ? `<div class="parts-count"></div>${parts.map((pt, n) => partHTML(card, pt, n, images, fill)).join('')}` : ''}
         </div>
         <div class="back-foot">
           <button class="back-hint" data-act="flipback">Tap to flip back</button>
@@ -399,6 +455,8 @@ export class DeckView {
 
   close() {
     this.untrack && this.untrack();
+    if (this.unwatchBring) this.unwatchBring();
+    hidePill();
     if (this.partsObserver) this.partsObserver.disconnect();
     if (this.openPart) this.closePartPad();
     this.sendNotes(true);
@@ -471,24 +529,28 @@ export class DeckView {
         <div class="composer" id="composer" hidden><div class="padwrap">${padHTML('comment', 'Your comment. Drag down to close.')}<div class="photostrip" id="commentphotos" hidden></div>${linkButton('comment')}${photoButton('comment')}</div></div>
         <div class="notes-sheet" id="notes" hidden>
           <button class="sheet-head" data-act="closenotes"><i class="grabber"></i><span>Notes on this deck</span></button>
+          <div class="noterefs" id="noterefs" hidden></div>
           <div class="padwrap">${padHTML('notestext', "Anything that doesn't fit a card. Drag down to close.")}<div class="photostrip" id="notesphotos" hidden></div>${linkButton('notes')}${photoButton('notes')}</div>
         </div>
       </div>
       <div class="overview" id="overview" hidden></div>
-      <div class="overview boardview" id="boardview" hidden></div>
-      <div class="overview partsview" id="partsview" hidden></div>`;
+      <div class="overview boardview" id="boardview" hidden></div>`;
     const $ = id => this.host.querySelector('#' + id);
     Object.assign(this, {
       root: $('deck'), table: $('table'), glow: $('glow'), mark: $('mark'), composer: $('composer'), comment: $('comment'),
-      notesSheet: $('notes'), notesText: $('notestext'), endBox: $('end'), overview: $('overview'), boardEl: $('boardview'), partsEl: $('partsview'),
+      notesSheet: $('notes'), notesText: $('notestext'), endBox: $('end'), overview: $('overview'), boardEl: $('boardview'),
       countEl: $('count'), barEl: $('bar'), undoBtn: $('undo'), skipBtn: $('skip'), notesBtn: $('notesbtn'), crumbCard: $('crumbcard'),
     });
     padSet(this.notesText, this.s.notes || '');
+    const crumbs = this.host.querySelector('.crumbs');
+    crumbs.addEventListener('scroll', () => crumbs.classList.toggle('scrolled', crumbs.scrollLeft > 2), { passive: true });
+    if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { crumbs.scrollLeft = crumbs.scrollWidth; }).observe(crumbs);
 
     this.host.onchange = e => { if (e.target.matches('[data-photo]')) this.addPhoto(e.target); };
     this.host.onclick = e => {
       const l = this.lift; // something already acted on this same tap, and its click lands on whatever just opened
       if (l && e.detail !== 0 && performance.now() - l.t < 600 && Math.hypot(e.clientX - l.x, e.clientY - l.y) < 14) return;
+      if (this.pressed && performance.now() - this.pressed < 900) { this.pressed = 0; return; } // the end of a long press
       const link = e.target.closest('.rlink');
       if (link) { e.preventDefault(); this.follow(link.dataset.addr); return; }
       if (e.target.closest('.weblink')) return; // a web address opens as any link does
@@ -522,6 +584,7 @@ export class DeckView {
       this.draftTimer = setTimeout(() => this.sendDrafts(), DRAFT_SEND_AFTER);
     });
     padReady(this.notesText, text => this.notesChanged(text));
+    this.watchBring();
 
     // Dragging down brings the comment box or the notes back down, whatever the swipe directions are.
     const follow = el => dy => {
@@ -542,6 +605,8 @@ export class DeckView {
       pinch: s => this.onPinch(s),
       pinchEnd: () => this.onPinchEnd(),
     });
+    // At the end of a deck there's no card to pinch, so the end itself takes the pinch.
+    watchPinch(this.endBox, () => { if (!this.topId() && this.nav.shrink) this.nav.shrink(); });
     paintNotices();
   }
 
@@ -569,7 +634,7 @@ export class DeckView {
       done: () => this.verdict('done'),
       replan: () => this.verdict('replan'),
       opencomment: () => this.openComposer(),
-      rmphoto: () => this.dropPhoto(btn.dataset.photoId, btn.dataset.where),
+      rmphoto: () => this.dropPhoto(btn.dataset.photoId, btn.dataset.where, btn),
       keepgoing: () => this.deal(),
       clipbig: () => this.viewMedia(btn.closest('.clip')),
       shrink: () => this.nav.shrink && this.nav.shrink(),
@@ -578,7 +643,7 @@ export class DeckView {
       crumbdeck: () => this.showOverview(),
       crumbcard: () => this.toCard(),
       linkcard: () => this.linkCard(btn.dataset.where),
-      closeparts: () => this.closeParts(),
+      noteref: () => this.openRef(btn.dataset.addr),
       partmark: () => this.markPart(btn.dataset.part, btn.dataset.mark),
       partcomment: () => this.openPartPad(btn.dataset.part),
       partdone: () => this.closePartPad(),
@@ -589,6 +654,156 @@ export class DeckView {
   exit() {
     this.saveNow();
     this.onExit && this.onExit();
+  }
+
+  // ---------- bringing a picture, a film's moment or some words into the deck's notes
+
+  watchBring() {
+    const onSel = () => {
+      const sel = getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { if (pill && pill.dataset.kind === 'quote' && !pill.classList.contains('done')) hidePill(); return; }
+      const node = sel.getRangeAt(0).commonAncestorContainer;
+      const el = node.nodeType === 1 ? node : node.parentElement;
+      const top = this.topNode();
+      if (!el || !top || !top.contains(el) || !el.closest('.back-scroll') || el.closest('.pad')) return;
+      const text = sel.toString().replace(/\s+/g, ' ').trim();
+      if (!text) return;
+      const part = el.closest('.part');
+      this.offerBring({ kind: 'quote', text: text.slice(0, 400), card: this.topId(), part: part ? part.dataset.part : null });
+    };
+    // Held still on a picture or a film on the back for about half a second.
+    const onDown = e => {
+      const m = e.target.closest && e.target.closest('.back-scroll img.mpic, .back-scroll .clip');
+      if (!m || e.target.closest('.clip-big') || !this.flipped || !this.topNode() || !this.topNode().contains(m)) return;
+      const x0 = e.clientX, y0 = e.clientY;
+      const stop = () => {
+        clearTimeout(timer);
+        removeEventListener('pointermove', move, true);
+        removeEventListener('pointerup', stop, true);
+        removeEventListener('pointercancel', stop, true);
+      };
+      const move = ev => { if (Math.hypot(ev.clientX - x0, ev.clientY - y0) > 10) stop(); };
+      const timer = setTimeout(() => {
+        stop();
+        this.pressed = performance.now();
+        const part = m.closest('.part');
+        const film = m.classList.contains('clip');
+        if (film) m.querySelector('video').pause();
+        this.offerBring({ kind: film ? 'film' : 'pic', path: m.dataset.path, t: film ? m.querySelector('video').currentTime : 0, card: this.topId(), part: part ? part.dataset.part : null });
+        tick();
+      }, 520);
+      addEventListener('pointermove', move, true);
+      addEventListener('pointerup', stop, true);
+      addEventListener('pointercancel', stop, true);
+    };
+    // No picture menu or callout on a long press here: the button takes its place.
+    const onMenu = e => { if (e.target.closest && e.target.closest('.back-scroll img, .back-scroll .clip, .viewer-stage')) e.preventDefault(); };
+    document.addEventListener('selectionchange', onSel);
+    this.host.addEventListener('pointerdown', onDown);
+    document.addEventListener('contextmenu', onMenu);
+    this.unwatchBring = () => {
+      document.removeEventListener('selectionchange', onSel);
+      this.host.removeEventListener('pointerdown', onDown);
+      document.removeEventListener('contextmenu', onMenu);
+    };
+  }
+
+  offerBring(info) {
+    offerPill(info.kind, () => this.bringToNotes(info));
+  }
+
+  // Where the caret was in the notes, as a place in their words, even when the notes aren't open.
+  notesOffset() {
+    const pad = this.notesText;
+    const r = pad.caret;
+    if (r && pad.contains(r.startContainer)) {
+      const pre = document.createRange();
+      pre.selectNodeContents(pad);
+      pre.setEnd(r.startContainer, r.startOffset);
+      return pre.toString().length;
+    }
+    return this.notesAt ?? (this.s.notes || '').length;
+  }
+
+  // Puts a reference into the notes at the caret, on a line of its own: a link the notes show as a chip.
+  // A film's says the moment it was stopped at; words are quoted; a drawing comes along as a picture.
+  async bringToNotes(info) {
+    const card = this.cards.get(info.card);
+    if (!card) return;
+    const part = info.part && (card.parts || []).find(x => x.id === info.part);
+    const title = card.title || plainLinks(card.text || '');
+    const label = part ? `${title} › ${part.title}` : title;
+    const address = addressOf(this.pack.id, this.deck.id, card.id, info.part || null);
+    // Only what would break the link is encoded, so the notes stay readable: img/walk.mp4, not img%2Fwalk.mp4.
+    const safe = v => String(v || '').replace(/[\s()[\]&?#%]/g, encodeURIComponent);
+    const path = safe(info.path);
+    let token;
+    if (info.kind === 'quote') token = `“${info.text}” ${linkText(label, address)}`;
+    else if (info.kind === 'film') token = linkText(`Film at ${clock(info.t)}, ${label}`, `${address}?film=${path}&t=${(info.t || 0).toFixed(1)}`);
+    else token = linkText(`Picture, ${label}`, `${address}?pic=${path}`);
+    if (info.blob) {
+      const id = await saveDrawing(info.blob, info.path || '');
+      this.s.drawnOn[id] = info.path || '';
+      this.s.notesPhotos.push(id);
+      token = linkText(`Drawing, ${label}`, `${address}?pic=${path}&drawing=${safe(photoPath(id))}`);
+    }
+    const notes = this.s.notes || '';
+    const at = clamp(this.notesOffset(), 0, notes.length);
+    const before = notes.slice(0, at), after = notes.slice(at);
+    const lead = before && !before.endsWith('\n') ? '\n' : '';
+    const tail = after.startsWith('\n') ? '' : '\n';
+    const next = before + lead + token + tail + after;
+    this.notesAt = (before + lead + token + tail).length;
+    this.notesText.caret = null;
+    padSet(this.notesText, next);
+    const end = this.endBox.querySelector('#endnotes');
+    if (end) padSet(end, next);
+    this.notesChanged(next);
+    this.drawPhotos();
+  }
+
+  // The things brought to the notes, and any cards they link, as chips above the pad.
+  drawNoteRefs() {
+    const refs = linksIn(this.s.notes || '').filter(l => l.address);
+    for (const id of ['noterefs', 'endrefs']) {
+      const box = this.host.querySelector(`#${id}`);
+      if (!box) continue;
+      box.hidden = !refs.length;
+      box.innerHTML = refs.map(l => {
+        const what = /[?&]film=/.test(l.address) ? 'play' : /[?&](pic|drawing)=/.test(l.address) ? 'image' : 'link';
+        return `<button class="noteref" data-act="noteref" data-addr="${esc(l.address)}">${icon(what)}<span>${esc(l.label)}</span></button>`;
+      }).join('');
+    }
+  }
+
+  // Reopens what a reference in the notes points at: the picture, the film at its moment, the drawing,
+  // or the card. One in another deck is followed there.
+  openRef(address) {
+    const [base, query = ''] = String(address).split('?');
+    const [packId, deckId, cardId, partId] = splitAddress(base);
+    const q = new URLSearchParams(query);
+    if (packId !== this.pack.id || deckId !== this.deck.id || !this.cards.has(cardId)) { this.follow(base); return; }
+    this.toggleNotes(false);
+    const card = this.cards.get(cardId);
+    const drawing = q.get('drawing'), pic = q.get('pic'), film = q.get('film');
+    if (drawing) {
+      const id = drawing.replace(/^answers\/img\//, '').replace(/\.jpg$/, '');
+      openViewer({ items: [{ full: () => photoUrl(id), label: 'Your drawing' }] });
+      return;
+    }
+    if (pic || film) {
+      const holder = (partId && (card.parts || []).find(x => x.id === partId)) || card;
+      const items = [
+        ...(holder.images || []).map(path => ({ path, full: () => pictureUrl(this.pack.id, path) })),
+        ...videosOf(holder).map(v => ({ path: v.src, full: () => (v.poster ? pictureUrl(this.pack.id, v.poster) : null), video: () => pictureUrl(this.pack.id, v.src) })),
+      ].map(it => ({ ...it, inkKey: this.inkKeyOf(cardId, partId, it.path), on: it.path }));
+      this.viewing = items;
+      openViewer({ items, at: Math.max(0, items.findIndex(it => it.path === (pic || film))), start: film ? +q.get('t') || 0 : null, ink: this.inkFor(cardId, partId) });
+      return;
+    }
+    this.jump(cardId, partId);
+    const c = this.topCard();
+    if (c && !partId && (c.details || (c.images || []).length || videosOf(c).length)) this.flip(true);
   }
 
   // ---------- links, and where this is
@@ -603,28 +818,33 @@ export class DeckView {
   // Where things are now, for coming back to: the card on top, its parts, and what was being typed.
   place() {
     const card = this.topCard();
-    const partsOpen = !this.partsEl.hidden && this.partsCard;
+    const partsOpen = !!this.partsCard;
+    const sum = deckSummary(this.deck, this.s);
+    const part = partsOpen ? (this.openPart || this.visiblePart()) : null;
+    const partTitle = part && ((card.parts || []).find(p => p.id === part) || {}).title;
     return {
-      kind: 'deck', pack: this.pack.id, deck: this.deck.id, card: partsOpen ? this.partsCard : this.topId(),
-      part: partsOpen ? (this.openPart || this.visiblePart()) : null, partsOpen: !!partsOpen,
+      kind: 'deck', pack: this.pack.id, deck: this.deck.id, card: this.topId(),
+      part, partsOpen, flipped: this.flipped,
       composing: this.composing, partComposing: !!(partsOpen && this.openPart),
-      show: card ? { deckTitle: this.deck.title, title: card.title || '', text: card.text || '', rarity: card.rarity || 'common', kind: card.kind || 'question' } : { deckTitle: this.deck.title, text: 'Deck done' },
+      show: card
+        ? { deckTitle: this.deck.title, title: card.title || '', text: card.text || '', rarity: card.rarity || 'common', kind: card.kind || 'question', part: partTitle || '', handled: !!card.handled }
+        : { deckTitle: this.deck.title, done: true, text: 'Deck done', said: `${sum.total - sum.left} of ${sum.total} answered` },
     };
   }
 
-  // The part at the top of the parts screen, scrolled to.
+  // The part at the top of the card's back, as far as it's scrolled.
   visiblePart() {
-    const box = this.partsEl.querySelector('.parts-scroll');
+    const node = this.topNode();
+    const box = node && node.querySelector('.back-scroll');
     if (!box) return null;
     const top = box.getBoundingClientRect().top;
-    const sec = [...this.partsEl.querySelectorAll('.part')].find(x => x.getBoundingClientRect().bottom > top + 40);
+    const sec = [...node.querySelectorAll('.back .part')].find(x => x.getBoundingClientRect().bottom > top + 40);
     return sec ? sec.dataset.part : null;
   }
 
   // The card crumb brings the card itself back into view, from its back or its parts.
   toCard() {
     if (!this.overview.hidden) this.hideOverview();
-    if (!this.partsEl.hidden) { this.closeParts(); return; }
     if (this.flipped) { this.flip(false); return; }
     const top = this.topNode();
     if (top && top.animate) top.animate([{ transform: 'scale(1)' }, { transform: 'scale(.98)' }, { transform: 'scale(1)' }], { duration: 200 });
@@ -635,6 +855,9 @@ export class DeckView {
     const card = this.topCard();
     this.crumbCard.textContent = card ? card.title || plainLinks(card.text || '') : 'The end';
     this.crumbCard.disabled = !card;
+    // One row that scrolls sideways, full names and all, showing its end: where this is.
+    const row = this.crumbCard.parentElement;
+    requestAnimationFrame(() => { row.scrollLeft = row.scrollWidth; row.classList.toggle('scrolled', row.scrollLeft > 2); });
   }
 
   // The link button in a box to type in: this card or part, the mini player's card, or one from a list.
@@ -644,7 +867,7 @@ export class DeckView {
     let pad = this.comment, here = null;
     if (where === 'part') {
       const part = card && (card.parts || []).find(p => p.id === this.openPart);
-      pad = this.partPad(this.openPart);
+      pad = this.partPad(card && card.id, this.openPart);
       if (part) here = { address: addressOf(this.pack.id, this.deck.id, card.id, part.id), label: `${card.title || plainLinks(card.text)} › ${part.title}`, what: 'This part' };
     } else if (where === 'notes' || where === 'endnotes') {
       pad = where === 'notes' ? this.notesText : this.endBox.querySelector('#endnotes');
@@ -666,6 +889,7 @@ export class DeckView {
     n.className = `card ${card.rarity || 'common'}${card.handled ? ' is-handled' : ''}${card.kind === 'options' ? ' is-options' : ''}`;
     n.dataset.id = card.id;
     n.innerHTML = cardHTML(card, this.images, this.pack.demo ? fillDirs : t => t);
+    if (this.hasParts(card)) this.wireParts(n, card);
     return n;
   }
 
@@ -694,12 +918,15 @@ export class DeckView {
     });
     this.table.style.setProperty('--rise', 0);
     this.glow.style.opacity = 0;
+    this.glow.style.transform = '';
     this.hideMark();
     this.armed = false;
     this.flipped = false;
+    this.openPart = null;
+    this.root.classList.remove('reading', 'parttyping');
     this.table.classList.remove('flipped');
     for (const n of this.nodes.values()) {
-      n.querySelector('.flip').classList.remove('flipped');
+      n.querySelector('.flip').classList.remove('flipped', 'flat', 'turn-in', 'turn-out');
       this.playClips(n, false);
     }
 
@@ -930,8 +1157,8 @@ export class DeckView {
           st.photos = [...(st.photos || []), id];
           this.s.partsV[cardId] = (this.cards.get(cardId) || {}).version || 1;
           this.saveNow();
-          this.drawPartPhotos(partId);
-          this.syncPartChip(partId);
+          this.drawPartPhotos(cardId, partId);
+          this.syncPartChip(cardId, partId);
         } else {
           this.s.draftPhotos[cardId] = [...(this.s.draftPhotos[cardId] || []), id];
           this.saveNow();
@@ -946,12 +1173,13 @@ export class DeckView {
   // Everything in the same place as what was tapped: a card's back, or one part.
   viewMedia(el) {
     const section = el.closest('.part');
-    const box = section || el.closest('.back-scroll, .parts-lead');
+    const box = section || el.closest('.back-scroll');
     if (!box) return;
-    const card = this.cards.get(this.partsEl.hidden ? this.topId() : this.partsCard);
+    const card = this.topCard();
     if (!card) return;
     const partId = section ? section.dataset.part : null;
-    const all = [...box.querySelectorAll('img.mpic, .clip')];
+    // The card's own pictures, or one part's: never both, so a drawing goes on the right comment.
+    const all = [...box.querySelectorAll('img.mpic, .clip')].filter(x => section || !x.closest('.part'));
     for (const v of box.querySelectorAll('.clip video')) v.pause();
     this.viewing = all.map(x => {
       const path = x.dataset.path;
@@ -968,8 +1196,9 @@ export class DeckView {
       items: this.viewing,
       at: Math.max(0, all.indexOf(el)),
       // A drawing on the card's own picture, above its parts, goes on the card's comment.
-      ink: this.inkFor(card.id, partId, !partId && !this.partsEl.hidden ? () => { this.closeParts(); this.openComposer(); } : null),
-      onClose: () => { if (!this.partsEl.hidden) this.watchPartClips(); else this.playClips(this.topNode(), this.flipped); },
+      ink: this.inkFor(card.id, partId),
+      bring: (i, info) => this.offerBring({ ...info, card: card.id, part: partId, path: this.viewing[i] && this.viewing[i].on }),
+      onClose: () => { if (this.partsCard) this.watchPartClips(); else this.playClips(this.topNode(), this.flipped); },
     });
   }
 
@@ -1029,7 +1258,12 @@ export class DeckView {
     else { v.pause(); clip.dataset.stopped = '1'; clip.classList.add('paused'); }
   }
 
-  // ---------- parts: sections of one card, each read, marked and commented on by itself
+  // ---------- parts: sections of one card, read on its back, each marked and commented on by itself
+
+  hasParts(card) { return !!(card && (card.parts || []).length && card.kind !== 'options' && card.kind !== 'board'); }
+
+  // The card whose parts are showing: the top one, flipped to its back.
+  get partsCard() { const c = this.topCard(); return this.flipped && this.hasParts(c) ? c.id : null; }
 
   partState(cardId, partId) {
     const all = this.s.parts[cardId] = this.s.parts[cardId] || {};
@@ -1050,184 +1284,156 @@ export class DeckView {
     });
   }
 
-  openParts(partId = null) {
-    const card = this.topCard();
-    if (!card || !(card.parts || []).length) return;
-    this.partsCard = card.id;
-    this.typingBeforeParts = this.composing;
-    if (this.composing) padBlur(this.comment);
-    const fill = this.pack.demo ? fillDirs : t => t;
-    this.partsEl.innerHTML = `
-      <div class="ov-head">
-        <button class="iconbtn" data-act="closeparts" aria-label="Back to the card">${icon('chevron-left')}</button>
-        <div class="t">${esc(card.title || card.text)}</div>
-        <div class="n" id="partscount"></div>
-      </div>
-      <div class="parts-scroll scroll">
-        <div class="parts-lead">
-          <p class="parts-text">${linkify(card.text || '', fill)}</p>
-          ${card.why ? `<p class="parts-why">${linkify(card.why, fill)}</p>` : ''}
-          ${mediaHTML(card, this.images)}
-          ${paraLinks(card.details || '', fill)}
-        </div>
-        ${card.parts.map((pt, n) => `<section class="part" data-part="${esc(pt.id)}">
-          <h3><b>${n + 1}</b><span>${esc(fill(pt.title || ''))}</span></h3>
-          <div class="part-body">${paraLinks(pt.text || '', fill)}${mediaHTML(pt, this.images)}</div>
-          <div class="part-acts">
-            ${PART_MARKS.map(m => `<button class="part-mark" data-act="partmark" data-part="${esc(pt.id)}" data-mark="${m}">${esc(partWord(card, m))}</button>`).join('')}
-            <button class="part-say" data-act="partcomment" data-part="${esc(pt.id)}" aria-label="Comment on this part">${icon('message-square-text')}</button>
-          </div>
-          <button class="attached part-chip" data-act="partcomment" data-part="${esc(pt.id)}" hidden>${icon('message-square-text')}<span></span></button>
-          <div class="part-pad" hidden>
-            <div class="padwrap">${padHTML(`partpad-${n}`, 'Your comment on this part. Drag down to close.')}<div class="photostrip" hidden></div>${linkButton('part')}${photoButton('part')}</div>
-            <button class="ghostbtn part-done" data-act="partdone">Done</button>
-          </div>
-        </section>`).join('')}
-      </div>
-      <div class="board-bar"><button class="primary" data-act="closeparts">Back to the card</button></div>`;
-    this.partsEl.hidden = false;
-    for (const pt of card.parts) {
-      const pad = this.partPad(pt.id);
+  // A card's parts come built into its back. This fills in what's been said on them, and wires their boxes.
+  wireParts(node, card) {
+    for (const pt of card.parts || []) {
+      const pad = this.partPad(card.id, pt.id, node);
+      if (!pad) continue;
       const st = (this.s.parts[card.id] || {})[pt.id];
       padSet(pad, (st && st.text) || '');
-      padReady(pad, text => this.partTyped(pt.id, text));
+      padReady(pad, text => this.partTyped(card.id, pt.id, text));
       dragToClose(pad, () => pad, () => {}, () => this.closePartPad());
-      this.syncPart(pt.id);
-      this.drawPartPhotos(pt.id);
+      this.syncPart(card.id, pt.id, node);
+      this.drawPartPhotos(card.id, pt.id, node);
     }
-    this.syncPartsCount();
-    this.watchPartClips();
-    if (partId) {
-      // Pictures above it come in after this, and push it down, so it's scrolled to again as each one
-      // arrives, until the reader scrolls for themselves.
-      const scroller = this.partsEl.querySelector('.parts-scroll');
-      let touched = false;
-      const to = () => { const sec = this.partSection(partId); if (sec && !touched) sec.scrollIntoView({ block: 'start' }); };
-      scroller.addEventListener('touchstart', () => { touched = true; }, { once: true, passive: true });
-      scroller.addEventListener('wheel', () => { touched = true; }, { once: true, passive: true });
-      this.partsEl.querySelectorAll('img').forEach(m => m.addEventListener('load', to, { once: true }));
-      this.partsEl.querySelectorAll('video').forEach(m => m.addEventListener('loadedmetadata', to, { once: true }));
-      to();
-    }
+    this.syncPartsCount(card.id, node);
   }
 
-  partSection(partId) { return partId ? this.partsEl.querySelector(`.part[data-part="${CSS.escape(partId)}"]`) : null; }
-  partPad(partId) { const sec = this.partSection(partId); return sec && sec.querySelector('.pad'); }
+  // Flips the card to its parts, and scrolls to one if asked. Pictures above it come in after this and
+  // push it down, so it's scrolled to again as each arrives, until the reader scrolls for themselves.
+  openParts(partId = null) {
+    const card = this.topCard();
+    if (!this.hasParts(card)) return;
+    if (!this.flipped) this.flip(true);
+    if (!partId) return;
+    const node = this.topNode();
+    const scroller = node.querySelector('.back-scroll');
+    let touched = false;
+    const to = () => {
+      const sec = this.partSection(card.id, partId);
+      if (sec && !touched && this.topId() === card.id) scroller.scrollTop = sec.offsetTop - scroller.offsetTop - 8;
+    };
+    scroller.addEventListener('touchstart', () => { touched = true; }, { once: true, passive: true });
+    scroller.addEventListener('wheel', () => { touched = true; }, { once: true, passive: true });
+    node.querySelectorAll('.back img').forEach(m => { if (!m.complete) m.addEventListener('load', to, { once: true }); });
+    node.querySelectorAll('.back video').forEach(m => m.addEventListener('loadedmetadata', to, { once: true }));
+    to();
+  }
 
-  syncPart(partId) {
-    const section = this.partSection(partId);
+  closeParts() { if (this.flipped) this.flip(false); }
+
+  partSection(cardId, partId, node = this.nodes.get(cardId)) { return node && partId ? node.querySelector(`.back .part[data-part="${CSS.escape(partId)}"]`) : null; }
+  partPad(cardId, partId, node) { const sec = this.partSection(cardId, partId, node); return sec && sec.querySelector('.pad'); }
+
+  syncPart(cardId, partId, node) {
+    const section = this.partSection(cardId, partId, node);
     if (!section) return;
-    const st = (this.s.parts[this.partsCard] || {})[partId] || {};
+    const st = (this.s.parts[cardId] || {})[partId] || {};
     section.querySelectorAll('.part-mark').forEach(b => b.classList.toggle('on', b.dataset.mark === st.mark));
     section.dataset.mark = st.mark || '';
-    this.syncPartChip(partId);
+    this.syncPartChip(cardId, partId, node);
   }
 
-  syncPartChip(partId) {
-    const section = this.partSection(partId);
+  syncPartChip(cardId, partId, node) {
+    const section = this.partSection(cardId, partId, node);
     if (!section) return;
-    const st = (this.s.parts[this.partsCard] || {})[partId] || {};
+    const st = (this.s.parts[cardId] || {})[partId] || {};
     const chip = section.querySelector('.part-chip');
     const text = (st.text || '').trim(), n = (st.photos || []).length;
-    chip.hidden = (!text && !n) || this.openPart === partId;
+    chip.hidden = (!text && !n) || (this.openPart === partId && this.topId() === cardId);
     chip.querySelector('span').textContent = [plainLinks(text), n ? countWords(n) : ''].filter(Boolean).join(' · ');
   }
 
-  syncPartsCount() {
-    const card = this.cards.get(this.partsCard);
-    const el = this.partsEl.querySelector('#partscount');
+  syncPartsCount(cardId, node = this.nodes.get(cardId)) {
+    const card = this.cards.get(cardId);
+    const el = node && node.querySelector('.parts-count');
     if (!card || !el) return;
     const states = this.s.parts[card.id] || {};
     const said = card.parts.filter(pt => states[pt.id] && (states[pt.id].mark || (states[pt.id].text || '').trim() || (states[pt.id].photos || []).length)).length;
-    el.textContent = `${said} of ${card.parts.length}`;
+    el.textContent = said ? `${said} of ${card.parts.length} parts answered` : `${card.parts.length} parts`;
   }
 
-  drawPartPhotos(partId) {
-    const section = this.partSection(partId);
+  drawPartPhotos(cardId, partId, node) {
+    const section = this.partSection(cardId, partId, node);
     if (!section) return Promise.resolve();
-    const st = (this.s.parts[this.partsCard] || {})[partId] || {};
+    const st = (this.s.parts[cardId] || {})[partId] || {};
     return drawStrip(section.querySelector('.photostrip'), st.photos || [], `part:${partId}`);
   }
 
-  // Films in the parts play while they're on screen, and stop when scrolled past.
+  // Films on a card's back with parts play while they're on screen, and stop when scrolled past.
   watchPartClips() {
     if (this.partsObserver) this.partsObserver.disconnect();
     this.partsObserver = null;
-    if (this.partsEl.hidden || typeof IntersectionObserver === 'undefined') return;
+    const node = this.topNode();
+    if (!node || !this.partsCard || typeof IntersectionObserver === 'undefined') return;
     this.partsObserver = new IntersectionObserver(entries => {
       for (const e of entries) {
         const clip = e.target;
-        if (e.isIntersecting && !clip.dataset.stopped) this.startClip(clip);
+        if (e.isIntersecting && !clip.dataset.stopped && this.flipped) this.startClip(clip);
         else { clip.querySelector('video').pause(); clip.classList.add('paused'); }
       }
-    }, { root: this.partsEl.querySelector('.parts-scroll'), threshold: 0.4 });
-    this.partsEl.querySelectorAll('.clip').forEach(c => { c.querySelector('video').muted = true; this.partsObserver.observe(c); });
+    }, { root: node.querySelector('.back-scroll'), threshold: 0.4 });
+    node.querySelectorAll('.back .clip').forEach(c => { c.querySelector('video').muted = true; this.partsObserver.observe(c); });
   }
 
   markPart(partId, m) {
-    const card = this.cards.get(this.partsCard);
+    const card = this.cards.get(this.partsCard || this.topId());
     if (!card) return;
     const st = this.partState(card.id, partId);
     st.mark = st.mark === m ? null : m;
     this.s.partsV[card.id] = card.version || 1;
     this.saveNow();
-    this.syncPart(partId);
-    this.syncPartsCount();
+    this.syncPart(card.id, partId);
+    this.syncPartsCount(card.id);
+    this.syncPartsPreview();
     this.sendParts(false);
     tick();
   }
 
-  partTyped(partId, text) {
-    const card = this.cards.get(this.partsCard);
+  partTyped(cardId, partId, text) {
+    const card = this.cards.get(cardId);
     if (!card) return;
     const st = this.partState(card.id, partId);
     st.text = text;
     this.s.partsV[card.id] = card.version || 1;
     this.saveNow(); // at once: the backup write is synchronous, so a killed app keeps it
-    this.syncPartsCount();
+    this.syncPartsCount(card.id);
     clearTimeout(this.partTimer);
     this.partTimer = setTimeout(() => this.sendParts(false), PART_SEND_AFTER);
   }
 
   openPartPad(partId) {
+    const cardId = this.topId();
+    if (!this.hasParts(this.topCard())) return;
+    if (!this.flipped) this.flip(true);
     if (this.openPart && this.openPart !== partId) this.closePartPad();
-    const section = this.partSection(partId);
+    const section = this.partSection(cardId, partId);
     if (!section) return;
     this.openPart = partId;
     section.querySelector('.part-pad').hidden = false;
     section.classList.add('typing');
-    this.partsEl.classList.add('typing');
-    this.syncPartChip(partId);
-    padFocus(this.partPad(partId));
-    setTimeout(() => { if (this.openPart === partId) section.querySelector('.part-pad').scrollIntoView({ block: 'nearest' }); }, 260);
+    this.root.classList.add('parttyping');
+    this.syncPartChip(cardId, partId);
+    padFocus(this.partPad(cardId, partId));
+    revealPad(this.partPad(cardId, partId));
   }
 
   // Closing a part's box sends its words, and its new pictures with them.
   closePartPad() {
     const partId = this.openPart;
     if (!partId) return;
+    const cardId = this.topId();
     this.openPart = null;
-    const section = this.partSection(partId);
+    const section = this.partSection(cardId, partId);
     if (section) {
-      padBlur(this.partPad(partId));
+      padBlur(this.partPad(cardId, partId));
       section.querySelector('.part-pad').hidden = true;
       section.classList.remove('typing');
     }
-    this.partsEl.classList.remove('typing');
-    this.syncPartChip(partId);
-    this.sendParts(true);
-  }
-
-  closeParts() {
-    this.closePartPad();
-    if (this.partsObserver) { this.partsObserver.disconnect(); this.partsObserver = null; }
-    this.partsEl.querySelectorAll('video').forEach(v => v.pause());
-    this.partsEl.hidden = true;
-    this.partsEl.innerHTML = '';
-    this.partsCard = null;
+    this.root.classList.remove('parttyping');
+    this.syncPartChip(cardId, partId);
     this.syncPartsPreview();
-    if (this.typingBeforeParts && this.composing) padFocus(this.comment);
-    this.typingBeforeParts = false;
+    this.sendParts(true);
   }
 
   // Only what changed since it last went. New pictures wait for the box to close, like the notes'.
@@ -1237,7 +1443,7 @@ export class DeckView {
     for (const [cardId, parts] of Object.entries(this.s.parts)) {
       const card = this.cards.get(cardId) || { id: cardId };
       for (const [partId, st] of Object.entries(parts)) {
-        const open = this.openPart === partId && this.partsCard === cardId;
+        const open = this.openPart === partId && this.topId() === cardId;
         const pics = pictures && !open ? st.photos || [] : st.photosSent || [];
         const sig = partSig(st, pics);
         if (sig === (st.sent || EMPTY_PART)) continue;
@@ -1324,6 +1530,7 @@ export class DeckView {
     }
     this.showMark(phys, logical, word, clamp((p - 0.12) / 0.5, 0, 1), armed);
     this.table.style.setProperty('--rise', Math.min(p, 1));
+    this.glow.style.transform = top.style.transform; // the glow is on the card, and goes where it goes
     this.glow.style.opacity = Math.min(p, 1) * 0.9;
   }
 
@@ -1375,6 +1582,7 @@ export class DeckView {
     const jx = (Math.random() - 0.5) * j, jy = (Math.random() - 0.5) * j;
     const x = ux * dist + uy * across * 0.12 + jx, y = uy * dist - ux * across * 0.12 + jy;
     top.style.transform = `translate3d(${x}px,${y}px,0) rotate(${ux * dist * 0.03 + jx * 0.2}deg) scale(${1 + c * 0.018})`;
+    this.glow.style.transform = top.style.transform;
     const word = stampWord(card, 'right');
     const st = top.querySelector('.stamp');
     st.dataset.dir = phys;
@@ -1441,6 +1649,7 @@ export class DeckView {
     if (!draining) {
       this.table.style.setProperty('--rise', 0);
       this.glow.style.opacity = 0;
+      this.glow.style.transform = '';
       this.hideMark();
     }
     this.armed = false;
@@ -1492,14 +1701,38 @@ export class DeckView {
     }
   }
 
+  // The turn eases in to edge-on at exactly halfway and out from there, which is when the hidden side
+  // swaps, so neither side is ever missing mid-turn. Once turned, the back is drawn flat, with nothing 3D
+  // about it, so typing, scrolling and the caret on it behave as anywhere else on an iPhone.
   flip(on) {
     const top = this.topNode();
     if (!top) return;
+    if (!on && this.openPart) this.closePartPad();
     this.flipped = on;
     this.table.classList.toggle('flipped', on);
-    top.querySelector('.flip').classList.toggle('flipped', on);
+    this.root.classList.toggle('reading', on && this.hasParts(this.topCard()));
+    const f = top.querySelector('.flip');
+    f.classList.remove('flat', 'turn-in', 'turn-out');
+    f.classList.toggle('flipped', on);
+    void f.offsetWidth;
+    f.classList.add(on ? 'turn-in' : 'turn-out');
+    const settled = e => {
+      if (e && (e.target !== f || !/^turn/.test(e.animationName))) return;
+      f.removeEventListener('animationend', settled);
+      clearTimeout(this.flipTimer);
+      f.classList.remove('turn-in', 'turn-out');
+      if (on && this.flipped && this.topNode() === top) f.classList.add('flat');
+    };
+    f.addEventListener('animationend', settled);
+    clearTimeout(this.flipTimer);
+    this.flipTimer = setTimeout(settled, 460); // reduced motion, or a page in the background
     if (on) top.querySelector('.back-scroll').scrollTop = 0;
-    this.playClips(top, on);
+    else this.syncPartsPreview(); // the face shows what was said on the back
+    if (this.hasParts(this.topCard())) {
+      if (on) this.watchPartClips();
+      else { if (this.partsObserver) this.partsObserver.disconnect(); this.playClips(top, false); }
+    } else this.playClips(top, on);
+    blurHidden();
   }
 
   // Throws the top card, records the answer and has the next card ready at once. `logical` is what
@@ -1662,6 +1895,7 @@ export class DeckView {
 
   notesChanged(text) {
     this.s.notes = text;
+    this.drawNoteRefs();
     this.saveNow(); // at once: the backup write is synchronous, so a killed app keeps it
     clearTimeout(this.notesTimer);
     this.notesTimer = setTimeout(() => this.sendNotes(false), 1500);
@@ -1675,7 +1909,7 @@ export class DeckView {
     this.s.notesSent = this.s.notes;
     this.s.notesPhotosSent = images.slice();
     this.s.wordsSent.n = mark(this.s.notes, images);
-    this.send({ type: 'notes', text: this.s.notes, ...withPictures(images) }, true);
+    this.send({ type: 'notes', text: this.s.notes, ...withPictures(images, this.s.drawnOn) }, true);
     this.saveNow();
   }
 
@@ -1693,11 +1927,12 @@ export class DeckView {
     try {
       const id = await savePhoto(file);
       if (section) {
-        const st = this.partState(this.partsCard, section.dataset.part);
+        const cardId = section.closest('.card').dataset.id;
+        const st = this.partState(cardId, section.dataset.part);
         st.photos = [...(st.photos || []), id];
         this.saveNow();
-        await this.drawPartPhotos(section.dataset.part);
-        this.syncPartChip(section.dataset.part);
+        await this.drawPartPhotos(cardId, section.dataset.part);
+        this.syncPartChip(cardId, section.dataset.part);
         return;
       }
       if (where === 'comment') this.s.draftPhotos[card] = [...(this.s.draftPhotos[card] || []), id];
@@ -1712,14 +1947,15 @@ export class DeckView {
     }
   }
 
-  dropPhoto(id, where) {
+  dropPhoto(id, where, btn = null) {
     if (where.startsWith('part:')) {
       const partId = where.slice(5);
-      const st = this.partState(this.partsCard, partId);
+      const cardId = (btn && btn.closest('.card') && btn.closest('.card').dataset.id) || this.topId();
+      const st = this.partState(cardId, partId);
       st.photos = (st.photos || []).filter(x => x !== id);
       this.saveNow();
-      this.drawPartPhotos(partId);
-      this.syncPartChip(partId);
+      this.drawPartPhotos(cardId, partId);
+      this.syncPartChip(cardId, partId);
       discardPhoto(id);
       return;
     }
@@ -1758,6 +1994,7 @@ export class DeckView {
       if (this.composing) this.closeComposer();
       padSet(this.notesText, this.s.notes || '');
       this.drawPhotos();
+      this.drawNoteRefs();
       padFocus(this.notesText);
     } else {
       padBlur(this.notesText);
@@ -1800,9 +2037,10 @@ export class DeckView {
       top.classList.add('dragging');
       top.style.transform = `scale(${clamp(scale, 0.6, 1)})`; // never bigger: it would reach the screen's edges and cover the buttons
     }
+    // A pinch shrinks the deck into the mini player. Grid is the way to the overview.
     if (!this.pinchFired && scale < TUNE.pinchOpen) {
       this.pinchFired = true;
-      this.showOverview();
+      if (this.nav.shrink) this.nav.shrink(); else this.showOverview();
     }
   }
   onPinchEnd() {
@@ -1848,7 +2086,6 @@ export class DeckView {
   // Brings any card to the top. An answered one can be swiped again to change the answer.
   jump(id, partId = null) {
     this.hideOverview();
-    if (!this.partsEl.hidden) this.closeParts();
     if (this.composing) this.closeComposer();
     if (this.s.reviewing && this.s.reviewing !== id) {
       this.s.order = this.s.order.filter(x => x !== this.s.reviewing);
@@ -1884,6 +2121,7 @@ export class DeckView {
         <h2 class="end-title">${early ? 'Replan this deck?' : 'Deck done'}</h2>
         <div class="end-sub">${esc(sub)}</div>
         <div class="tally">${groups.map(g => `<div class="dir-${g.dir}"><b data-to="${g.n}">0</b><span>${esc(g.words)}</span></div>`).join('')}</div>
+        <div class="noterefs" id="endrefs" hidden></div>
         <div class="padwrap">${padHTML('endnotes', 'Anything else on this deck?')}<div class="photostrip" id="endphotos" hidden></div>${linkButton('endnotes')}${photoButton('notes')}</div>
         <div class="end-actions">
           ${early ? '' : `<button class="primary" data-act="done">Deck's done</button>`}
@@ -1894,6 +2132,7 @@ export class DeckView {
     const pad = this.endBox.querySelector('#endnotes');
     padSet(pad, this.s.notes || '');
     padReady(pad, text => this.notesChanged(text));
+    this.drawNoteRefs();
     dragToClose(pad, () => pad, () => {}, () => padBlur(pad));
     this.drawPhotos();
     this.endBox.hidden = false;
@@ -1979,7 +2218,6 @@ export class DeckView {
     this.nodes.clear();
     padSet(this.notesText, this.s.notes);
     this.hideOverview();
-    if (!this.partsEl.hidden) this.closeParts();
     this.deal();
     this.saveNow();
   }

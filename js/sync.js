@@ -76,12 +76,40 @@ const toBase64 = data => {
   return btoa(bin);
 };
 
-const putFile = (path, content, message, key, opts = {}) =>
-  call(`/repos/${FULL}/contents/${path}`, key, {
-    method: 'PUT',
-    body: { message, content: toBase64(content), branch: BRANCH },
-    ...opts,
+// Every write this phone makes waits its turn in one of two lines, one at a time in each: words (answers,
+// records, their own decks) and pictures. Two writes at once each make a commit on the same branch, and
+// the second is refused (409) because the first moved it on. Words keep a line of their own so a big
+// picture on a slow connection never holds them back, and the rare clash between the two lines is tried
+// again quietly, below.
+const lines = { words: { busy: false, jobs: [] }, pictures: { busy: false, jobs: [] } };
+function inLine(job, picture = false) {
+  const line = picture ? lines.pictures : lines.words;
+  return new Promise((resolve, reject) => {
+    line.jobs.push({ job, resolve, reject });
+    nextWrite(line);
   });
+}
+async function nextWrite(line) {
+  if (line.busy) return;
+  const next = line.jobs.shift();
+  if (!next) return;
+  line.busy = true;
+  try { next.resolve(await next.job()); } catch (e) { next.reject(e); } finally { line.busy = false; nextWrite(line); }
+}
+
+// A 409 left over, from another phone or a write GitHub hadn't finished, is tried again a few times on
+// GitHub's newest state before anything is said about it.
+const RETRY_409 = [400, 1200, 3000];
+async function put(path, body, key, opts = {}) {
+  for (let i = 0; ; i++) {
+    const r = await call(`/repos/${FULL}/contents/${path}`, key, { method: 'PUT', body: typeof body === 'function' ? await body() : body, ...opts });
+    if (r.status !== 409 || i >= RETRY_409.length) return r;
+    await new Promise(res => setTimeout(res, RETRY_409[i]));
+  }
+}
+
+const putFile = (path, content, message, key, opts = {}) =>
+  inLine(() => put(path, { message, content: toBase64(content), branch: BRANCH }, key, opts), path.startsWith('answers/img/'));
 
 const stamp = () => new Date().toISOString().replace(/[:.]/g, '-');
 const rand = () => Math.random().toString(36).slice(2, 8);
@@ -96,10 +124,11 @@ async function refusal(r) {
   const slowed = r.status === 429 || (r.status === 403 && (/rate limit/i.test(said) || r.headers.get('retry-after') || r.headers.get('x-ratelimit-remaining') === '0'));
   if (slowed) return { text: `GitHub asked the app to slow down (${r.status}). It will try again by itself.`, retry: true };
   if (r.status === 401) return { text: `GitHub isn't accepting your key any more (401). It may have been deleted. Open the gear and connect again.`, retry: false };
+  if (r.status === 409) return { text: 'GitHub was busy saving something else from this phone, and said to wait (409). Nothing is lost, and it will try again by itself.', retry: true };
   if (r.status === 403) return { text: `Your key isn't allowed to write to ${REPO} (403).${quote} On GitHub's key page, Contents has to be Read and write.`, retry: false };
   if (r.status === 404) return { text: `GitHub can't find ${REPO} with this key (404). Open the gear and connect again, with ${REPO} picked.`, retry: false };
   if (r.status >= 500) return { text: `GitHub is having trouble (${r.status}). It will try again by itself.`, retry: true };
-  return { text: `GitHub refused the answers (${r.status}).${quote} It will try again by itself.`, retry: true };
+  return { text: `GitHub said no to a save from this phone (${r.status}).${quote.replace(/\b[0-9a-f]{12,40}\b/g, '…')} It will try again by itself.`, retry: true };
 }
 
 // Checks a pasted key before keeping it. Only a key that reaches the data repo, can write to it and
@@ -261,7 +290,7 @@ export async function pushMine({ toFile, fromFile, merge } = mineTools) {
   mineAttempt = Date.now();
   let sent = 0;
   try {
-    for (const k of (await store.keys()).filter(x => x.startsWith('mine:'))) {
+    for (const k of (await store.keys()).filter(x => x.startsWith('mine:') && x !== 'mine:feel-test')) { // the Feel test's stay here
       const packId = k.slice(5);
       const data = await store.get(k);
       for (const deck of Object.values((data && data.decks) || {})) {
@@ -310,16 +339,18 @@ export async function pushMine({ toFile, fromFile, merge } = mineTools) {
 const mineTools = { toFile: d => d, fromFile: d => d, merge: (a) => a };
 export const setMineTools = tools => Object.assign(mineTools, tools);
 
+// One of their own decks: in line with every other write, and once only, since a conflict on it is
+// about which copy is newest, and pushMine merges those.
 async function putMine(path, record, sha, key) {
-  return call(`/repos/${FULL}/contents/${path}`, key, {
+  return inLine(() => call(`/repos/${FULL}/contents/${path}`, key, {
     method: 'PUT',
     body: { message: 'Their own deck, from the phone', content: toBase64(JSON.stringify(record, null, 1)), branch: BRANCH, ...(sha ? { sha } : {}) },
-  });
+  }));
 }
 
 export async function mineWaiting() {
   let n = 0;
-  for (const k of (await store.keys().catch(() => [])).filter(x => x.startsWith('mine:'))) {
+  for (const k of (await store.keys().catch(() => [])).filter(x => x.startsWith('mine:') && x !== 'mine:feel-test')) {
     const data = await store.get(k).catch(() => null);
     for (const d of Object.values((data && data.decks) || {})) if (d.updated !== d.pushed && (d.title || (d.cards || []).length)) n++;
   }

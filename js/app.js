@@ -11,7 +11,7 @@ import { addressOf, linkify, linkText, plainLinks, splitAddress } from './links.
 import { initIsland, islandNow, setIsland } from './island.js';
 import { MineView, deckFromFile, fileOf, liveCards, liveDecks, mergeDecks, mineKey, mineOf } from './mine.js';
 
-const VERSION = '0.8.0';
+const VERSION = '0.9.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -56,10 +56,17 @@ const mustInstall = isIOS && !isInstalled;
 // The on-screen keyboard shrinks only the visual viewport, so the app sizes itself to that.
 function trackViewport() {
   const vv = window.visualViewport;
+  let sab = null; // the safe area under the content, as set before the keyboard came up
   const set = () => {
     const root = document.documentElement.style;
     root.setProperty('--vvh', `${vv ? vv.height : innerHeight}px`);
     root.setProperty('--vvt', `${vv ? vv.offsetTop : 0}px`);
+    // With the keyboard up, the home bar is under it, so its safe area would only be empty room.
+    const kb = !!vv && vv.height < innerHeight - 120;
+    if (kb === document.documentElement.classList.contains('kb')) return;
+    document.documentElement.classList.toggle('kb', kb);
+    if (kb) { sab = root.getPropertyValue('--sab'); root.setProperty('--sab', '0px'); }
+    else if (sab) root.setProperty('--sab', sab); else root.removeProperty('--sab');
   };
   set();
   if (vv) { vv.addEventListener('resize', set); vv.addEventListener('scroll', set); }
@@ -573,14 +580,14 @@ async function showPack(id, message = '', { topic = null, keepTrail = false } = 
       </div>
       ${message ? `<div class="set-text problem">${esc(message)}</div>` : ''}
       <button class="thoughtsrow" data-go="thoughts">${icon('lightbulb')}<span><strong>Thoughts</strong><small>${thoughts ? `${thoughts} filed` : 'Anything on your mind about this project'}</small></span></button>
-      ${pack.demo ? '' : `<section class="mine-block">
+      ${`<section class="mine-block">
         ${mine.map(d => {
           const n = liveCards(d).length;
           const t = d.topic && topicById.get(d.topic);
           const answered = replies[d.id] || liveCards(d).some(c => replies[`${d.id}/${c.id}`]);
           return `<button class="minerow" data-mine="${esc(d.id)}">${icon('notebook-pen')}<span><strong>${esc(d.title || 'Untitled')}</strong><small>Yours · ${n} card${n === 1 ? '' : 's'}${t ? ` · ${esc(t.title)}` : ''}${answered ? ' · replied' : ''}</small></span></button>`;
         }).join('')}
-        <button class="minerow newdeck" data-go="newmine">${icon('plus')}<span><strong>New deck of your own</strong><small>Ideas, pictures and links, for the writer</small></span></button>
+        <button class="minerow newdeck" data-go="newmine">${icon('plus')}<span><strong>New deck of your own</strong><small>${pack.demo ? 'To try it: in the Feel test, these stay on this phone' : 'Ideas, pictures and links, for the writer'}</small></span></button>
       </section>`}
       <div class="sortbar" role="group" aria-label="Order">${SORTS.map(([k, w]) => `<button data-sort="${k}" class="${k === sort ? 'on' : ''}">${w}</button>`).join('')}</div>
       ${sort === 'topics'
@@ -629,8 +636,6 @@ async function feelWords(pack) {
   return { live, old, states };
 }
 
-const wordsAsText = ({ live, old }) => [...live, ...old].map(w => `${w.where}\n${[w.text, (w.pics || []).length ? `(${countWords(w.pics.length)})` : ''].filter(Boolean).join(' ')}`).join('\n\n');
-
 function sendUnsent(pack, { live, states }) {
   for (const d of pack.decks) {
     const s = states.get(d.id);
@@ -640,60 +645,38 @@ function sendUnsent(pack, { live, states }) {
   }
 }
 
-async function copyText(text, out) {
-  try {
-    await navigator.clipboard.writeText(text);
-    out.textContent = 'Copied.';
-  } catch {
-    // Some views refuse the clipboard, so show the words selected instead.
-    out.innerHTML = '<textarea class="copybox" rows="6" readonly></textarea><span>Copy this by hand.</span>';
-    const box = out.querySelector('textarea');
-    box.value = text;
-    box.focus();
-    box.select();
-  }
-}
-
 async function drawFeelWords(pack, confirming = false) {
   const host = document.getElementById('feelwords');
   if (!host) return;
   const words = await feelWords(pack);
-  const unsent = words.live.filter(w => !w.sent);
+  // Words an older version kept only on this phone go now, without being asked.
+  if (words.live.some(w => !w.sent)) { sendUnsent(pack, words); await new Promise(r => setTimeout(r, 0)); }
+  const queued = (await store.queueAll().catch(() => [])).filter(i => i.event && i.event.pack === pack.id && i.event.demo).length;
+  const st = sync.status();
   const swipes = [...words.states.values()].reduce((n, s) => n + Object.keys(s.answers || {}).length, 0);
-  const row = w => `<div class="word"><small>${esc(w.where)}</small><span>${linkify([w.text, (w.pics || []).length ? `(${countWords(w.pics.length)})` : ''].filter(Boolean).join(' '))}</span><em class="${w.sent ? 'sent' : ''}">${w.sent ? 'Sent' : 'Not sent yet'}</em></div>`;
   const count = words.live.length;
+  const waiting = !queued ? ''
+    : `${queued === 1 ? 'One thing' : `${queued} things`} you wrote here ${queued === 1 ? 'is' : 'are'} waiting to send. ${st.connected ? `${queued === 1 ? 'It goes' : 'They go'} by ${queued === 1 ? 'itself' : 'themselves'}.` : `${queued === 1 ? 'It goes' : 'They go'} once you connect, from the gear.`}`;
+  const trouble = st.problem && queued ? st.problem : '';
   host.innerHTML = `
-    <div class="demo-note">Anything you type here gets sent, tagged as a test. Swipes with no words stay on this phone.</div>
-    ${count + words.old.length ? `
-      <div class="set-title">What you wrote here</div>
-      <div class="words">${words.live.map(row).join('')}${words.old.map(w => row({ ...w, sent: true })).join('')}</div>
-      <div class="set-row">
-        <button class="secondary" data-go="send-words" ${unsent.length ? '' : 'disabled'}>${icon('cloud-upload')}Send these</button>
-        <button class="secondary" data-go="copy-words">${icon('notebook-pen')}Copy</button>
-      </div>
-      <div class="set-text small" id="wordsresult"></div>` : ''}
+    ${trouble || waiting ? `<div class="set-text small feel-waiting${trouble ? ' problem' : ''}" id="feelwaiting">${esc(trouble || waiting)}</div>` : ''}
     ${confirming ? `
       <div class="confirm" id="resetconfirm">
-        <div class="set-text">This clears ${swipes} swipe${swipes === 1 ? '' : 's'}${count ? ` and ${count} thing${count === 1 ? '' : 's'} you wrote` : ''} from the Feel test.${unsent.length ? ` First it sends the ${unsent.length} not sent yet.` : ''}${count ? ' Your words stay listed here.' : ''}</div>
+        <div class="set-text">This clears ${swipes} swipe${swipes === 1 ? '' : 's'}${count ? ` and ${count} thing${count === 1 ? '' : 's'} you wrote` : ''} from the Feel test. Anything you wrote that hasn't gone yet goes first.</div>
         <div class="set-row">
           <button class="primary" data-go="reset-yes">Clear it</button>
           <button class="ghostbtn" data-go="reset-no">Keep it</button>
         </div>
-      </div>` : `<button class="ghostbtn resetbtn" data-go="reset">${icon('rotate-ccw')}Start the Feel test again</button>`}`;
+      </div>` : `<button class="ghostbtn resetbtn" data-go="reset">${icon('rotate-ccw')}Start the Feel test again</button>`}
+    <div class="demo-note">What you type here goes to the writer, marked as a test. Swipes with no words stay on this phone.</div>`;
   const on = (name, fn) => { const b = host.querySelector(`[data-go=${name}]`); if (b) b.onclick = fn; };
-  on('send-words', async () => {
-    sendUnsent(pack, words);
-    await drawFeelWords(pack);
-    const out = document.getElementById('wordsresult');
-    if (out) out.textContent = sync.status().connected ? 'On their way.' : "They'll go once you connect, from the gear.";
-  });
-  on('copy-words', () => copyText(wordsAsText(words), document.getElementById('wordsresult')));
   on('reset', () => drawFeelWords(pack, true));
   on('reset-no', () => drawFeelWords(pack));
   on('reset-yes', async () => {
-    // Words first: queued, then kept in the list, and only then is anything cleared.
-    sendUnsent(pack, words);
-    await archiveWords(words.live);
+    // Words first: queued, then kept, and only then is anything cleared.
+    const now = await feelWords(pack);
+    sendUnsent(pack, now);
+    await archiveWords(now.live);
     for (const d of pack.decks) store.del(deckKey(pack, d));
     showPack(pack.id);
   });
@@ -747,9 +730,9 @@ async function openDeck(pack, deckId, at = null, { keepTrail = false } = {}) {
     const view = current;
     if (at && at.card && view.cards.has(at.card)) {
       view.jump(at.card, at.partsOpen || at.part ? at.part || null : null);
-      if (at.partsOpen && !at.part && view.partsEl.hidden) view.openParts();
+      if ((at.partsOpen || at.flipped) && !view.flipped) view.flip(true);
       if (at.partComposing && at.part) view.openPartPad(at.part);
-      else if (at.composing && view.partsEl.hidden) view.openComposer();
+      else if (at.composing) view.openComposer();
     }
   } catch {
     current = null;
@@ -913,10 +896,34 @@ async function showPicker(packId, done) {
       <button class="iconbtn" data-pk="close" aria-label="Back">${icon('chevron-left')}</button>
       <div class="t">Pick a card to link</div>
     </div>
-    <div class="picker-list scroll">
-      ${packs.map(p => `<div class="pk-pack">${esc(p.title)}</div>
-        ${topicsOf(p).topics.flatMap(t => t.decks).concat(topicsOf(p).misc).map(d => `<button class="pk-deck" data-pack="${esc(p.id)}" data-deck="${esc(d.id)}"><span>${esc(d.title)}</span><small>${d.cards.length}</small>${icon('chevron-right')}</button><div class="pk-cards" hidden></div>`).join('')}`).join('')}
-    </div>`;
+    <input class="pk-search" type="search" placeholder="Search packs, decks, cards and parts" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Search">
+    <div class="picker-list scroll"></div>`;
+  const list = el.querySelector('.picker-list');
+  const tree = () => packs.map(p => `<div class="pk-pack">${esc(p.title)}</div>
+    ${topicsOf(p).topics.flatMap(t => t.decks).concat(topicsOf(p).misc).map(d => `<button class="pk-deck" data-pack="${esc(p.id)}" data-deck="${esc(d.id)}"><span>${esc(d.title)}</span><small>${d.cards.length}</small>${icon('chevron-right')}</button><div class="pk-cards" hidden></div>`).join('')}`).join('');
+  // Everything whose words hold every word searched for, decks first, then cards, then parts.
+  const found = q => {
+    const words = q.toLowerCase().split(/\s+/).filter(Boolean);
+    const hit = (...texts) => { const t = texts.join(' ').toLowerCase(); return words.every(w => t.includes(w)); };
+    const out = [];
+    for (const p of packs) {
+      for (const d of p.decks) {
+        if (hit(p.title, d.title)) out.push({ rank: 0, html: `<button class="pk-card pk-found" data-addr="${esc(addressOf(p.id, d.id))}" data-label="${esc(d.title)}"><b>${esc(d.title)}</b><small>A deck in ${esc(p.title)}</small></button>` });
+        for (const c of d.cards) {
+          const title = c.title || plainLinks(c.text || '');
+          if (hit(title, c.text, c.why)) out.push({ rank: 1, html: `<button class="pk-card pk-found ${esc(c.rarity || 'common')}" data-addr="${esc(addressOf(p.id, d.id, c.id))}" data-label="${esc(title)}"><b>${esc(title)}</b><small>${esc(p.title)} › ${esc(d.title)}</small></button>` });
+          for (const pt of c.parts || []) {
+            if (hit(pt.title, pt.text)) out.push({ rank: 2, html: `<button class="pk-card pk-found pk-part ${esc(c.rarity || 'common')}" data-addr="${esc(addressOf(p.id, d.id, c.id, pt.id))}" data-label="${esc(`${title} › ${pt.title}`)}"><b>${esc(pt.title)}</b><small>${esc(d.title)} › ${esc(title)}</small></button>` });
+          }
+        }
+      }
+    }
+    out.sort((x, y) => x.rank - y.rank);
+    return out.length ? `${out.slice(0, 80).map(o => o.html).join('')}${out.length > 80 ? `<div class="demo-note">And ${out.length - 80} more. Add a word to narrow it.</div>` : ''}` : '<div class="demo-note">Nothing has those words.</div>';
+  };
+  list.innerHTML = tree();
+  const search = el.querySelector('.pk-search');
+  search.addEventListener('input', () => { const q = search.value.trim(); list.innerHTML = q ? found(q) : tree(); list.scrollTop = 0; });
   app.append(el);
   document.body.classList.add('covered');
   const finish = chosen => { el.remove(); document.body.classList.remove('covered'); done(chosen); };
@@ -980,8 +987,10 @@ function reward(level, pack, title, iconText, color, decks, sums) {
       <div class="reward-word">${esc(title)} cleared</div>
       <div class="reward-sub">${decks.length} deck${decks.length === 1 ? '' : 's'}, ${cards} card${cards === 1 ? '' : 's'}.</div>
       <button class="primary" data-go="pack">${isPack ? 'Back to the packs' : 'Back to the pack'}</button>
+      <button class="ghostbtn" data-go="newmine">${icon('plus')}New deck of your own</button>
     </div>`;
   app.querySelector('[data-go=pack]').onclick = () => (isPack ? showHome() : showPack(pack.id));
+  app.querySelector('[data-go=newmine]').onclick = () => openMine(pack, null);
   confetti(app, isPack ? { count: 56, force: 0.95, colors: [pc, '#ffffff', '#ffd76a'] } : { count: 20, force: 0.6, colors: [pc, '#ffffff'] });
   tick();
 }

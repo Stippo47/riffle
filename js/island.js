@@ -87,12 +87,25 @@ function build() {
 function draw() {
   if (!layer) build();
   layer.hidden = !state;
+  document.body.classList.toggle('has-island', !!state);
   if (!state) return;
   const s = state.show || {};
   el.dataset.corner = CORNERS.includes(corner) ? corner : 'br';
+  // A finished deck looks like the end of a deck: dark, with what was answered. A card looks like a card.
+  if (s.done) {
+    el.className = 'island is-done';
+    el.innerHTML = `
+      <span class="isl-deck">${esc(s.deckTitle || '')}</span>
+      <span class="isl-title">Deck done</span>
+      <span class="isl-text">${esc(s.said || '')}</span>
+      <span class="isl-kind">Tap to go back to it</span>`;
+    return;
+  }
+  const what = s.handled ? 'Handled' : kindOf({ kind: s.kind }).label;
   el.className = `island ${s.rarity || 'common'}`;
   el.innerHTML = `
     <span class="isl-deck">${esc(s.deckTitle || '')}</span>
-    <span class="isl-text">${esc(plainLinks(s.text || s.title || ''))}</span>
-    <span class="isl-kind">${esc(s.part ? s.part : kindOf({ kind: s.kind }).label)}</span>`;
+    ${s.title ? `<span class="isl-title">${esc(plainLinks(s.title))}</span>` : ''}
+    <span class="isl-text">${esc(plainLinks(s.text || ''))}</span>
+    <span class="isl-kind">${esc(s.part ? `${what} · ${s.part}` : what)}</span>`;
 }

@@ -30,7 +30,10 @@ export const inkKey = key => `ink:${key}`;
 // picks: { isOn(i), toggle(i), count() } if the pictures can be selected here.
 // opener: { t, x, y } of the finger lifting, if that's what opened this.
 // ink: { save(i, blob) => promise, done(i) } if drawings can be kept from here.
-export function openViewer({ items, at = 0, picks = null, opener = null, onClose = () => {}, ink = null }) {
+// bring(i, { kind, t, blob }) offers to bring what's held down on into the notes: a long press.
+// start: a time to open the first film at, paused there.
+const PRESS_MS = 520;
+export function openViewer({ items, at = 0, picks = null, opener = null, onClose = () => {}, ink = null, bring = null, start = null }) {
   const many = items.length > 1;
   const anyFilm = items.some(it => it.video);
   const hasFoot = many || picks || ink || anyFilm || items.some(it => it.label);
@@ -187,7 +190,8 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
           setSize(film.videoWidth, film.videoHeight);
           film.hidden = false;
           img.hidden = true;
-          if (!penOn) film.play().catch(() => {});
+          if (start !== null && i === startAt) { film.currentTime = Math.min(start, film.duration || start); start = null; } // a moment brought to the notes
+          else if (!penOn) film.play().catch(() => {});
           syncFilm();
         };
         film.src = url;
@@ -360,7 +364,33 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
 
   // ---------- fingers
   const pts = new Map();
-  let drag = null, pinch = null, pinched = false, lastTap = null, tapTimer = null, idle = false;
+  let drag = null, pinch = null, pinched = false, lastTap = null, tapTimer = null, idle = false, pressTimer = 0, pressed = false, pressFrom = { x: 0, y: 0 };
+  // Held still for about half a second: offers to bring this, as it is now, into the notes. A drawing on it
+  // goes with it, instead of onto the comment.
+  const firePress = () => {
+    pressed = true;
+    if (stroke) { stroke = null; drawInk(); } // a finger held still with the pen on meant this, not a dot
+    drag = null;
+    lastTap = null;
+    clearTimeout(tapTimer);
+    const filmNow = isFilm() && !film.hidden;
+    if (filmNow) film.pause();
+    const info = filmNow ? { kind: 'film', t: film.currentTime } : { kind: 'pic' };
+    const offer = blob => bring(at, blob ? { ...info, blob } : info);
+    if (ink && strokes.length && nw) {
+      let canvas = null;
+      try { canvas = composite(); } catch { canvas = null; }
+      if (canvas) {
+        const key = keyOf(at);
+        strokes = [];
+        drawInk();
+        if (key) store.del(inkKey(key));
+        canvas.toBlob(offer, 'image/jpeg', 0.86);
+        return;
+      }
+    }
+    offer(null);
+  };
   const place = e => {
     const r = stage.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -399,10 +429,14 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
     pts.set(e.pointerId, place(e));
     try { stage.setPointerCapture(e.pointerId); } catch { /* synthetic pointers in tests */ }
     media.classList.remove('anim');
+    clearTimeout(pressTimer);
     if (pts.size === 1) {
       pinched = false;
       idle = false;
+      pressed = false;
       const p = pts.get(e.pointerId);
+      pressFrom = p;
+      if (bring && nw) pressTimer = setTimeout(firePress, PRESS_MS);
       if (penOn && nw) {
         stroke = { c: colour, w: +((PEN_WIDTH * dpr()) / (base * s)).toFixed(2), p: [toPicture(p.x, p.y).map(v => +v.toFixed(1))], t: e.timeStamp };
         drawInk();
@@ -426,6 +460,7 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
       return;
     }
     if (stroke) {
+      if (Math.hypot(p.x - pressFrom.x, p.y - pressFrom.y) >= TAP_MOVE) clearTimeout(pressTimer);
       const q = toPicture(p.x, p.y).map(v => +v.toFixed(1));
       const last = stroke.p[stroke.p.length - 1];
       if (Math.hypot(q[0] - last[0], q[1] - last[1]) * ((base * s) / dpr()) >= 1.5) {
@@ -435,6 +470,7 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
       return;
     }
     if (!drag || idle) return;
+    if (Math.hypot(p.x - drag.x0, p.y - drag.y0) >= TAP_MOVE) clearTimeout(pressTimer);
     const dt = Math.max(1, e.timeStamp - drag.time);
     drag.vx = (p.x - drag.x) / dt;
     drag.vy = (p.y - drag.y) / dt;
@@ -464,6 +500,8 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
   const lift = (e, cancelled) => {
     if (!pts.has(e.pointerId)) return;
     pts.delete(e.pointerId);
+    clearTimeout(pressTimer);
+    if (pressed) { if (!pts.size) { pressed = false; drag = null; } return; }
     if (pinch) {
       if (pts.size < 2) {
         pinch = null;
@@ -557,6 +595,7 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
   }
 
   measure();
+  const startAt = at;
   show(at);
   return { close, get drawing() { return penOn; }, setPen, keepInk };
 }

@@ -147,3 +147,25 @@ export function track(el, h) {
     for (const t of ['gesturestart', 'gesturechange', 'gestureend']) el.removeEventListener(t, onGesture);
   };
 }
+
+// Just a pinch inward, on something that isn't a card and keeps its own touches for scrolling and typing:
+// the end of a deck. fire() runs once per pinch.
+export function watchPinch(el, fire) {
+  const pts = new Map();
+  let d0 = 1, fired = false;
+  const spread = () => { const [a, b] = [...pts.values()]; return Math.hypot(a.x - b.x, a.y - b.y) || 1; };
+  el.addEventListener('pointerdown', e => {
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2) { d0 = spread(); fired = false; }
+  });
+  el.addEventListener('pointermove', e => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size === 2 && !fired && spread() / d0 < TUNE.pinchOpen) { fired = true; fire(); }
+  });
+  const up = e => pts.delete(e.pointerId);
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointercancel', up);
+  el.addEventListener('gesturestart', () => { fired = false; });
+  el.addEventListener('gesturechange', e => { if (!fired && e.scale < TUNE.pinchOpen) { fired = true; fire(); } });
+}
