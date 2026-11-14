@@ -118,6 +118,10 @@ A long description scrolls in its own small box. A vertical drag that starts on 
 
 Drafts survive closing the app.
 
+In every box to type in, the link and photo buttons sit in a strip of their own along the box's bottom, and the words scroll above it, never under them. A tap on that strip types in the box.
+
+Opening a box raises the keyboard during the finger's lift that asked for it, and only that one: no later tap anywhere opens a box again.
+
 The box and the notes pad are `contenteditable="plaintext-only"` rather than form fields, in the hope iPhones then leave out the autofill bar above the keyboard. Autocorrect, dictation and pasting work as usual.
 
 ## Photos
@@ -205,7 +209,9 @@ A row at the top of every pack's page, always there, needing no deck file. It is
 
 A card or a part can carry films beside its pictures, and a board can mix films and pictures. On a card's back they play by themselves, muted, looping and inline, once the card is flipped, and stop when it's flipped back. A tap pauses or plays one. In parts, a film plays while it's on screen. Each has a poster for before it plays and for tiles, and a board marks its films with a small play sign.
 
-The corner button opens a film full screen, like a picture: pinch to zoom, double tap, drag down to go back. Under it is a bar: play or pause, a slider to scrub through it, and a speed button that goes 1×, ½×, ¼×. A tap on the film plays or pauses it, just after a double tap would have counted.
+The corner button opens a film full screen, like a picture: pinch to zoom, double tap, drag down to go back. Under it is a bar: play or pause, a slider to scrub through it, and a speed button that goes 1×, ½×, ¼×. The slider takes a finger anywhere along it, a full finger tall: a touch jumps the film there and pauses it, and the film follows the finger from then on. A tap on the film plays or pauses it, just after a double tap would have counted.
+
+A film remembers where it was left, its moment, speed and whether it was playing, while the app is open. Going to the next one on a board and back, or closing it and opening it again, carries on from there.
 
 A card's films come down ahead, after its pictures. A board's come when they're looked at, like its full pictures.
 
@@ -236,7 +242,7 @@ A tap on an option's picture opens it, and a tap anywhere else on the option tic
 For picking from many pictures, where one big picture of them all can't be seen well enough. Up and down are swipes, so a long grid can't scroll on the card itself. So the card shows a few small pictures, with the ticked ones first, and a tap opens the board's own screen: a scrolling grid, three across, with each tile's picture, label and tick. The count of selected ones shows at the top.
 
 - A tile shows its thumbnail whole and never crops it, on the card too. An item can bring its own thumbnail, for pictures that don't read when shrunk whole. Looking at it still opens the whole picture.
-- Tapping a tile's picture looks at it, with next, previous and a tick there too.
+- Tapping a tile's picture looks at it, with next, previous and a tick there too, and a speech bubble beside Draw for a comment on that item alone. The bubble opens a box under the picture with the keyboard up; its words are kept as they're typed and go when it closes (Done, a drag down, the next item, or leaving). The bubble has a dot once the item has words, and so does its tile on the grid. It's sent like a part's comment, apart from the card's own comment and swipe.
 - Tapping its tick or label selects it. Any number can be selected.
 - A swipe on the card means done with these picks. It works as on an option card, and the answer carries `selected`.
 - Ticks are saved as they're made, so a half-finished selection survives the app being closed. They also go out as a draft a few seconds later, like comments. Plain ticks in the Feel test stay on the phone.

@@ -251,7 +251,7 @@ Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typ
 | `draft` with `thought: true` | `text`, with `deck` and `card` null | A thought being typed, not filed yet. The latest wins, and filing replaces it |
 | `thought` | `id`, `text`, with `deck` null | A general thought about the pack |
 | `deck` | `verdict` (`done`, `replan`), `tally`, `answered`, `total` | The deck as a whole. `replan` means rethink it from the base; the answers still stand |
-| `part` | `card`, `cardVersion`, `title`, `kind`, `part`, `partTitle`, `mark`, `stamp`, `comment` | What's said about one part of a card. `mark` is a meaning like `swipe` (`right`, `left` or `down`), or null for none. The latest for a part stands, whether or not the card is answered |
+| `part` | `card`, `cardVersion`, `title`, `kind`, `part`, `partTitle`, `mark`, `stamp`, `comment`, and on a board `item` | What's said about one part of a card. `mark` is a meaning like `swipe` (`right`, `left` or `down`), or null for none. The latest for a part stands, whether or not the card is answered. On a board, `item: true` means it's a comment on one item: `part` is the item's id, `partTitle` its label, and there's no mark |
 | `archive` | `archived` | They archived the deck on the phone (`true`), or brought it back (`false`). Whichever of this and the writer's `archived` in order.json is later stands |
 | `deck-reset` | `keptNotes` | They started the deck over. Answers on this deck from before this no longer stand, though anything they typed was still said. If `keptNotes`, comments came back as drafts on their cards, and the notes stayed |
 

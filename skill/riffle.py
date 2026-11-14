@@ -989,6 +989,15 @@ def part_word(e):
 
 
 def part_line(e, card):
+    # A comment on one item of a board comes as a part, marked `item`: its words, with no mark.
+    if e.get('item'):
+        title = e.get('partTitle') or next((i.get('label') for i in (card or {}).get('items') or [] if i.get('id') == e.get('part')), '') or e.get('part')
+        line = f'      item {e.get("part")} ({title})'
+        if e.get('comment'):
+            line += f': "{readable(e["comment"])}"'
+        if e.get('images'):
+            line += f'\n          pictures: {pictures(e)}'
+        return line
     title = e.get('partTitle') or next((p.get('title') for p in (card or {}).get('parts') or [] if p.get('id') == e.get('part')), '') or e.get('part')
     said = part_word(e) or 'no mark'
     line = f'      part {e.get("part")} ({title}): {said}'
@@ -1053,8 +1062,9 @@ def cmd_answers(a):
                 parts_here = [p for p in d['parts'].get(card_id, {}).values() if p in shown]
                 if parts_here:
                     if card_id not in d['answers'] and card_id not in d['drafts']:
-                        print(f'  {card_id} ({(card or {}).get("title") or parts_here[0].get("title") or card_id}): not swiped yet. On its parts:')
-                    order = [p.get('id') for p in (card or {}).get('parts') or []]
+                        which = 'items' if (card or {}).get('kind') == 'board' or parts_here[0].get('item') else 'parts'
+                        print(f'  {card_id} ({(card or {}).get("title") or parts_here[0].get("title") or card_id}): not swiped yet. On its {which}:')
+                    order = [p.get('id') for p in [*((card or {}).get('parts') or []), *((card or {}).get('items') or [])]]
                     for p in sorted(parts_here, key=lambda e: order.index(e.get('part')) if e.get('part') in order else 99):
                         print(part_line(p, card))
             if d['notes'] and d['notes'] in shown:

@@ -4,7 +4,7 @@
 // Films play here muted and looping. A tap pauses or plays, and the bar under them scrubs and slows them down.
 // With the pen on, one finger draws and two still zoom and pan. Strokes are kept as they're drawn, so a closed
 // app keeps them, and on leaving a picture the drawing over it becomes a photo on the comment it belongs to.
-import { clamp, icon } from './ui.js';
+import { clamp, dragToClose, icon, padBlur, padFocus, padHTML, padReady, padSet } from './ui.js';
 import * as store from './store.js';
 
 const MAX_ZOOM = 6;
@@ -24,6 +24,9 @@ const INK_LONG_SIDE = 2000;
 const SPEEDS = [1, 0.5, 0.25];
 const SPEED_WORD = { 1: '1×', 0.5: '½×', 0.25: '¼×' };
 export const inkKey = key => `ink:${key}`;
+// Where each film was left, its moment, speed and whether it was playing, so coming back to one carries on
+// from there: the next and back again on a board, or closing it and opening it again. Kept while the app is open.
+const filmLeft = new Map();
 
 // items: { thumb, full, video, label, text, inkKey }, with each of thumb, full and video a function giving
 // a url, or a promise of one. `video` makes it a film, with `full` as its poster frame.
@@ -32,11 +35,12 @@ export const inkKey = key => `ink:${key}`;
 // ink: { save(i, blob) => promise, done(i) } if drawings can be kept from here.
 // bring(i, { kind, t, blob }) offers to bring what's held down on into the notes: a long press.
 // start: a time to open the first film at, paused there.
+// comments: { text(i), typed(i, text), done(i) } if each one can have a comment of its own, as a board's items.
 const PRESS_MS = 520;
-export function openViewer({ items, at = 0, picks = null, opener = null, onClose = () => {}, ink = null, bring = null, start = null }) {
+export function openViewer({ items, at = 0, picks = null, opener = null, onClose = () => {}, ink = null, bring = null, start = null, comments = null }) {
   const many = items.length > 1;
   const anyFilm = items.some(it => it.video);
-  const hasFoot = many || picks || ink || anyFilm || items.some(it => it.label);
+  const hasFoot = many || picks || ink || comments || anyFilm || items.some(it => it.label);
   const root = document.createElement('div');
   root.className = 'viewer';
   root.innerHTML = `
@@ -47,12 +51,13 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
       <div class="viewer-words"><b></b><small></small><span></span></div>
       ${anyFilm ? `<div class="viewer-film" hidden>
         <button class="viewer-play" aria-label="Pause">${icon('pause')}</button>
-        <input class="viewer-scrub" type="range" min="0" max="1000" step="1" value="0" aria-label="Where in the film">
+        <div class="viewer-scrub" role="slider" tabindex="0" aria-label="Where in the film" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i class="vs-rail"><i class="vs-fill"></i></i><i class="vs-knob"></i></div>
         <button class="viewer-speed" aria-label="Speed">1×</button>
       </div>` : ''}
       <div class="viewer-row">
         ${many ? `<button class="viewer-prev" aria-label="Previous">${icon('chevron-left')}</button>` : ''}
         ${ink ? `<button class="viewer-pen" aria-label="Draw on it">${icon('pencil')}<span>Draw</span></button>` : ''}
+        ${comments ? `<button class="viewer-say" aria-label="Comment on this one">${icon('message-square-text')}</button>` : ''}
         ${picks ? `<button class="viewer-tick">${icon('check')}<span></span></button>` : '<i class="viewer-gap"></i>'}
         ${many ? `<button class="viewer-next" aria-label="Next">${icon('chevron-left')}</button>` : ''}
       </div>
@@ -61,6 +66,10 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
         <button class="pen-undo" aria-label="Undo the last line">${icon('undo-2')}</button>
         <button class="pen-clear" aria-label="Clear the drawing">${icon('trash-2')}</button>
         <button class="pen-done">Done</button>
+      </div>` : ''}
+      ${comments ? `<div class="viewer-sayer" hidden>
+        ${padHTML('viewersay', 'Your comment on this one. Drag down to close.')}
+        <button class="say-done">Done</button>
       </div>` : ''}
     </div>` : ''}`;
   document.body.append(root);
@@ -154,8 +163,17 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
       $('.viewer-next').disabled = i === items.length - 1;
     }
     if (anyFilm) $('.viewer-film').hidden = !it.video;
+    if (comments) $('.viewer-say').classList.toggle('has', !!(comments.text(i) || '').trim());
+  };
+  // Notes where the film showing now was, before it goes.
+  const leaveFilm = () => {
+    const it = items[at], key = it && (it.filmKey || it.inkKey);
+    if (!key || !it.video || film.hidden || !film.duration) return;
+    filmLeft.set(key, { t: film.currentTime, rate: film.playbackRate, paused: film.paused });
   };
   const show = async i => {
+    if (saying) closeSay();
+    leaveFilm();
     at = i;
     const mine = ++token;
     note.hidden = true;
@@ -190,8 +208,13 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
           setSize(film.videoWidth, film.videoHeight);
           film.hidden = false;
           img.hidden = true;
+          const left = filmLeft.get(it.filmKey || it.inkKey);
           if (start !== null && i === startAt) { film.currentTime = Math.min(start, film.duration || start); start = null; } // a moment brought to the notes
-          else if (!penOn) film.play().catch(() => {});
+          else if (left) { // back where it was left
+            film.currentTime = Math.min(left.t, film.duration || left.t);
+            film.playbackRate = left.rate || 1;
+            if (!left.paused && !penOn) film.play().catch(() => {});
+          } else if (!penOn) film.play().catch(() => {});
           syncFilm();
         };
         film.src = url;
@@ -216,6 +239,8 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
     show(next);
   };
   const close = () => {
+    if (saying) closeSay();
+    leaveFilm();
     keepInk();
     token++;
     film.pause();
@@ -228,13 +253,18 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
 
   // ---------- films
   let scrubbing = false;
+  const showAt = f => {
+    const scrub = $('.viewer-scrub');
+    scrub.style.setProperty('--at', String(f));
+    scrub.setAttribute('aria-valuenow', String(Math.round(f * 100)));
+  };
   const syncFilm = () => {
     if (!anyFilm || !isFilm()) return;
     const playing = !film.paused;
     const btn = $('.viewer-play');
     btn.innerHTML = icon(playing ? 'pause' : 'play');
     btn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
-    if (!scrubbing && film.duration) $('.viewer-scrub').value = String(Math.round((film.currentTime / film.duration) * 1000));
+    if (!scrubbing && film.duration) showAt(film.currentTime / film.duration);
     $('.viewer-speed').textContent = SPEED_WORD[film.playbackRate] || `${film.playbackRate}×`;
   };
   const toggleFilm = () => {
@@ -244,13 +274,47 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
   for (const t of ['play', 'pause', 'timeupdate', 'ratechange', 'seeked']) film.addEventListener(t, syncFilm);
   if (anyFilm) {
     $('.viewer-play').onclick = toggleFilm;
+    // The whole bar takes the finger, not just the knob: a touch anywhere on it jumps there, and the
+    // film follows the finger from then on, wherever it goes. One seek a frame, so a phone keeps up.
     const scrub = $('.viewer-scrub');
-    scrub.addEventListener('input', () => {
+    let held = null, seekTo = null;
+    const fracAt = x => {
+      const r = scrub.getBoundingClientRect(), edge = 14; // the knob's middle reaches the ends
+      return clamp((x - r.left - edge) / Math.max(1, r.width - edge * 2), 0, 1);
+    };
+    const seek = f => {
+      showAt(f);
+      if (!film.duration) return;
+      if (seekTo === null) requestAnimationFrame(() => { if (seekTo !== null) film.currentTime = seekTo; seekTo = null; });
+      seekTo = f * film.duration;
+    };
+    scrub.addEventListener('pointerdown', e => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
+      held = e.pointerId;
+      try { scrub.setPointerCapture(e.pointerId); } catch { /* synthetic pointers in tests */ }
       scrubbing = true;
       film.pause();
-      if (film.duration) film.currentTime = (scrub.value / 1000) * film.duration;
+      scrub.classList.add('held');
+      seek(fracAt(e.clientX));
     });
-    scrub.addEventListener('change', () => { scrubbing = false; syncFilm(); });
+    scrub.addEventListener('pointermove', e => { if (e.pointerId === held) seek(fracAt(e.clientX)); });
+    const letGo = e => {
+      if (e.pointerId !== held) return;
+      held = null;
+      scrubbing = false;
+      scrub.classList.remove('held');
+      syncFilm();
+    };
+    scrub.addEventListener('pointerup', letGo);
+    scrub.addEventListener('pointercancel', letGo);
+    scrub.addEventListener('keydown', e => {
+      const d = { ArrowLeft: -1, ArrowRight: 1 }[e.key];
+      if (!d || !film.duration) return;
+      e.preventDefault();
+      film.pause();
+      film.currentTime = clamp(film.currentTime + d * Math.max(0.1, film.duration / 50), 0, film.duration);
+    });
     $('.viewer-speed').onclick = () => {
       film.playbackRate = SPEEDS[(SPEEDS.indexOf(film.playbackRate) + 1) % SPEEDS.length] || 1;
       syncFilm();
@@ -361,6 +425,37 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
       if (drew) done.then(() => ink.done && ink.done(i));
     };
   }
+
+  // ---------- a comment on this one: a box under it, with the keyboard. Its words are kept as they're typed,
+  // and go when it closes: Done, a drag down on it, the next one, or leaving.
+  let saying = false;
+  const sayPad = comments ? $('#viewersay') : null;
+  function closeSay() {
+    if (!saying) return;
+    saying = false;
+    padBlur(sayPad);
+    $('.viewer-sayer').hidden = true;
+    $('.viewer-row').hidden = false;
+    root.classList.remove('is-saying');
+    comments.done(at);
+    words(at);
+  }
+  if (comments) {
+    padReady(sayPad, text => { if (saying) { comments.typed(at, text); words(at); } });
+    $('.viewer-say').onclick = () => {
+      saying = true;
+      film.pause();
+      padSet(sayPad, comments.text(at) || '');
+      $('.viewer-row').hidden = true;
+      $('.viewer-sayer').hidden = false;
+      root.classList.add('is-saying');
+      padFocus(sayPad);
+    };
+    $('.say-done').onclick = closeSay;
+    dragToClose($('.viewer-sayer'), () => sayPad, dy => { $('.viewer-sayer').style.transform = dy > 0 ? `translateY(${dy * 0.8}px)` : ''; }, closeSay);
+  }
+  // The keyboard makes the screen shorter, so the picture fits again in what's left.
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { if (root.isConnected) resized(); }).observe(stage);
 
   // ---------- fingers
   const pts = new Map();

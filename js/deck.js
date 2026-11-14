@@ -260,12 +260,15 @@ export async function queueUnsentWords(topicOf = () => null, cardOf = () => null
   }
 }
 
-// What's said about one part of a card. The latest one for a part stands.
+// What's said about one part of a card, or one item on a board. The latest one for each stands.
+const itemOf = (card, id) => (card.kind === 'board' ? (card.items || []).find(x => x.id === id) : null);
 function partEvent(card, partId, st, pics, drawnOn) {
-  const part = (card.parts || []).find(x => x.id === partId) || {};
+  const item = itemOf(card, partId);
+  const part = item || (card.parts || []).find(x => x.id === partId) || {};
   return {
     type: 'part', card: card.id, cardVersion: card.version || 1, title: card.title || '', kind: card.kind || 'question',
-    part: partId, partTitle: part.title || '', mark: st.mark || null, stamp: st.mark ? (KINDS[card.kind] || KINDS.question)[st.mark] : '',
+    part: partId, partTitle: (item ? item.label : part.title) || '', ...(item ? { item: true } : {}),
+    mark: st.mark || null, stamp: st.mark ? (KINDS[card.kind] || KINDS.question)[st.mark] : '',
     comment: st.text || '', ...withPictures(pics, drawnOn),
   };
 }
@@ -291,8 +294,8 @@ export function wordsIn(deck, s) {
     const c = deck.cards.find(x => x.id === card);
     for (const [part, st] of Object.entries(parts)) {
       if (!st.text && !(st.photos || []).length) continue;
-      const pt = c && (c.parts || []).find(x => x.id === part);
-      out.push({ kind: 'part', key: `p:${card}/${part}`, card, part, where: `${deck.title}: ${titleOf(card)}, ${pt ? pt.title : part}`, text: st.text || '', pics: st.photos || [], sent: sent[`p:${card}/${part}`] === mark(st.text, st.photos), st });
+      const pt = c && (itemOf(c, part) || (c.parts || []).find(x => x.id === part));
+      out.push({ kind: 'part', key: `p:${card}/${part}`, card, part, where: `${deck.title}: ${titleOf(card)}, ${pt ? pt.title || pt.label : part}`, text: st.text || '', pics: st.photos || [], sent: sent[`p:${card}/${part}`] === mark(st.text, st.photos), st });
     }
   }
   const notePics = s.notesPhotos || [];
@@ -1056,7 +1059,7 @@ export class DeckView {
       </div>
       <div class="board-grid scroll">
         ${items.map(it => `<div class="bt${it.video ? ' film' : ''}" data-item="${esc(it.id)}">
-          <button class="bt-pic" data-act="boardview" data-id="${esc(it.id)}" aria-label="Look at ${esc(it.label)}"><img alt="" draggable="false">${it.video ? `<i class="bt-film">${icon('play')}</i>` : ''}</button>
+          <button class="bt-pic" data-act="boardview" data-id="${esc(it.id)}" aria-label="Look at ${esc(it.label)}"><img alt="" draggable="false">${it.video ? `<i class="bt-film">${icon('play')}</i>` : ''}<i class="bt-said" aria-label="Has your comment">${icon('message-square-text')}</i></button>
           ${mine.includes(it.id) ? `<em class="bt-mine">${esc(kindOf(card).pickLabel)}</em>` : ''}
           <button class="bt-tick" data-act="boardtick" data-id="${esc(it.id)}" aria-label="Select ${esc(it.label)}"><i>${icon('check')}</i></button>
           <button class="bt-label" data-act="boardtick" data-id="${esc(it.id)}">${esc(it.label)}</button>
@@ -1076,7 +1079,11 @@ export class DeckView {
 
   syncBoard() {
     const picked = this.chosen();
-    this.boardEl.querySelectorAll('.bt').forEach(t => t.classList.toggle('on', picked.includes(t.dataset.item)));
+    const said = this.s.parts[this.topId()] || {};
+    this.boardEl.querySelectorAll('.bt').forEach(t => {
+      t.classList.toggle('on', picked.includes(t.dataset.item));
+      t.classList.toggle('said', !!((said[t.dataset.item] || {}).text || '').trim());
+    });
     const count = this.boardEl.querySelector('#boardcount');
     if (count) count.textContent = `${picked.length} selected`;
   }
@@ -1135,6 +1142,12 @@ export class DeckView {
         count: () => this.chosen().length,
       },
       ink: this.inkFor(card.id, null, () => { this.closeBoard(); this.openComposer(); }),
+      // A comment on one item, kept and sent like a part's.
+      comments: {
+        text: i => ((this.s.parts[card.id] || {})[items[i].id] || {}).text || '',
+        typed: (i, text) => { this.partTyped(card.id, items[i].id, text); this.syncBoard(); },
+        done: () => { this.sendParts(true); this.syncBoard(); },
+      },
     });
   }
 

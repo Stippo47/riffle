@@ -11,7 +11,7 @@ import { addressOf, linkify, linkText, plainLinks, splitAddress } from './links.
 import { initIsland, islandNow, setIsland } from './island.js';
 import { MineView, deckFromFile, fileOf, liveCards, liveDecks, mergeDecks, mineKey, mineOf } from './mine.js';
 
-const VERSION = '0.9.1';
+const VERSION = '0.10.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.

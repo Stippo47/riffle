@@ -146,6 +146,7 @@ If a card is technical with no context, they'll send it back. So:
 - **Things brought to notes**: their deck notes can hold references to a picture, a film at a moment, a drawing, or quoted words from a card, like `[Film at 0:12, The walk](riffle:...)`. `riffle answers` writes out which picture or film and when: look at it there.
 - **Drawings** are pictures they drew on, to circle or arrow what they mean. `riffle answers` lists each with what it was drawn over. Open it: the circle is the point of the comment.
 - **Parts** show under their card: `part feet (Feet): PROBLEM, "they slide"`. A part can be marked or commented on without the card being swiped. `riffle redeal` lists parts marked problem or huh.
+- **Board items** can have comments of their own, from the full-screen look at one: `item f1 (Spinning): "the spin wobbles"`, under their board.
 - **Deck: replan** means the whole deck's premise is off. Rethink it from the base. **Started over** means they want to go through it again.
 - **Feel test** lines are test answers, but they're still their words. See them with `riffle answers --pack feel-test`.
 

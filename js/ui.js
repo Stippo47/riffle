@@ -123,13 +123,22 @@ function caretToEnd(el) {
   sel.addRange(r);
 }
 // iPhones only raise the keyboard for a focus during a finger's lift. This runs during the pointer's
-// lift and tries once more on the touch's own end, whichever of them counts.
+// lift and tries once more on the touch's own end, whichever of them counts. Only the touch that's
+// down now: a try left waiting after a click (which comes after the touch ended) would catch the next
+// tap anywhere, and open this box again under a finger that meant something else.
+let fingersDown = 0;
+const countFingers = e => { fingersDown = e.touches ? e.touches.length : 0; };
+for (const t of ['touchstart', 'touchend', 'touchcancel']) document.addEventListener(t, countFingers, { capture: true, passive: true });
 export function padFocus(el) {
   el.focus();
   caretToEnd(el);
-  document.addEventListener('touchend', () => {
+  if (!fingersDown) return;
+  const again = () => {
+    clearTimeout(expire);
     if (document.activeElement !== el && !el.closest('[hidden]')) { el.focus(); caretToEnd(el); }
-  }, { once: true, capture: true });
+  };
+  const expire = setTimeout(() => document.removeEventListener('touchend', again, true), 1000);
+  document.addEventListener('touchend', again, { once: true, capture: true });
 }
 export function padBlur(el) {
   el.blur();
@@ -187,6 +196,13 @@ const blurSoon = () => {
 };
 document.addEventListener('scroll', blurSoon, { capture: true, passive: true });
 document.addEventListener('pointerup', () => setTimeout(blurHidden, 60), { capture: true });
+// The strip under the words, where the link and photo buttons sit, is still the box: a tap there types.
+document.addEventListener('click', e => {
+  const w = e.target;
+  if (!w || !w.classList || !w.classList.contains('padwrap')) return;
+  const pad = w.querySelector('.pad');
+  if (pad) padFocus(pad);
+});
 // Any box that's focused is brought into view above the keyboard, wherever it is.
 document.addEventListener('focusin', e => { if (e.target && e.target.classList && e.target.classList.contains('pad')) revealPad(e.target); });
 
