@@ -547,23 +547,30 @@ write('d/race.json', deck(good_card('r1')))
 code, out = run('deck', str(work / 'd/race.json'), '--pack', 'proj', '--quiet')
 ok(code == 0 and (clone / 'answers/2026-11-02T12-03-00-000Z-ddd.json').exists(), 'a deck sent while answers land keeps both', out)
 
+
 print('Waiting for them')
 os.environ['RIFFLE_WAIT_FLOOR'] = '0.3'
+from datetime import datetime as _dt, timezone as _tz
+
+
+def nowz(ahead=0):
+    return _dt.fromtimestamp(time.time() + ahead, _tz.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 
 def start_wait(*args):
-    env = {**os.environ, 'RIFFLE_DATA': str(clone), 'HOME': str(home), 'USERPROFILE': str(home), 'PYTHONIOENCODING': 'utf-8', 'RIFFLE_WAIT_FLOOR': '0.3'}
+    env = {**os.environ, 'RIFFLE_DATA': str(clone), 'HOME': str(home), 'USERPROFILE': str(home), 'PYTHONIOENCODING': 'utf-8'}
     w = subprocess.Popen([sys.executable, str(RIFFLE), 'wait', '--pack', 'proj', '--every', '0.3', *args], cwd=work, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=env)
-    time.sleep(2.5)  # its first look sets what counts as already there
+    time.sleep(3)  # its first look sets what counts as already there
     return w
 
 
-def finished(w, most=15):
+def finished(w, most=20):
     try:
         out, _ = w.communicate(timeout=most)
         return w.returncode, out
     except subprocess.TimeoutExpired:
-        return None, ''
+        w.kill()
+        return None, w.communicate()[0]
 
 
 def still_waiting(w, for_seconds=2.5):
@@ -571,51 +578,100 @@ def still_waiting(w, for_seconds=2.5):
     return w.poll() is None
 
 
+def order_file():
+    git(clone, 'pull', '-q', 'origin', 'main')
+    p = clone / 'packs/proj/order.json'
+    return json.loads(p.read_text(encoding='utf-8')) if p.exists() else {'decks': {}}
+
+
+def clear_woke():
+    run('started', '--pack', 'proj', '--quiet')
+
+
+for name in ('second', 'third', 'fourth'):
+    write(f'd/{name}.json', deck(good_card('x')))
+    run('deck', str(work / f'd/{name}.json'), '--pack', 'proj', '--id', name, '--quiet')
+
 stamp = '2026-11-16T09:00:00.000Z'
-w = start_wait('--deck', 'first')
-phone_sends('2026-11-16T09-00-00-000Z-w01.json', {'eid': 'w1', 'at': stamp, 'type': 'answer', 'card': 'a', 'cardVersion': 1, 'title': 'A', 'kind': 'question', 'swipe': 'right', 'stamp': 'GO', 'comment': ''})
+w = start_wait('--deck', 'first', '--quiet', '0')
+phone_sends('2026-11-16T09-00-00-000Z-w01.json', {'eid': 'w1', 'at': nowz(), 'type': 'answer', 'card': 'a', 'cardVersion': 1, 'title': 'A', 'kind': 'question', 'swipe': 'right', 'stamp': 'GO', 'comment': ''})
 ok(still_waiting(w), 'a plain answer does not wake a deck wait')
-phone_sends('2026-11-16T09-00-01-000Z-w02.json', {'eid': 'w2', 'at': stamp, 'type': 'wake', 'deck': 'other', 'answered': 1, 'total': 3})
-ok(still_waiting(w), 'nor does another deck being sent')
-phone_sends('2026-11-16T09-00-02-000Z-w03.json', {'eid': 'w3', 'at': stamp, 'type': 'thought', 'id': 't9', 'text': 'An idea', 'deck': None, 'topic': None})
+phone_sends('2026-11-16T09-00-01-000Z-w02.json', {'eid': 'w2', 'at': nowz(), 'type': 'wake', 'deck': 'other', 'answered': 1, 'total': 3})
+ok(still_waiting(w), 'nor does another deck being dealt in')
+phone_sends('2026-11-16T09-00-02-000Z-w03.json', {'eid': 'w3', 'at': nowz(), 'type': 'thought', 'id': 't9', 'text': 'An idea', 'deck': None, 'topic': None})
 ok(still_waiting(w), 'nor a thought, when only some decks are waited on')
-phone_sends('2026-11-16T09-00-03-000Z-w04.json', {'eid': 'w4', 'at': stamp, 'type': 'deck', 'verdict': 'done', 'tally': {'right': 2}, 'answered': 2, 'total': 2, 'demo': True})
+phone_sends('2026-11-16T09-00-03-000Z-w04.json', {'eid': 'w4', 'at': nowz(), 'type': 'deck', 'verdict': 'done', 'tally': {'right': 2}, 'answered': 2, 'total': 2, 'demo': True})
 ok(still_waiting(w), 'nor the Feel test')
-phone_sends('2026-11-16T09-00-04-000Z-w05.json', {'eid': 'w5', 'at': stamp, 'type': 'deck', 'verdict': 'done', 'tally': {'right': 2}, 'answered': 2, 'total': 2})
+phone_sends('2026-11-16T09-00-04-000Z-w05.json', {'eid': 'w5', 'at': nowz(1), 'type': 'deck', 'verdict': 'done', 'tally': {'right': 2}, 'answered': 2, 'total': 2})
 code, out = finished(w)
-ok(code == 0 and "deck first: Deck's done (2 of 2 answered)" in out and 'riffle answers --pack proj' in out, "the deck's done wakes it, and says what to run", out)
+ok(code == 0 and "deck first: Deck's done (2 of 2 answered)" in out and 'riffle answers --pack proj' in out and 'riffle started --deck first' in out, "the deck's done wakes it, and says what to run next", out)
 
-w = start_wait('--deck', 'first')
-phone_sends('2026-11-16T09-00-05-000Z-w06.json', {'eid': 'w6', 'at': stamp, 'type': 'wake', 'answered': 1, 'total': 4})
+ok((home / '.riffle/woke/proj.json').exists(), 'a wait that fired leaves a note, until a writer says it started')
+code, out = run('status', '--pack', 'proj')
+ok('A WAIT FIRED' in out, 'status shows it, so a restarted session sees what it missed', out)
+code, out = run('wait', '--pack', 'proj', '--deck', 'first', '--every', '0.3')
+ok(code == 0 and 'already fired' in out, 'and waiting again returns at once', out)
+code, out = run('started', '--pack', 'proj', '--deck', 'first', '--note', 'the rivers')
+ok(code == 0 and not (home / '.riffle/woke/proj.json').exists(), 'started clears the note', out)
+ok('working' in order_file()['decks'].get('first', {}).get('tags', []), 'and marks the deck Being worked on')
+ok(any(n['body'] == 'Started on A deck: the rivers' for n in sent_notices()), 'and tells their phone', sent_notices())
+code, out = run('started', '--pack', 'proj', '--deck', 'first', '--stop', '--quiet')
+ok('working' not in order_file()['decks'].get('first', {}).get('tags', []), '--stop takes Being worked on off')
+
+w = start_wait('--deck', 'first', '--deck', 'second', '--quiet', '0')
+o = order_file()['decks']
+ok(o.get('first', {}).get('with') == ['second'] and o.get('second', {}).get('with') == ['first'], 'decks needed together are marked on the phone', o)
+ok(still_waiting(w), 'one finished deck is not enough when two are needed')
+phone_sends('2026-11-16T09-00-06-000Z-w06.json', {'eid': 'w6', 'at': nowz(1), 'type': 'deck', 'verdict': 'replan', 'tally': {}, 'answered': 0, 'total': 1, 'deck': 'second'})
 code, out = finished(w)
-ok(code == 0 and 'Sent what they have so far (1 of 4 answered)' in out, 'so does sending a part-done deck', out)
+ok(code == 0 and "deck first: Deck's done" in out and 'deck second: Replan this deck' in out, 'both finished wakes it, replan counting as finished', out)
+run('started', '--pack', 'proj', '--deck', 'first', '--deck', 'second', '--quiet')
+o = order_file()['decks']
+ok('with' not in o.get('first', {}) and 'with' not in o.get('second', {}), 'and started takes the marks off', o)
 
-w = start_wait()
-phone_sends('2026-11-16T09-00-06-000Z-w07.json', {'eid': 'w7', 'at': stamp, 'type': 'thought', 'id': 't10', 'text': 'Try the river again', 'deck': None, 'topic': None})
+w = start_wait('--deck', 'third', '--quiet', '0.12')
+phone_sends('2026-11-16T09-00-07-000Z-w07.json', {'eid': 'w7', 'at': nowz(1), 'type': 'deck', 'verdict': 'done', 'tally': {'right': 1}, 'answered': 1, 'total': 1, 'deck': 'third'})
+ok(still_waiting(w, 2), 'a finished deck waits until their phone has been quiet')
 code, out = finished(w)
-ok(code == 0 and 'a thought: "Try the river again"' in out, 'a whole-pack wait wakes on a thought', out)
+ok(code == 0 and "deck third: Deck's done" in out, 'then wakes', out)
+clear_woke()
 
-w = start_wait('--topic', 'first', '--on', 'deck,thought')
-phone_sends('2026-11-16T09-00-07-000Z-w08.json', {'eid': 'w8', 'at': stamp, 'type': 'thought', 'id': 't11', 'text': 'Asked for by name', 'deck': None, 'topic': None})
+w = start_wait('--deck', 'fourth', '--quiet', '30')
+phone_sends('2026-11-16T09-00-08-000Z-w08.json', {'eid': 'w8', 'at': stamp, 'type': 'wake', 'answered': 1, 'total': 4, 'deck': 'fourth'})
+code, out = finished(w)
+ok(code == 0 and 'deck fourth: dealt in now (1 of 4 answered)' in out, 'dealing in wakes it at once, past the quiet and an unfinished deck', out)
+clear_woke()
+
+w = start_wait('--quiet', '0')
+phone_sends('2026-11-16T09-00-09-000Z-w09.json', {'eid': 'w9', 'at': stamp, 'type': 'thought', 'id': 't10', 'text': 'Try the river again', 'deck': None, 'topic': None})
+code, out = finished(w)
+ok(code == 0 and 'a thought: "Try the river again"' in out, 'a whole-pack wait wakes on a thought, even one stamped earlier but sent late', out)
+clear_woke()
+
+w = start_wait('--topic', 'first', '--on', 'deck,thought', '--quiet', '0')
+phone_sends('2026-11-16T09-00-10-000Z-w10.json', {'eid': 'w10', 'at': stamp, 'type': 'thought', 'id': 't11', 'text': 'Asked for by name', 'deck': None, 'topic': None})
 code, out = finished(w)
 ok(code == 0 and 'Asked for by name' in out, 'and a narrower one too, when thoughts are asked for', out)
+clear_woke()
 
-w = start_wait()
+w = start_wait('--quiet', '0')
 (other / 'packs/proj/mine').mkdir(parents=True, exist_ok=True)
 (other / 'packs/proj/mine/wait-deck.json').write_text(json.dumps({'v': 1, 'id': 'wait-deck', 'title': 'Late ideas', 'cards': []}), encoding='utf-8')
 git(other, 'add', '-A'); git(other, 'commit', '-q', '-m', 'mine'); git(other, 'pull', '-q', '--rebase', 'origin', 'main'); git(other, 'push', '-q', 'origin', 'HEAD:main')
 code, out = finished(w)
 ok(code == 0 and 'their own deck "Late ideas" changed' in out and 'riffle mine' in out, 'and on one of their own decks changing', out)
+clear_woke()
 
-code, out = run('wait', '--pack', 'proj', '--deck', 'first', '--since', '2026-11-16T09:00:00.000Z', '--every', '0.3')
-ok(code == 0 and "Deck's done" in out, '--since counts what landed before it started', out)
+code, out = run('wait', '--pack', 'proj', '--since', '2026-11-16T08:59:00.000Z', '--every', '0.3', '--quiet', '0')
+ok(code == 0 and 'deck other: dealt in now' in out, '--since counts what landed before it started, a deal-in first', out)
+clear_woke()
 
 before = git(clone, 'status', '--porcelain').stdout
-code, out = run('wait', '--pack', 'proj', '--deck', 'first', '--every', '0.3', '--hours', '0.0003')
+code, out = run('wait', '--pack', 'proj', '--deck', 'fifth', '--every', '0.3', '--hours', '0.0003')
 ok(code == 2 and 'Nothing yet' in out, 'it gives up after --hours, with exit code 2', out)
 ok(git(clone, 'status', '--porcelain').stdout == before, 'and waiting never touches the working folder')
 code, out = run('answers', '--pack', 'proj', '--all')
-ok('SENT SO FAR: start on what is answered (1 of 4)' in out, 'answers shows a part-done deck sent to the writer', out)
+ok('DEALT IN: start now on what is answered (1 of 4)' in out, 'answers shows a deck dealt in', out)
 code, out = run('wait', '--pack', 'proj', '--on', 'cards')
 ok(code == 1 and '--on takes' in out, 'a wrong --on is refused', out)
 

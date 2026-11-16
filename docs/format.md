@@ -57,8 +57,10 @@ read.json
 The writer's say on decks, written by `riffle order` and `riffle archive`, so sending a deck again never undoes it. What's here wins over the same field in the deck's file.
 
 ```json
-{ "decks": { "this-week": { "priority": 1, "tags": ["first", "working"], "kind": "report", "archived": "2026-11-11T20:00:00.000Z" } } }
+{ "decks": { "this-week": { "priority": 1, "tags": ["first", "working"], "kind": "report", "archived": "2026-11-11T20:00:00.000Z", "with": ["next-week"] } } }
 ```
+
+`with` is written by `riffle wait` when a writer needs several decks finished together, and taken off by `riffle started`. The deck's end then says what else the writer needs.
 
 ## Their own decks: mine/<deck-id>.json
 
@@ -252,7 +254,7 @@ Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typ
 | `thought` | `id`, `text`, with `deck` null | A general thought about the pack |
 | `deck` | `verdict` (`done`, `replan`), `tally`, `answered`, `total` | The deck as a whole. `replan` means rethink it from the base; the answers still stand |
 | `part` | `card`, `cardVersion`, `title`, `kind`, `part`, `partTitle`, `mark`, `stamp`, `comment`, and on a board `item` | What's said about one part of a card. `mark` is a meaning like `swipe` (`right`, `left` or `down`), or null for none. The latest for a part stands, whether or not the card is answered. On a board, `item: true` means it's a comment on one item: `part` is the item's id, `partTitle` its label, and there's no mark |
-| `wake` | `answered`, `total` | They pressed **Send what I have to the writer** in the deck's grid: start on what's answered so far. Like `deck`, it wakes a `riffle wait` on that deck. The deck isn't finished |
+| `wake` | `answered`, `total` | They pressed **Deal in now**, at the deck's end or in its grid: start now on what's answered so far. It wakes a `riffle wait` on that deck at once, past the quiet minutes and any other deck it needs. From the grid, the deck isn't finished |
 | `archive` | `archived` | They archived the deck on the phone (`true`), or brought it back (`false`). Whichever of this and the writer's `archived` in order.json is later stands |
 | `deck-reset` | `keptNotes` | They started the deck over. Answers on this deck from before this no longer stand, though anything they typed was still said. If `keptNotes`, comments came back as drafts on their cards, and the notes stayed |
 

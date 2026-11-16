@@ -642,6 +642,7 @@ export class DeckView {
       jump: () => this.jump(btn.dataset.id),
       gridnotes: () => { this.hideOverview(); if (this.topId()) this.toggleNotes(true); else padFocus(this.endBox.querySelector('#endnotes')); },
       gridwake: () => this.wakeWriter(btn),
+      dealin: () => { this.wakeWriter(null); this.verdict('done'); },
       gridreplan: () => { this.hideOverview(); this.showEnd('replan'); },
       gridover: () => { this.hideOverview(); this.showStartOver(); },
       gridarchive: () => this.nav.archive && this.nav.archive(),
@@ -2135,7 +2136,7 @@ export class DeckView {
         ${tiles}
         <div class="ov-foot">
           <button class="ghostbtn" data-act="gridnotes">${icon('notebook-pen')}Deck notes</button>
-          ${this.pack.demo ? '' : `<button class="ghostbtn" data-act="gridwake">${icon('bell')}Send what I have to the writer</button>`}
+          ${this.pack.demo ? '' : `<button class="ghostbtn" data-act="gridwake">${icon('bell')}Deal in now</button>`}
           <button class="ghostbtn" data-act="gridreplan">${icon('message-square-text')}Replan this deck</button>
           <button class="ghostbtn" data-act="gridover">${icon('rotate-ccw')}Start this deck over</button>
           ${this.nav.archive ? `<button class="ghostbtn" data-act="gridarchive">${icon(this.nav.archived ? 'archive-restore' : 'archive')}${this.nav.archived ? 'Bring this deck back' : 'Archive this deck'}</button>` : ''}
@@ -2176,6 +2177,7 @@ export class DeckView {
     const mins = Math.max(1, Math.round((Date.now() - (this.s.startedAt || Date.now())) / 60000));
     const sum = deckSummary(this.deck, this.s);
     const early = mode === 'replan';
+    const with_ = this.neededWith();
     const sub = early
       ? `This asks for the deck to be rethought from the base. Your ${sum.total - sum.left} answer${sum.total - sum.left === 1 ? '' : 's'} stay, and nothing here is cleared.`
       : `${sum.total} card${sum.total === 1 ? '' : 's'} in about ${mins} minute${mins === 1 ? '' : 's'}.`;
@@ -2187,9 +2189,11 @@ export class DeckView {
         <div class="padwrap">${padHTML('endnotes', 'Anything else on this deck?')}<div class="photostrip" id="endphotos" hidden></div>${linkButton('endnotes')}${photoButton('notes')}</div>
         <div class="end-actions">
           ${early ? '' : `<button class="primary" data-act="done">Deck's done</button>`}
+          ${early || this.pack.demo ? '' : `<button class="secondary" data-act="dealin">${icon('bell')}Deal in now</button>`}
           <button class="${early ? 'primary' : 'secondary'}" data-act="replan">Replan this deck</button>
           ${early ? '<button class="ghostbtn" data-act="keepgoing">Never mind</button>' : ''}
         </div>
+        ${early || this.pack.demo ? '' : `<div class="end-sub small end-wake">Deck's done: Claude starts once you've put the phone down for 5 minutes${with_.length ? `, and once ${esc(with_.join(', '))} ${with_.length === 1 ? 'is' : 'are'} done too` : ''}. Deal in now: it starts straight away.</div>`}
       </div>`;
     const pad = this.endBox.querySelector('#endnotes');
     padSet(pad, this.s.notes || '');
@@ -2293,15 +2297,22 @@ export class DeckView {
     requestAnimationFrame(step);
   }
 
-  // Tells the writer to start on what's answered so far, without finishing the deck. A writer waiting on
-  // this deck (riffle wait) wakes on it, as it does on "Deck's done".
+  // Deal in: the writer starts now, on what's answered so far. A writer waiting on this deck (riffle wait)
+  // wakes at once, without the quiet minutes "Deck's done" waits for, or the other decks it needs.
   wakeWriter(btn) {
     this.sendNotes();
     this.sendDrafts();
     const sum = deckSummary(this.deck, this.s);
     this.send({ type: 'wake', answered: sum.total - sum.left, total: sum.total });
     setTimeout(() => flush().catch(() => {}), 300);
-    if (btn) { btn.disabled = true; btn.innerHTML = `${icon('check')}Sent to the writer`; }
+    if (btn) { btn.disabled = true; btn.innerHTML = `${icon('check')}Dealt in`; }
+  }
+
+  // The decks a waiting writer needs along with this one, by title, from order.json's `with`.
+  neededWith() {
+    const o = (((this.pack.orderFile || {}).decks) || {})[this.deck.id] || {};
+    const decks = this.pack.decks || [];
+    return [].concat(o.with || []).map(id => (decks.find(d => d.id === id) || {}).title || id);
   }
 
   verdict(which) {

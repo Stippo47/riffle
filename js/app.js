@@ -11,7 +11,7 @@ import { addressOf, linkify, linkText, plainLinks, splitAddress } from './links.
 import { initIsland, islandFrom, islandNow, islandRect, setIsland } from './island.js';
 import { MineView, deckFromFile, fileOf, liveCards, liveDecks, mergeDecks, mineKey, mineOf } from './mine.js';
 
-const VERSION = '0.12.0';
+const VERSION = '0.13.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -441,7 +441,7 @@ function packTile(p, left, count, big = 0) {
 // What the writer says about a deck: its answer-first priority, tags, kind and archiving. From
 // packs/<pack>/order.json, which `riffle order` and `riffle archive` write, or the deck's own file.
 const TAGS = { working: 'Being worked on', first: 'Answer first', waiting: 'Waiting on you' };
-const KIND_WORD = { report: 'Report', questions: 'Questions', board: 'Board' };
+const KIND_WORD = { report: 'Report', questions: 'Questions', board: 'Spread' };
 const RANK = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5 };
 const SORTS = [['suggested', 'Suggested'], ['importance', 'Importance'], ['date', 'Newest'], ['topics', 'Topics']];
 

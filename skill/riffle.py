@@ -1091,7 +1091,7 @@ def cmd_answers(a):
                 print(f'  DECK: {"done" if v.get("verdict") == "done" else "REPLAN FROM THE BASE"} ({v.get("answered")} of {v.get("total")} answered)')
             if d.get('wake') and d['wake'] in shown:
                 w = d['wake']
-                print(f'  SENT SO FAR: start on what is answered ({w.get("answered")} of {w.get("total")}), the deck is not finished')
+                print(f'  DEALT IN: start now on what is answered ({w.get("answered")} of {w.get("total")}), the deck is not finished')
             if d.get('archive') and d['archive'] in shown:
                 print(f'  They {"archived this deck" if d["archive"].get("archived") else "brought this deck back from the archive"}.')
         for pack, items in sorted(thoughts.items(), key=lambda kv: str(kv[0])):
@@ -1440,6 +1440,10 @@ def cmd_status(a):
         p = load_json(DATA / 'packs' / pack / 'pack.json')
         waiting = len(unread(events, state, pack))
         print(f'\n{pack}: {p.get("title")}' + (f' ({waiting} new event{"" if waiting == 1 else "s"} to read)' if waiting else ''))
+        if woke_path(pack).exists():
+            w = load_json(woke_path(pack))
+            print(f'  A WAIT FIRED at {w.get("at")} and no writer has said it started: {"; ".join(w.get("reasons", []))}')
+            print('  Read the answers, then riffle started (or wait again).')
         order = load_order(pack)
         for deck_id, deck in decks_of(pack).items():
             d = decks.get((pack, deck_id), {'answers': {}, 'verdict': None})
@@ -1645,6 +1649,7 @@ def start_waiter(wait):
 # ---------- waiting for them
 
 WAIT_ON = ('deck', 'thought', 'mine')
+WOKE = OWN_FILES / 'woke'  # a wait that fired, until a writer says it started: so a restarted session sees what it missed
 
 
 def remote_head():
@@ -1682,24 +1687,106 @@ def blobs(ref, paths):
     return found
 
 
-def wake_reasons(events, pack, decks, topics, on, since):
-    """What in these new events should wake the writer waiting on this pack."""
-    out = []
-    for e in events:
-        if e.get('pack') != pack or e.get('demo') or (since and seconds(e.get('at')) < since):
+def events_at(ref):
+    """Every event on GitHub's main, by time, repeats dropped. Like read_events, without the working folder."""
+    names = sorted(n for n in tree_names(ref, 'answers') if n.endswith('.json') and not n.startswith('connect-check'))
+    events, seen = [], set()
+    for path, text in blobs(ref, [f'answers/{n}' for n in names]).items():
+        try:
+            batch = json.loads(text or '{}')
+        except ValueError:
             continue
-        t = e.get('type')
-        if t in ('deck', 'wake') and 'deck' in on:
-            if decks and e.get('deck') not in decks:
+        for e in batch.get('events', []):
+            if e.get('eid') in seen:
                 continue
-            if topics and e.get('topic') not in topics:
-                continue
-            n = f"{e.get('answered', '?')} of {e.get('total', '?')} answered"
-            what = {'done': "Deck's done", 'replan': 'Replan this deck'}.get(e.get('verdict'), 'Sent what they have so far')
-            out.append(f"deck {e.get('deck')}: {what} ({n})")
-        elif t == 'thought' and 'thought' in on:
-            out.append(f"a thought: \"{readable(e.get('text', ''))[:160]}\"")
-    return out
+            seen.add(e.get('eid'))
+            e['_file'] = path.split('/', 1)[1]
+            events.append(e)
+    events.sort(key=lambda e: e.get('at', ''))
+    return events
+
+
+def deck_finished(events, pack, deck_id, deck):
+    """Their verdict on the deck as it is now: done or replan, given since its cards last changed and not started over since."""
+    last = None
+    for e in events:
+        if e.get('pack') != pack or e.get('deck') != deck_id or e.get('demo'):
+            continue
+        if e.get('type') == 'deck':
+            last = e
+        elif e.get('type') == 'deck-reset':
+            last = None
+    if last and seconds(last.get('at')) >= seconds((deck or {}).get('updated')):
+        return last
+    return None
+
+
+def verdict_words(e):
+    what = "Deck's done" if e.get('verdict') == 'done' else 'Replan this deck'
+    return f"deck {e.get('deck')}: {what} ({e.get('answered', '?')} of {e.get('total', '?')} answered)"
+
+
+def last_activity(events):
+    """When their phone last did anything. A phone's clock can run ahead, so no event counts as later than
+    when this machine first saw it (`_seen`)."""
+    return max([min(seconds(e.get('at')), e.get('_seen', float('inf'))) for e in events if not e.get('demo')] or [0])
+
+
+def wait_status(events, pack, decks, topics, on, is_fresh, deck_files, now_s, quiet, extra=()):
+    """(wake now?, reasons, decks still needed, seconds of quiet left).
+
+    Dealing in wakes at once. Anything else waits until every deck asked for is finished, then until
+    their phone has sent nothing, in any pack, for `quiet` seconds: they've put it down."""
+    mine = [e for e in events if e.get('pack') == pack and not e.get('demo')]
+    fresh = [e for e in mine if is_fresh(e)]
+    in_scope = lambda e: (not decks or e.get('deck') in decks) and (not topics or e.get('topic') in topics)
+    forced = [e for e in fresh if e.get('type') == 'wake' and in_scope(e) and 'deck' in on]
+    if forced:
+        e = forced[-1]
+        return True, [f"deck {e.get('deck')}: dealt in now ({e.get('answered', '?')} of {e.get('total', '?')} answered)"], [], 0
+    reasons, needed = [], []
+    if 'deck' in on:
+        if decks:
+            verdicts = {d: deck_finished(mine, pack, d, deck_files.get(d)) for d in sorted(decks)}
+            needed = [d for d, v in verdicts.items() if not v]
+            if not needed:
+                reasons += [verdict_words(v) for v in verdicts.values()]
+        else:
+            reasons += [verdict_words(e) for e in fresh if e.get('type') == 'deck' and in_scope(e)]
+    if 'thought' in on:
+        reasons += [f"a thought: \"{readable(e.get('text', ''))[:160]}\"" for e in fresh if e.get('type') == 'thought']
+    reasons += list(extra)
+    if not reasons:
+        return False, [], needed, None
+    left = quiet - (now_s - last_activity(events))
+    return left <= 0, reasons, needed, max(0, left)
+
+
+def mark_with(pack, decks, together):
+    """Tells the phone which decks a writer needs together, so a finished one can say what it still waits for."""
+    if len(decks) < 2:
+        return
+    sync()
+    o = load_order(pack)
+    changed = False
+    for d in decks:
+        entry = o['decks'].setdefault(d, {})
+        want = sorted(x for x in decks if x != d) if together else None
+        if entry.get('with') != want:
+            changed = True
+            if want:
+                entry['with'] = want
+            else:
+                entry.pop('with', None)
+        if not entry:
+            o['decks'].pop(d, None)
+    if changed:
+        save_json(order_path(pack), o)
+        publish(f'Waiting in {pack} on {", ".join(sorted(decks))} together', order_path(pack))
+
+
+def woke_path(pack):
+    return WOKE / f'{pack}.json'
 
 
 def cmd_wait(a):
@@ -1719,50 +1806,117 @@ def cmd_wait(a):
     for d in decks:
         if d not in known:
             print(f'  warning: no deck {d} in {pack} yet, waiting for it anyway')
+
+    missed = woke_path(pack)
+    if missed.exists():
+        w = load_json(missed)
+        if not decks or not w.get('decks') or set(w['decks']) & decks:
+            print(f'A wait on {pack} already fired at {w.get("at")}, and no writer has said it started:')
+            for r in w.get('reasons', []):
+                print(f'  - {r}')
+            print(f'Read them with: riffle answers --pack {pack}, then riffle started')
+            sys.exit(0)
+
+    start = time.time()
     since = seconds(a.since) if a.since else None
     every = max(float(os.environ.get('RIFFLE_WAIT_FLOOR', 15)), a.every)  # the tests lower the floor
-    give_up = time.time() + a.hours * 3600
+    quiet = a.quiet * 60
+    give_up = start + a.hours * 3600
+    mark_with(pack, decks, True)
 
     fetch_main()
     base = git('rev-parse', 'origin/main', check=False).stdout.strip()
-    seen = set() if since else tree_names(base, 'answers')
-    last_head = None
+    # New means a file that lands after the wait starts, not a time on their phone's clock, so words
+    # queued offline and sent later still count.
+    there = tree_names(base, 'answers')
+    is_fresh = lambda e: e.get('_file') not in there or (since is not None and seconds(e.get('at')) >= since)
     what = ', '.join(sorted(decks)) if decks else (f'topic {", ".join(sorted(topics))}' if topics else 'the whole pack')
-    print(f'Waiting on {pack} ({what}) for {" and ".join(sorted(on))}, checking every {every} seconds.', flush=True)
+    print(f'Waiting on {pack} ({what}) for {" and ".join(sorted(on))}, checking every {every:g} seconds; once finished, {a.quiet:g} quiet minutes.', flush=True)
+    last_head, events, deck_files, extra, said, first_seen = None, [], {}, [], None, {}
     while True:
         head = remote_head()
         if head and head != last_head and fetch_main():
             last_head = head
             ref = 'origin/main'
-            names = {n for n in tree_names(ref, 'answers') if n.endswith('.json') and not n.startswith('connect-check')}
-            fresh = sorted(names - seen)
-            reasons = []
-            for name, text in blobs(ref, [f'answers/{n}' for n in fresh]).items():
-                try:
-                    reasons += wake_reasons(json.loads(text or '{}').get('events', []), pack, decks, topics, on, since)
-                except ValueError:
-                    continue  # half a file can't be read; the next round will see it whole
-                seen.add(name.split('/', 1)[1])
+            events = events_at(ref)
+            for e in events:
+                e['_seen'] = first_seen.setdefault(e.get('_file'), time.time())
+            files = blobs(ref, [f'packs/{pack}/decks/{d}.json' for d in sorted(decks)])
+            deck_files = {pathlib.Path(k).stem: json.loads(v) for k, v in files.items() if v}
             if 'mine' in on:
+                # Their own decks changed since the wait began. Each change is activity on their phone too.
+                extra = []
                 changed = git('diff', '--name-only', base, ref, '--', f'packs/{pack}/mine/', check=False).stdout.split()
                 for path, text in blobs(ref, changed).items():
                     try:
-                        mine = json.loads(text or '{}')
+                        m = json.loads(text or '{}')
                     except ValueError:
                         continue
-                    if not mine.get('removed'):
-                        reasons.append(f"their own deck \"{mine.get('title') or pathlib.Path(path).stem}\" changed")
-                base = git('rev-parse', ref, check=False).stdout.strip() or base
-            if reasons:
-                print('Woke for:')
-                for r in dict.fromkeys(reasons):
-                    print(f'  - {r}')
-                print(f'Read them with: riffle answers --pack {pack}' + (' and riffle mine' if any('own deck' in r for r in reasons) else ''))
-                sys.exit(0)
+                    events.append({'type': 'mine', 'at': m.get('updated') or now(), '_seen': first_seen.setdefault(path + (m.get('updated') or ''), time.time())})
+                    if not m.get('removed'):
+                        extra.append(f"their own deck \"{m.get('title') or pathlib.Path(path).stem}\" changed")
+        go, reasons, needed, left = wait_status(events, pack, decks, topics, on, is_fresh, deck_files, time.time(), quiet, dict.fromkeys(extra))
+        note = 'quiet' if reasons and not go else ('needs', tuple(needed)) if needed and len(needed) < len(decks) else None
+        if note and note != said:
+            print('  Finished; now waiting until their phone has been quiet for a while.' if note == 'quiet' else f'  Still waiting on {", ".join(needed)}.', flush=True)
+        said = note
+        if go:
+            reasons = list(dict.fromkeys(reasons))
+            WOKE.mkdir(parents=True, exist_ok=True)
+            save_json(woke_path(pack), {'at': now(), 'decks': sorted(decks), 'reasons': reasons})
+            print('Woke for:')
+            for r in reasons:
+                print(f'  - {r}')
+            print(f'Read them with: riffle answers --pack {pack}' + (' and riffle mine' if extra else ''))
+            flags = ''.join(f' --deck {d}' for d in sorted(decks))
+            print(f'If what they said settles your direction, run: riffle started{flags} --note "what you start on"  (it tells their phone).')
+            print('If a card that decides the direction is still open, wait again instead, and tell them why with riffle notify.')
+            sys.exit(0)
         if time.time() >= give_up:
             print(f'Nothing yet after {a.hours:g} hours. Run wait again to keep waiting.')
             sys.exit(2)
         time.sleep(every)
+
+
+def cmd_started(a):
+    """A writer picked up: tells their phone, marks the decks Being worked on, and clears what the wait left."""
+    pack = pack_from(a)
+    if not pack:
+        die('Which pack? Give --pack, or run this inside a project with a .riffle-pack file.')
+    need_pack(pack)
+    decks = list(dict.fromkeys(a.deck or []))
+    for d in decks:
+        need_deck(pack, d)
+    sync()
+    if decks:
+        o = load_order(pack)
+        for d in decks:
+            entry = o['decks'].setdefault(d, {})
+            tags = [t for t in (entry.get('tags') or []) if t != 'waiting']
+            if a.stop:
+                tags = [t for t in tags if t != 'working']
+            elif 'working' not in tags:
+                tags.append('working')
+            if tags:
+                entry['tags'] = tags
+            else:
+                entry.pop('tags', None)
+            entry.pop('with', None)
+            if not entry:
+                o['decks'].pop(d, None)
+        save_json(order_path(pack), o)
+        publish(f'{"Finished" if a.stop else "Started"} in {pack}: {", ".join(decks)}', order_path(pack))
+    woke_path(pack).unlink(missing_ok=True)
+    if a.quiet:
+        return
+    p = load_json(DATA / 'packs' / pack / 'pack.json')
+    titles = [(decks_of(pack).get(d) or {}).get('title') or d for d in decks]
+    body = f'{"Finished" if a.stop else "Started"} on {", ".join(titles) if titles else "what you sent"}'
+    if a.note:
+        body += f': {a.note}'
+    url = f'./#open={urllib.parse.quote(pack)}' + (f'/{urllib.parse.quote(decks[0])}' if decks else '')
+    send_notification(p.get('title') or pack, body, owed_cards(summarise(read_events())[0]), f'started-{pack}', url)
+    print(f'  told their phone: {body}')
 
 
 def cmd_notify_flush(a):
@@ -1894,14 +2048,21 @@ def main():
     s.add_argument('--url', help='where a tap goes, like ./#open=pack/deck/card')
     s.set_defaults(fn=cmd_notify)
 
-    s = sub.add_parser('wait', help='wait until they finish or send a deck, or file a thought; run it in the background')
-    s.add_argument('--pack'); s.add_argument('--deck', action='append', help='only this deck; give it more than once for several')
+    s = sub.add_parser('wait', help='wait until they finish your decks or deal you in, or file a thought; run it in the background')
+    s.add_argument('--pack'); s.add_argument('--deck', action='append', help='a deck you need; give it once for each, and every one must be finished')
+    s.add_argument('--quiet', type=float, default=5, help='minutes their phone must be quiet after finishing, unless they deal you in')
     s.add_argument('--topic', action='append', help='only decks in this topic')
     s.add_argument('--on', help=f'what wakes it, of {",".join(WAIT_ON)}; all three by default, only deck with --deck or --topic')
     s.add_argument('--since', help='also count what came after this time (ISO), not only what lands from now')
     s.add_argument('--every', type=float, default=60, help='seconds between checks, 15 at least')
     s.add_argument('--hours', type=float, default=12, help='give up after this long, with exit code 2')
     s.set_defaults(fn=cmd_wait)
+
+    s = sub.add_parser('started', help='after a wait wakes you: tell their phone you started, and mark the decks Being worked on')
+    s.add_argument('--pack'); s.add_argument('--deck', action='append'); s.add_argument('--note', help='a few words on what you start on')
+    s.add_argument('--stop', action='store_true', help='finished: take Being worked on off, and say so')
+    s.add_argument('--quiet', action='store_true', help='no notification')
+    s.set_defaults(fn=cmd_started)
 
     s = sub.add_parser('notify-flush', help=argparse.SUPPRESS)
     s.add_argument('--wait', type=float, default=0)

@@ -21,7 +21,7 @@ A project names its pack with one line in a `.riffle-pack` file at its root. Wor
 riffle answers              what came back since you last read, their own decks included
 riffle answers --mark-read  the same, and records it as read, which the app's settings show
 riffle redeal               handled cards they answered, and cards sent back to you
-riffle status               every deck, what's owed, its kind, priority, tags, and whether it's archived
+riffle status               every deck, what's owed, its kind, priority, tags, whether it's archived, and any wait that fired unheard
 riffle mine                 their own decks, changed since you last read them (--every for all)
 ```
 
@@ -154,22 +154,31 @@ Log what comes back the way your project logs what they say.
 
 ## Waiting for them, then carrying on
 
-When your work is held up until they answer, don't stop and wait to be told. Send the deck, then run `riffle wait` **in the background** (the Bash tool's `run_in_background`), and end your turn. The command polls GitHub about once a minute and costs no tokens while it waits. When it exits, you're woken. Read what came back with `riffle answers` and carry on.
+When your work is held up until they answer, don't stop and wait to be told. Send the deck, then run `riffle wait` **in the background** (the Bash tool's `run_in_background`), and end your turn. The command polls GitHub about once a minute and costs no tokens while it waits. When it exits, you're woken.
 
 ```
-riffle wait --deck <deck-id>                every deck you're waiting on, one --deck each
-riffle wait --topic <topic-id>              any deck in your topic
-riffle wait                                 the whole pack: decks, thoughts and their own decks
-riffle wait --deck <deck-id> --on deck,thought   thoughts too
+riffle wait --deck <a> --deck <b>         the decks you need: every one must be finished
+riffle wait --topic <topic-id>            any deck in your topic being finished
+riffle wait                               the whole pack: decks, thoughts and their own decks
+riffle wait --deck <a> --on deck,thought  thoughts too
+riffle started --deck <a> --note "..."    once you've read what woke you and you're starting
+riffle started --deck <a> --stop          when you've finished that work
 ```
 
-- **The pack** comes from the project's `.riffle-pack`, or `--pack`. A writer only ever wakes for its own pack.
-- **What wakes it:** "Deck's done" or "Replan this deck" at a deck's end, or **Send what I have to the writer** in a deck's grid, which they use to let you start before they've answered every card. A plain swipe never wakes it. Neither does the Feel test.
-- **Thoughts and their own decks** belong to the whole pack. A wait narrowed with `--deck` or `--topic` leaves them to the pack's other writers, unless you name them with `--on`.
-- **Only what lands after it starts counts.** If you start waiting a while after sending the deck, add `--since <time the deck went up>`.
+**When it wakes you.** They decide when you start, not you:
+- **Deck's done** (or **Replan this deck**) on every deck you named, then 5 minutes with nothing from their phone, in any pack, so they've put it down. `--quiet <minutes>` changes the 5. A deck counts as finished only if they finished it after its cards last changed.
+- **Deal in now**, at a deck's end or in its grid, wakes you at once, past the quiet minutes and past any deck you still need. They use it to let you start on part of a deck.
+- With more than one `--deck`, their phone shows each of those decks' ends saying what else you need, so they know why you haven't started.
+- Thoughts and their own decks belong to the whole pack. A wait narrowed with `--deck` or `--topic` leaves them to the pack's other writers, unless you name them with `--on`.
+- A plain swipe never wakes you. Neither does the Feel test. Only what reaches GitHub after the wait starts counts as new; `--since <time>` counts earlier things too.
+
+**When you wake, you're not obliged to work.** Read what came back with `riffle answers`. If it settles your direction, run `riffle started` with the decks and a few words: their phone gets "Started on …", and the decks show Being worked on. That notification is how they know you picked up, so always send it. If a card that decides the direction is still open, don't guess: deal it back or ask, wait again, and say why with `riffle notify`. When the work is done, `riffle started --stop` takes Being worked on off.
+
+**If your session restarted while waiting**, the wait may have fired with nobody listening. It leaves a note until a writer runs `riffle started`: `riffle status` shows it as A WAIT FIRED, and `riffle wait` on that pack returns at once with what fired. Check `riffle status` at the start of every session.
+
 - **Exit 0** prints what woke it. **Exit 2** means nothing came within `--hours` (12 by default): run it again if you still need it.
-- It only reads, and never touches the clone's working folder, so you can send other decks while it runs.
-- This needs the session left open and the PC awake. A closed session has nothing to wake.
+- The wait only reads from GitHub, and never touches the clone's working folder, so you can send other decks while it runs. It writes once at the start, to mark decks needed together.
+- This needs the session left open and the PC awake.
 
 ## Dealing a card back, and marking it handled
 

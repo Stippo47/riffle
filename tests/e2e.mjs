@@ -943,6 +943,9 @@ ok(hTiles[1].includes('handled') && hTiles[1].includes('FINE'), 'a handled tile 
 await shot('42-grid-handled');
 await tap('[data-act=closegrid]');
 await sleep(120);
+const endWords = await text();
+ok(endWords.includes('Deal in now') && endWords.includes('put the phone down for 5 minutes'), "the end of a real deck offers Deal in now beside Deck's done, and says how each starts the writer", endWords);
+await shot('42b-end-deal-in');
 await tap('[data-act=done]');
 await sleep(500);
 const deckFile = JSON.parse(await (await fetch(`${API}/__file?path=${encodeURIComponent('packs/test-pack/decks/h1.json')}`)).text());
@@ -1088,7 +1091,7 @@ ok(!(await text()).includes('Send this whole deck back'), 'the old button is gon
 const wakeFilesBefore = new Set(await api('/__files'));
 await tap('[data-act=gridwake]');
 await sleep(2500);
-ok((await text()).includes('Sent to the writer'), 'the grid sends what is answered so far to the writer, and says so');
+ok((await text()).includes('Dealt in'), 'Deal in now in the grid sends what is answered so far to the writer, and says so');
 const wakeEvents = [];
 for (const n of (await api('/__files')).filter(n => isBatch(n) && !wakeFilesBefore.has(n))) {
   wakeEvents.push(...JSON.parse(await (await fetch(`${API}/__file?path=${encodeURIComponent(n)}`)).text()).events);
@@ -2336,7 +2339,7 @@ ok(JSON.stringify(await flatOrder()) === JSON.stringify(['w3', 'w1', 'w2', 'w4']
 ok((await ev(`document.querySelector('.sortbar .on').textContent`)) === 'Suggested', 'and is the order to start with');
 const rowOf = id => ev(`(()=>{const r=document.querySelector('.flatrow[data-deck=${id}]');return r?{kind:r.querySelector('.kindword').textContent,tags:[...r.querySelectorAll('.tag')].map(t=>t.textContent),prio:(r.querySelector('.prio')||{}).textContent||'',meta:r.querySelector('.fr-meta').innerText}:null})()`);
 const w3 = await rowOf('w3'), w2 = await rowOf('w2'), w1 = await rowOf('w1'), w4 = await rowOf('w4');
-ok(w3.kind === 'Board' && w2.kind === 'Report' && w1.kind === 'Questions', 'each deck says whether it is a report, questions or a board', JSON.stringify([w3, w2, w1]));
+ok(w3.kind === 'Spread' && w2.kind === 'Report' && w1.kind === 'Questions', 'each deck says whether it is a report, questions or a board', JSON.stringify([w3, w2, w1]));
 ok(w3.prio === '1' && w3.tags.join() === 'Answer first' && w1.tags.join() === 'Waiting on you' && w4.tags.join() === 'Being worked on', 'with the writer\'s priority and tags', JSON.stringify([w3, w1, w4]));
 ok(w2.meta.includes('Alpha') && w3.meta.includes('Beta'), 'and its topic', JSON.stringify([w2.meta, w3.meta]));
 await shot('94-suggested');
