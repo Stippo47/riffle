@@ -354,10 +354,13 @@ phone_sends('2026-11-02T12-00-40-000Z-prt.json',
             {'eid': 'q1', 'deck': 'parts', 'at': '2026-11-02T12:00:40.000Z', 'type': 'part', 'card': 'walk', 'cardVersion': 1, 'title': 'A title', 'kind': 'report', 'part': 'feet', 'partTitle': 'Feet', 'mark': 'left', 'stamp': 'PROBLEM', 'comment': 'They slide', 'images': ['answers/img/drawn.jpg'], 'drawings': {'answers/img/drawn.jpg': 'img/parts-part-pic.jpg'}},
             {'eid': 'q2', 'deck': 'parts', 'at': '2026-11-02T12:00:41.000Z', 'type': 'part', 'card': 'walk', 'cardVersion': 1, 'title': 'A title', 'kind': 'report', 'part': 'hips', 'partTitle': 'Hips', 'mark': 'right', 'stamp': 'GOOD', 'comment': ''},
             {'eid': 'q3', 'deck': 'parts', 'at': '2026-11-02T12:00:42.000Z', 'type': 'part', 'card': 'walk', 'cardVersion': 1, 'title': 'A title', 'kind': 'report', 'part': 'hips', 'partTitle': 'Hips', 'mark': 'down', 'stamp': 'HUH?', 'comment': 'Changed my mind'},
+            {'eid': 'q5', 'deck': 'parts', 'at': '2026-11-02T12:00:44.000Z', 'type': 'part', 'card': 'walk', 'cardVersion': 1, 'title': 'A title', 'kind': 'report', 'part': 'knees', 'partTitle': 'Knees', 'mark': 'down', 'stamp': 'DECENT', 'comment': 'Better'},
+            {'eid': 'q6', 'deck': 'parts', 'at': '2026-11-02T12:00:45.000Z', 'type': 'answer', 'card': 'run', 'cardVersion': 1, 'title': 'Run', 'kind': 'report', 'swipe': 'down', 'stamp': 'DECENT', 'comment': ''},
             {'eid': 'q4', 'deck': 'inpack', 'at': '2026-11-02T12:00:43.000Z', 'type': 'answer', 'card': 'a', 'cardVersion': 1, 'title': 'A title', 'kind': 'question', 'swipe': 'left', 'stamp': 'WORKSHOP', 'comment': 'See my drawing', 'images': ['answers/img/d2.jpg'], 'drawings': {'answers/img/d2.jpg': 'img/first-big.jpg'}})
 code, out = run('answers', '--pack', 'proj')
 ok('walk (A title): not swiped yet. On its parts:' in out and 'part feet (Feet): PROBLEM, "They slide"' in out, 'a part answer shows under its card, with its mark and comment', out)
 ok('part hips (Hips): HUH?, "Changed my mind"' in out and 'GOOD' not in out.split('part hips')[1].split('\n')[0], 'the latest on a part stands', out)
+ok('part knees (Knees): DECENT, "Better"' in out and 'run (Run): DECENT' in out, "a report's down reads DECENT now, and one said before 0.11.0 still reads HUH?, as it was said", out)
 ok('answers/img/drawn.jpg (still uploading) (their drawing over img/parts-part-pic.jpg)' in out, 'a drawing is listed with its path and what it was drawn over', out)
 ok('a (A title): WORKSHOP' in out and '(their drawing over img/first-big.jpg)' in out, 'on a card comment too', out)
 phone_sends('2026-11-02T12-00-45-000Z-lnk.json',

@@ -31,7 +31,7 @@ export const DEMO_PACK = {
         {
           id: 'start', kind: 'report', rarity: 'common', title: 'Start here',
           text: 'This is a report card. It says what happened.',
-          why: 'Swipe {go} for good, {workshop} if there is a problem, {idk} if you don\'t quite follow. Swipe {comment} to add a comment. Swipe this one {go}.',
+          why: 'Swipe {go} for good, {workshop} if there is a problem, {idk} for decent: fine, but not happy yet, or not quite following. Swipe {comment} to add a comment. Swipe this one {go}.',
           details: 'Report cards don\'t ask for anything. They tell you where things stand, and your swipe tells me how that lands.\n\nA question card works the same way, but {go} means go with my pick and {workshop} means work on it.\n\nThe directions can be changed: gear, then Swipe directions.\n\nTap the words at the bottom of this side to flip back.',
         },
         {
@@ -86,8 +86,8 @@ export const DEMO_PACK = {
         {
           id: 'pinch', kind: 'question', rarity: 'common', title: 'Mini player',
           text: 'Pinch this card to shrink the deck into a corner.',
-          why: 'It becomes a small card you can drag to any corner. Open another deck, even write a comment there, then tap the small card to swap back. The Grid button shows the whole deck.',
-          pick: 'A pinch shrinks the deck, and Grid shows all of it.',
+          why: 'It becomes a small card you can drag to any corner. Open another deck, even write a comment there, then tap the small card to swap back. The deck name at the top shows the whole deck.',
+          pick: "A pinch shrinks the deck, and the deck's name at the top shows all of it.",
         },
         {
           id: 'speed', kind: 'question', rarity: 'common', title: 'Speed',
@@ -193,7 +193,7 @@ export const DEMO_PACK = {
           text: 'This report has three parts. Tap it to read them.',
           why: 'Each part can be marked and commented on by itself, apart from your swipe on the whole card.',
           parts: [
-            { id: 'one', title: 'Marking a part', text: 'Under each part are Good, Problem and Huh?. Tap one to mark this part. Tap it again to take it back.' },
+            { id: 'one', title: 'Marking a part', text: 'Under each part are Good, Problem and Decent. Tap one to mark this part. Tap it again to take it back.' },
             { id: 'two', title: 'Commenting on a part', text: 'The speech bubble opens a box under this part. What you type there is about this part only. Tap Done, or drag the box down, to close it.' },
             { id: 'three', title: 'Drawing on a part\'s picture', text: 'Tap the picture, then Draw. Circle something with one finger, and pinch with two to zoom while you do. Done puts the drawing on this part\'s comment.', images: [picture(3, 120)] },
           ],

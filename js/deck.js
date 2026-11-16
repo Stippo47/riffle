@@ -2,7 +2,7 @@
 // A card's answer is recorded by what it means. `swipe` is logical: right is go, left is workshop,
 // down is idk, up is comment. Which way the finger goes for each is the map in ui.js.
 import { TUNE, decide, dominant, progress, track, watchPinch } from './gesture.js';
-import { blurHidden, clamp, dragToClose, esc, fillDirs, icon, KINDS, kindOf, logicalOf, MARK_ICON, padBlur, padFocus, padHTML, padReady, padSet, paintNotices, paras, physicalOf, plainSlot, RARITY, revealPad, stampWord, tick } from './ui.js';
+import { blurHidden, clamp, dragToClose, esc, fillDirs, icon, KINDS, kindOf, logicalOf, markIcon, padBlur, padFocus, padHTML, padPut, padReady, padSet, paintNotices, paras, physicalOf, plainSlot, RARITY, revealPad, stampWord, tick } from './ui.js';
 import * as store from './store.js';
 import { eachAtOnce, enqueue, newId, photoPath, pictureUrl } from './sync.js';
 import { openViewer } from './viewer.js';
@@ -34,7 +34,7 @@ const withPictures = (pics, drawnOn = {}) => {
 export const videoOf = v => (typeof v === 'string' ? { src: v } : v && v.src ? v : null);
 const videosOf = holder => (holder.videos || []).map(videoOf).filter(Boolean);
 const PART_MARKS = ['right', 'left', 'down'];
-// A part's mark in the card's own words, without the shouting: Good, Problem, Huh?
+// A part's mark in the card's own words, without the shouting: Good, Problem, Decent
 const partWord = (card, m) => { const w = (KINDS[card.kind] || KINDS.question)[m] || ''; return w === 'IDK' ? w : w.charAt(0) + w.slice(1).toLowerCase(); };
 const partSig = (st, pics) => `${st.mark || ''}|${st.text || ''}|${(pics || []).join()}`;
 const EMPTY_PART = '||';
@@ -59,20 +59,21 @@ export function mediaHTML(holder, images = () => null) {
 const countOf = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
 const clock = t => `${Math.floor((t || 0) / 60)}:${String(Math.floor((t || 0) % 60)).padStart(2, '0')}`;
 
-// "Bring to notes": a small button at the bottom of the screen, well away from the menu iPhones show over
-// selected text, which pages can't add to. It goes by itself after a few seconds.
+// "Bring to comment": a small button at the bottom of the screen, well away from the menu iPhones show over
+// selected text, which pages can't add to. It goes by itself after a few seconds. `where` names the box it
+// will go into, which it says when tapped.
 let pill = null, pillTimer = 0;
 function hidePill() {
   clearTimeout(pillTimer);
   if (pill) pill.remove();
   pill = null;
 }
-function offerPill(kind, onTap) {
+function offerPill(kind, where, onTap) {
   hidePill();
   pill = document.createElement('button');
   pill.className = 'bringpill';
   pill.dataset.kind = kind;
-  pill.innerHTML = `${icon('notebook-pen')}<span>Bring to notes</span>`;
+  pill.innerHTML = `${icon('message-square-text')}<span>Bring to ${where}</span>`;
   const foot = document.querySelector('.viewer .viewer-foot');
   if (foot) pill.style.bottom = `${foot.offsetHeight + 14}px`;
   document.body.append(pill);
@@ -87,9 +88,10 @@ function offerPill(kind, onTap) {
     onTap();
     tick();
     pill.classList.add('done');
-    pill.innerHTML = `${icon('check')}<span>In your notes</span>`;
+    pill.style.pointerEvents = 'none'; // saying where it went, it lets taps through to what's under it
+    pill.innerHTML = `${icon('check')}<span>In your ${where}</span>`;
     clearTimeout(pillTimer);
-    pillTimer = setTimeout(hidePill, 1400);
+    pillTimer = setTimeout(hidePill, 1200);
   };
   pill.addEventListener('pointerup', act);
   pill.addEventListener('click', act);
@@ -344,7 +346,6 @@ export const toolsHTML = (ids = true) => {
     <button data-act="undo"${id('undo')}>${icon('undo-2')}<span>Undo</span></button>
     <button data-act="notes"${id('notesbtn')}>${icon('notebook-pen')}<span>Notes</span></button>
     <button data-act="skip"${id('skip')}>${icon('skip-forward')}<span>Skip</span></button>
-    <button data-act="grid">${icon('layout-grid')}<span>Grid</span></button>
   </div>`;
 };
 
@@ -354,7 +355,7 @@ export const crumbsHTML = (pack, deck, card = '') => {
   return `<nav class="crumbs t" aria-label="Where this is">
     <button class="crumb crumb-pack" data-act="crumbpack">${esc(pack.title)}</button><i class="c-pack">›</i>
     ${topic ? `<button class="crumb crumb-topic" data-act="crumbtopic">${esc(topic.title)}</button><i class="c-topic">›</i>` : ''}
-    <button class="crumb crumb-deck" data-act="crumbdeck">${esc(deck.title)}</button><i class="c-card">›</i>
+    <button class="crumb crumb-deck" data-act="crumbdeck" aria-label="${esc(deck.title)}, every card">${esc(deck.title)}${icon('layout-grid')}</button><i class="c-card">›</i>
     <button class="crumb crumb-card" data-act="crumbcard" id="crumbcard">${esc(card)}</button>
   </nav>`;
 };
@@ -440,7 +441,11 @@ export class DeckView {
 
   async open() {
     this.key = deckKey(this.pack, this.deck);
-    this.s = (await store.get(this.key)) || fresh(this.deck);
+    try {
+      this.s = (await store.get(this.key)) || fresh(this.deck);
+    } catch (e) {
+      throw Object.assign(new Error(`the phone's storage said: ${(e && e.message) || 'no reason given'}`), { storage: true });
+    }
     this.s.draftsSent = this.s.draftsSent || {};
     this.s.wordsSent = this.s.wordsSent || {};
     this.s.draftPhotos = this.s.draftPhotos || {};
@@ -532,7 +537,6 @@ export class DeckView {
         <div class="composer" id="composer" hidden><div class="padwrap">${padHTML('comment', 'Your comment. Drag down to close.')}<div class="photostrip" id="commentphotos" hidden></div>${linkButton('comment')}${photoButton('comment')}</div></div>
         <div class="notes-sheet" id="notes" hidden>
           <button class="sheet-head" data-act="closenotes"><i class="grabber"></i><span>Notes on this deck</span></button>
-          <div class="noterefs" id="noterefs" hidden></div>
           <div class="padwrap">${padHTML('notestext', "Anything that doesn't fit a card. Drag down to close.")}<div class="photostrip" id="notesphotos" hidden></div>${linkButton('notes')}${photoButton('notes')}</div>
         </div>
       </div>
@@ -575,6 +579,19 @@ export class DeckView {
       this.lift = { t: performance.now(), x: e.clientX, y: e.clientY }; // its click may land on whatever just opened
       this.act(b.dataset.act, b);
     });
+    // The crumbs too act as the finger lifts, since a click straight after a throw can be swallowed, but
+    // only for a tap: a finger that slid the row along was reading it.
+    let crumbDown = null;
+    crumbs.addEventListener('pointerdown', e => { crumbDown = { x: e.clientX, y: e.clientY, left: crumbs.scrollLeft }; });
+    crumbs.addEventListener('pointerup', e => {
+      const d = crumbDown;
+      crumbDown = null;
+      const b = e.target.closest('button[data-act]');
+      if (!d || !b || b.disabled || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 10 || Math.abs(crumbs.scrollLeft - d.left) > 4) return;
+      this.lift = { t: performance.now(), x: e.clientX, y: e.clientY };
+      this.act(b.dataset.act, b);
+    });
+    crumbs.addEventListener('pointercancel', () => { crumbDown = null; });
     // No click at all after a touch, or it could put the cursor mid-text in a pad that just opened under it.
     this.root.querySelector('.tools').addEventListener('touchend', e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
     padReady(this.comment, text => {
@@ -646,7 +663,6 @@ export class DeckView {
       crumbdeck: () => this.showOverview(),
       crumbcard: () => this.toCard(),
       linkcard: () => this.linkCard(btn.dataset.where),
-      noteref: () => this.openRef(btn.dataset.addr),
       partmark: () => this.markPart(btn.dataset.part, btn.dataset.mark),
       partcomment: () => this.openPartPad(btn.dataset.part),
       partdone: () => this.closePartPad(),
@@ -711,72 +727,58 @@ export class DeckView {
     };
   }
 
+  // Where something brought would go: the box being written in, or the comment on this card (or on the
+  // part it's from), opened for it.
+  bringTarget() {
+    if (this.openPart) return { pad: this.partPad(this.topId(), this.openPart), where: 'comment' };
+    if (this.composing) return { pad: this.comment, where: 'comment' };
+    return { pad: null, where: 'comment' };
+  }
+
   offerBring(info) {
-    offerPill(info.kind, () => this.bringToNotes(info));
+    offerPill(info.kind, this.bringTarget(info).where, () => this.bring(info));
   }
 
-  // Where the caret was in the notes, as a place in their words, even when the notes aren't open.
-  notesOffset() {
-    const pad = this.notesText;
-    const r = pad.caret;
-    if (r && pad.contains(r.startContainer)) {
-      const pre = document.createRange();
-      pre.selectNodeContents(pad);
-      pre.setEnd(r.startContainer, r.startOffset);
-      return pre.toString().length;
-    }
-    return this.notesAt ?? (this.s.notes || '').length;
-  }
-
-  // Puts a reference into the notes at the caret, on a line of its own: a link the notes show as a chip.
-  // A film's says the moment it was stopped at; words are quoted; a drawing comes along as a picture.
-  async bringToNotes(info) {
+  // Puts a reference where the caret was in the box being written in: a link that shows there as a chip.
+  // With no box open, the card's comment box opens for it (or the part's, for something from a part),
+  // without bringing the keyboard up. A film's says the moment it was stopped at; words are quoted;
+  // a drawing comes along as a picture on the comment.
+  async bring(info) {
     const card = this.cards.get(info.card);
     if (!card) return;
     const part = info.part && (card.parts || []).find(x => x.id === info.part);
-    const title = card.title || plainLinks(card.text || '');
-    const label = part ? `${title} › ${part.title}` : title;
     const address = addressOf(this.pack.id, this.deck.id, card.id, info.part || null);
-    // Only what would break the link is encoded, so the notes stay readable: img/walk.mp4, not img%2Fwalk.mp4.
+    // Only what would break the link is encoded, so the words stay readable: img/walk.mp4, not img%2Fwalk.mp4.
     const safe = v => String(v || '').replace(/[\s()[\]&?#%]/g, encodeURIComponent);
     const path = safe(info.path);
+    const short = t => (t.length > 34 ? `${t.slice(0, 32).trim()}…` : t);
+    const from = short(part ? part.title : card.title || plainLinks(card.text || ''));
+    let { pad } = this.bringTarget(info);
+    if (!pad) {
+      if (part) { this.openPartPad(part.id, { focus: false }); pad = this.partPad(card.id, part.id); }
+      else { this.openComposer({ focus: false }); pad = this.comment; }
+    }
+    if (!pad) return;
     let token;
-    if (info.kind === 'quote') token = `“${info.text}” ${linkText(label, address)}`;
-    else if (info.kind === 'film') token = linkText(`Film at ${clock(info.t)}, ${label}`, `${address}?film=${path}&t=${(info.t || 0).toFixed(1)}`);
-    else token = linkText(`Picture, ${label}`, `${address}?pic=${path}`);
-    if (info.blob) {
+    if (info.kind === 'quote') token = `“${info.text}” ${linkText(from, address)}`;
+    else if (info.kind === 'film') token = linkText(`Film at ${clock(info.t)}`, `${address}?film=${path}&t=${(info.t || 0).toFixed(1)}`);
+    else token = linkText('Picture', `${address}?pic=${path}`);
+    if (info.blob) { // the drawing goes on the same comment as its reference, the card's or that part's
       const id = await saveDrawing(info.blob, info.path || '');
       this.s.drawnOn[id] = info.path || '';
-      this.s.notesPhotos.push(id);
-      token = linkText(`Drawing, ${label}`, `${address}?pic=${path}&drawing=${safe(photoPath(id))}`);
+      const partId = pad === this.comment ? null : this.openPart;
+      if (partId) {
+        const st = this.partState(card.id, partId);
+        st.photos = [...(st.photos || []), id];
+        this.s.partsV[card.id] = card.version || 1;
+      } else this.s.draftPhotos[card.id] = [...(this.s.draftPhotos[card.id] || []), id];
+      token = linkText('Drawing', `${address}?pic=${path}&drawing=${safe(photoPath(id))}`);
+      this.saveNow();
+      if (partId) { this.drawPartPhotos(card.id, partId); this.syncPartChip(card.id, partId); }
+      else this.drawPhotos();
     }
-    const notes = this.s.notes || '';
-    const at = clamp(this.notesOffset(), 0, notes.length);
-    const before = notes.slice(0, at), after = notes.slice(at);
-    const lead = before && !before.endsWith('\n') ? '\n' : '';
-    const tail = after.startsWith('\n') ? '' : '\n';
-    const next = before + lead + token + tail + after;
-    this.notesAt = (before + lead + token + tail).length;
-    this.notesText.caret = null;
-    padSet(this.notesText, next);
-    const end = this.endBox.querySelector('#endnotes');
-    if (end) padSet(end, next);
-    this.notesChanged(next);
-    this.drawPhotos();
-  }
-
-  // The things brought to the notes, and any cards they link, as chips above the pad.
-  drawNoteRefs() {
-    const refs = linksIn(this.s.notes || '').filter(l => l.address);
-    for (const id of ['noterefs', 'endrefs']) {
-      const box = this.host.querySelector(`#${id}`);
-      if (!box) continue;
-      box.hidden = !refs.length;
-      box.innerHTML = refs.map(l => {
-        const what = /[?&]film=/.test(l.address) ? 'play' : /[?&](pic|drawing)=/.test(l.address) ? 'image' : 'link';
-        return `<button class="noteref" data-act="noteref" data-addr="${esc(l.address)}">${icon(what)}<span>${esc(l.label)}</span></button>`;
-      }).join('');
-    }
+    padPut(pad, token);
+    this.syncAttached();
   }
 
   // Reopens what a reference in the notes points at: the picture, the film at its moment, the drawing,
@@ -807,6 +809,26 @@ export class DeckView {
     this.jump(cardId, partId);
     const c = this.topCard();
     if (c && !partId && (c.details || (c.images || []).length || videosOf(c).length)) this.flip(true);
+  }
+
+  // ---------- growing out of the mini player, and shrinking into it
+
+  // What's showing: the card on top, or the end of the deck.
+  shownRect() {
+    const el = this.topNode() || (this.endBox && !this.endBox.hidden ? this.endBox : this.table);
+    return el ? el.getBoundingClientRect() : null;
+  }
+
+  // The card grows from where the mini player was to its own place.
+  growFrom(rect) {
+    const el = this.topNode() || (this.endBox && !this.endBox.hidden ? this.endBox : null);
+    if (!el || !rect || !el.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const to = el.getBoundingClientRect();
+    if (!to.width || !to.height) return;
+    el.animate([
+      { transform: `translate3d(${rect.left - to.left}px,${rect.top - to.top}px,0) scale(${rect.width / to.width},${rect.height / to.height})`, transformOrigin: '0 0', opacity: 0.7 },
+      { transform: 'translate3d(0,0,0) scale(1)', transformOrigin: '0 0', opacity: 1 },
+    ], { duration: 340, easing: 'cubic-bezier(.2,.9,.3,1)' });
   }
 
   // ---------- links, and where this is
@@ -921,15 +943,16 @@ export class DeckView {
     });
     this.table.style.setProperty('--rise', 0);
     this.glow.style.opacity = 0;
-    this.glow.style.transform = '';
     this.hideMark();
     this.armed = false;
     this.flipped = false;
+    clearTimeout(this.flipTimer);
+    this.afterSwap = null;
     this.openPart = null;
     this.root.classList.remove('reading', 'parttyping');
     this.table.classList.remove('flipped');
     for (const n of this.nodes.values()) {
-      n.querySelector('.flip').classList.remove('flipped', 'flat', 'turn-in', 'turn-out');
+      n.querySelector('.flip').classList.remove('flipped', 'flat', 'turn-away', 'turn-in', 'turn-back', 'turn-home');
       this.playClips(n, false);
     }
 
@@ -940,6 +963,7 @@ export class DeckView {
       top.classList.remove('dragging');
       top.style.transform = '';
       top.style.setProperty('--charge', 0);
+      top.append(this.glow); // the swipe's colour is on the card itself, and goes where it goes
       if (this.breakable()) {
         top.classList.remove('glinting');
         void top.offsetWidth;
@@ -1297,6 +1321,9 @@ export class DeckView {
     });
   }
 
+  // Runs once the side being turned to is showing: at once, or at the swap of a turn under way.
+  whenTurned(fn) { if (this.afterSwap) this.afterSwap.push(fn); else fn(); }
+
   // A card's parts come built into its back. This fills in what's been said on them, and wires their boxes.
   wireParts(node, card) {
     for (const pt of card.parts || []) {
@@ -1415,7 +1442,7 @@ export class DeckView {
     this.partTimer = setTimeout(() => this.sendParts(false), PART_SEND_AFTER);
   }
 
-  openPartPad(partId) {
+  openPartPad(partId, { focus = true } = {}) {
     const cardId = this.topId();
     if (!this.hasParts(this.topCard())) return;
     if (!this.flipped) this.flip(true);
@@ -1427,8 +1454,7 @@ export class DeckView {
     section.classList.add('typing');
     this.root.classList.add('parttyping');
     this.syncPartChip(cardId, partId);
-    padFocus(this.partPad(cardId, partId));
-    revealPad(this.partPad(cardId, partId));
+    if (focus) this.whenTurned(() => { padFocus(this.partPad(cardId, partId)); revealPad(this.partPad(cardId, partId)); });
   }
 
   // Closing a part's box sends its words, and its new pictures with them.
@@ -1486,7 +1512,7 @@ export class DeckView {
     m.dataset.at = phys;
     m.dataset.act = word === 'CLOSE' ? 'close' : logical;
     m.querySelector('.mark-word').textContent = word;
-    m.querySelector('.mark-icon').innerHTML = icon(word === 'CLOSE' ? 'chevron-down' : MARK_ICON[logical]);
+    m.querySelector('.mark-icon').innerHTML = icon(word === 'CLOSE' ? 'chevron-down' : markIcon(this.topCard(), logical));
     m.style.opacity = amount;
     m.style.setProperty('--s', (0.86 + 0.14 * Math.min(amount, 1)) * grow);
     m.classList.toggle('armed', armed);
@@ -1543,8 +1569,7 @@ export class DeckView {
     }
     this.showMark(phys, logical, word, clamp((p - 0.12) / 0.5, 0, 1), armed);
     this.table.style.setProperty('--rise', Math.min(p, 1));
-    this.glow.style.transform = top.style.transform; // the glow is on the card, and goes where it goes
-    this.glow.style.opacity = Math.min(p, 1) * 0.9;
+    this.glow.style.opacity = Math.min(p, 1);
   }
 
   // The card pushes against resistance while the build-up runs on a clock, because a held finger
@@ -1595,7 +1620,6 @@ export class DeckView {
     const jx = (Math.random() - 0.5) * j, jy = (Math.random() - 0.5) * j;
     const x = ux * dist + uy * across * 0.12 + jx, y = uy * dist - ux * across * 0.12 + jy;
     top.style.transform = `translate3d(${x}px,${y}px,0) rotate(${ux * dist * 0.03 + jx * 0.2}deg) scale(${1 + c * 0.018})`;
-    this.glow.style.transform = top.style.transform;
     const word = stampWord(card, 'right');
     const st = top.querySelector('.stamp');
     st.dataset.dir = phys;
@@ -1662,7 +1686,6 @@ export class DeckView {
     if (!draining) {
       this.table.style.setProperty('--rise', 0);
       this.glow.style.opacity = 0;
-      this.glow.style.transform = '';
       this.hideMark();
     }
     this.armed = false;
@@ -1714,9 +1737,11 @@ export class DeckView {
     }
   }
 
-  // The turn eases in to edge-on at exactly halfway and out from there, which is when the hidden side
-  // swaps, so neither side is ever missing mid-turn. Once turned, the back is drawn flat, with nothing 3D
-  // about it, so typing, scrolling and the caret on it behave as anywhere else on an iPhone.
+  // A turn is two halves. The side showing turns away to edge-on; only once that half has really
+  // finished (its animationend, not a clock that could run ahead of a late-starting animation) do the
+  // sides swap, and the other side turns in from edge-on. So the side coming in never shows before
+  // the card is edge-on. At rest neither side has any 3D on it, so typing and scrolling on the back
+  // behave as anywhere else on an iPhone.
   flip(on) {
     const top = this.topNode();
     if (!top) return;
@@ -1725,22 +1750,47 @@ export class DeckView {
     this.table.classList.toggle('flipped', on);
     this.root.classList.toggle('reading', on && this.hasParts(this.topCard()));
     const f = top.querySelector('.flip');
-    f.classList.remove('flat', 'turn-in', 'turn-out');
-    f.classList.toggle('flipped', on);
-    void f.offsetWidth;
-    f.classList.add(on ? 'turn-in' : 'turn-out');
-    const settled = e => {
-      if (e && (e.target !== f || !/^turn/.test(e.animationName))) return;
-      f.removeEventListener('animationend', settled);
-      clearTimeout(this.flipTimer);
-      f.classList.remove('turn-in', 'turn-out');
-      if (on && this.flipped && this.topNode() === top) f.classList.add('flat');
-    };
-    f.addEventListener('animationend', settled);
     clearTimeout(this.flipTimer);
-    this.flipTimer = setTimeout(settled, 460); // reduced motion, or a page in the background
+    this.afterSwap = null;
+    if (this.flipEnd) f.removeEventListener('animationend', this.flipEnd);
+    f.classList.remove('flat', 'turn-away', 'turn-in', 'turn-back', 'turn-home');
+    void f.offsetWidth;
+    const showing = f.classList.contains('flipped');
     if (on) top.querySelector('.back-scroll').scrollTop = 0;
-    else this.syncPartsPreview(); // the face shows what was said on the back
+    const swap = () => {
+      f.classList.remove('turn-away', 'turn-back');
+      f.classList.toggle('flipped', on);
+      if (!on) this.syncPartsPreview(); // the face shows what was said on the back, before it comes round
+      blurHidden();
+      const queued = this.afterSwap || [];
+      this.afterSwap = null;
+      queued.forEach(fn => fn());
+      void f.offsetWidth;
+      f.classList.add(on ? 'turn-in' : 'turn-home');
+      later(() => {
+        f.classList.remove('turn-in', 'turn-home');
+        if (on && this.flipped && this.topNode() === top) f.classList.add('flat');
+      }, 'in');
+    };
+    // Each half ends on its own animationend, or a clock for reduced motion or a page in the background.
+    const later = (fn, half) => {
+      const done = e => {
+        if (e && (e.target !== f || !e.animationName.startsWith('turn'))) return;
+        f.removeEventListener('animationend', done);
+        clearTimeout(this.flipTimer);
+        this.flipEnd = null;
+        fn();
+      };
+      this.flipEnd = done;
+      f.addEventListener('animationend', done);
+      this.flipTimer = setTimeout(done, half === 'away' ? 400 : 420);
+    };
+    if (showing === on) swap(); // already on that side: nothing to turn away from
+    else {
+      this.afterSwap = this.afterSwap || [];
+      f.classList.add(on ? 'turn-away' : 'turn-back');
+      later(swap, 'away');
+    }
     if (this.hasParts(this.topCard())) {
       if (on) this.watchPartClips();
       else { if (this.partsObserver) this.partsObserver.disconnect(); this.playClips(top, false); }
@@ -1908,7 +1958,6 @@ export class DeckView {
 
   notesChanged(text) {
     this.s.notes = text;
-    this.drawNoteRefs();
     this.saveNow(); // at once: the backup write is synchronous, so a killed app keeps it
     clearTimeout(this.notesTimer);
     this.notesTimer = setTimeout(() => this.sendNotes(false), 1500);
@@ -2007,8 +2056,7 @@ export class DeckView {
       if (this.composing) this.closeComposer();
       padSet(this.notesText, this.s.notes || '');
       this.drawPhotos();
-      this.drawNoteRefs();
-      padFocus(this.notesText);
+        padFocus(this.notesText);
     } else {
       padBlur(this.notesText);
       this.sendNotes(true);
@@ -2017,7 +2065,7 @@ export class DeckView {
 
   // ---------- comment box
 
-  openComposer() {
+  openComposer({ focus = true } = {}) {
     if (this.composing || !this.topId()) return;
     this.toggleNotes(false);
     this.composing = true;
@@ -2026,7 +2074,7 @@ export class DeckView {
     padSet(this.comment, this.draft());
     this.drawPhotos();
     this.syncAttached();
-    padFocus(this.comment);
+    if (focus) padFocus(this.comment);
     scrollTo(0, 0);
   }
 
@@ -2050,7 +2098,7 @@ export class DeckView {
       top.classList.add('dragging');
       top.style.transform = `scale(${clamp(scale, 0.6, 1)})`; // never bigger: it would reach the screen's edges and cover the buttons
     }
-    // A pinch shrinks the deck into the mini player. Grid is the way to the overview.
+    // A pinch shrinks the deck into the mini player. The deck's name, at the top, is the way to the overview.
     if (!this.pinchFired && scale < TUNE.pinchOpen) {
       this.pinchFired = true;
       if (this.nav.shrink) this.nav.shrink(); else this.showOverview();
@@ -2134,7 +2182,6 @@ export class DeckView {
         <h2 class="end-title">${early ? 'Replan this deck?' : 'Deck done'}</h2>
         <div class="end-sub">${esc(sub)}</div>
         <div class="tally">${groups.map(g => `<div class="dir-${g.dir}"><b data-to="${g.n}">0</b><span>${esc(g.words)}</span></div>`).join('')}</div>
-        <div class="noterefs" id="endrefs" hidden></div>
         <div class="padwrap">${padHTML('endnotes', 'Anything else on this deck?')}<div class="photostrip" id="endphotos" hidden></div>${linkButton('endnotes')}${photoButton('notes')}</div>
         <div class="end-actions">
           ${early ? '' : `<button class="primary" data-act="done">Deck's done</button>`}
@@ -2145,7 +2192,6 @@ export class DeckView {
     const pad = this.endBox.querySelector('#endnotes');
     padSet(pad, this.s.notes || '');
     padReady(pad, text => this.notesChanged(text));
-    this.drawNoteRefs();
     dragToClose(pad, () => pad, () => {}, () => padBlur(pad));
     this.drawPhotos();
     this.endBox.hidden = false;

@@ -34,7 +34,7 @@ A deck's kind is what the writer says, or else what its cards are: all reports i
 | Kind | What it is | Right | Left | Down |
 |---|---|---|---|---|
 | question | A question with the writer's pick | GO: go with the pick | WORKSHOP: not that, work on it | IDK: need more context |
-| report | What happened, with nothing asked | GOOD | PROBLEM: something's wrong with where this is going | HUH?: not following. Mostly so the writer knows; it doesn't need much back |
+| report | What happened, with nothing asked | GOOD | PROBLEM: something's wrong with where this is going | DECENT: fine, but not happy yet, or not quite following. Before 0.11.0 this read HUH?, and answers given then still read so |
 | design | The writer's design for something, to approve, deny or add to | YES | RETHINK | IDK |
 | options | Several options and a question: tap the ones wanted, then swipe | GO: only those. With nothing tapped, the writer's marked pick. With no pick either, it just bounces | REDO: even those weren't good, redo in their direction. With nothing tapped, all of them are bad | IDK |
 | board | Any number of pictures to pick from, 60 or more. See Boards below | As for options | As for options | IDK |
@@ -61,7 +61,7 @@ Five levels, in the usual game rarity colours. Each card's background is a light
 
 The gear opens settings, and Style sits at the top of them. **Layout**, **look** and **while swiping** are separate choices, so any goes with any. Tapping an option changes a live preview on that screen straight away: a small deck screen and a small home screen, built from the real parts. New installs start with `DEFAULT_LAYOUT`, `DEFAULT_LOOK` and `DEFAULT_MARK` in `js/app.js`.
 
-**While swiping.** What shows you what a swipe will do, along with a glow on the edge the card is heading for.
+**While swiping.** What shows you what a swipe will do, along with the swipe's colour on the card itself: a border glow and a tint that grow as it's dragged. The colours: go green, workshop orange, down (IDK, DECENT) yellow, comment blue.
 
 | Choice | What shows |
 |---|---|
@@ -97,7 +97,7 @@ In Full screen, a black band sits behind the phone's clock, because iPhones draw
 
 ## Swipes
 
-Dragging moves the top card, which tilts as it goes. The chosen mark fades in with distance and snaps on where the swipe counts. A glow shows on the side it's heading for, and the next card rises underneath. On release the card flies off at the finger's speed, and the next card can be thrown at once.
+Dragging moves the top card, which tilts as it goes. The chosen mark fades in with distance and snaps on where the swipe counts. The card takes on the swipe's colour, a glowing border and a tint that grow with the drag, so it's seen wherever the card goes, even half off the screen. The next card rises underneath. On release the card flies off at the finger's speed, and the next card can be thrown at once.
 
 A throw counts at 27% of the screen's width sideways or 15% of its height up and down, or as a quick flick from 34 pixels. Pulling back before letting go keeps the card. Numbers are in `TUNE` in `js/gesture.js`.
 
@@ -148,11 +148,13 @@ A box being typed in is brought into view above the keyboard, in whatever scroll
 
 Any pack, deck, card or part has an address, `pack/deck/card/part`. Opening the app with `#open=` and an address goes straight there: a notification's tap does this. Anything no longer there stops at the level above, so a deck that's gone opens its pack.
 
-**Links** are plain text in any words: `[Label](riffle:pack/deck/card/part)`. Wherever words show, on a card's face and back, in its parts, in a comment, a thought or the Feel test's list, a link shows as a small tappable label, and a web address as a link that opens in the browser. A one-line chip shows each link by its label only.
+**Links** are plain text in any words: `[Label](riffle:pack/deck/card/part)`. Wherever words show, on a card's face and back, in its parts, in a comment, a thought or the Feel test's list, a link shows as a small tappable label, and a web address as a link that opens in the browser. A one-line chip shows each link by its label only. In a box being typed in, a link is a short blue chip with its label, the full link hidden in it; a tap on it follows it. Deleting it takes the whole link.
 
 **Following one** goes to that card, its parts open if it names a part. The back button turns into a curved arrow, says where it goes ("Back to Has a link"), and returns to the card the link was on, as it was: its parts open, its comment box open with the words in it. Several links in a row come back one at a time. Going anywhere by any other way, the pack's page or a deck's tile, starts the trail again.
 
-**The link button** sits beside the photo button in every place to type: a comment, a part's comment, notes and Thoughts. It offers, in this order: the card in the mini player, if there is one; this card, part or deck; or "Pick one from a list", every deck in every pack, this pack first, opening to its cards and their parts, with a search box over all of them: packs, decks, cards and parts, by their words. The link goes in where the caret was, as if typed, so it's saved like anything typed.
+**The link button** sits beside the photo button in every place to type: a comment, a part's comment, notes and Thoughts. It offers, in this order: the card in the mini player, if there is one; this card, part or deck; or "Pick one from a list", every deck in every pack, this pack first, opening to its cards and their parts, with a search box over all of them: packs, decks, cards and parts, by their words. Each card or part in the list has an Open button beside it, to go there instead of linking it, the way a link is followed, so Back comes back to the words being written. The link goes in where the caret was, as if typed, so it's saved like anything typed.
+
+**Search** sits at the top of the first screen and of every pack's page: the same list and search box, over every pack's decks, cards and parts and their own decks and cards too. A result opens that card (or their deck), and Back comes back to where the search began.
 
 ## Your own decks
 
@@ -171,30 +173,30 @@ They're written to `packs/<pack>/mine/<deck>.json` in the data repo, a few secon
 
 ## Breadcrumbs
 
-The deck's title line reads Pack › Topic › Deck › Card, and each is a way there. Pack goes to the pack's page; Topic goes there at that topic; Deck opens the overview; Card brings the card itself back into view, from its back. The card's crumb follows the card on top. Every crumb shows in full, in one row that scrolls sideways, kept scrolled to its end, where this is; a fade at its left says there's more. That's the same in all four layouts.
+The deck's title line reads Pack › Topic › Deck › Card, and each is a way there. Pack goes to the pack's page; Topic goes there at that topic; Deck (with a small grid beside its name) opens the overview, and is the only way there; Card brings the card itself back into view, from its back. The card's crumb follows the card on top. Every crumb shows in full, in one row that scrolls sideways, kept scrolled to its end, where this is; a fade at its left says there's more. That's the same in all four layouts.
 
 ## The mini player
 
 A pinch on a card puts the deck into a small floating card in a corner and goes to the pack's page. A pinch on a picture or a film, open full screen, still zooms. At the end of a deck, a pinch anywhere on the end does it too. The small card shows the deck's name, the card's title and what's on it, and its kind; a deck finished when it was shrunk shows dark, like the end of a deck, with "Deck done" and how many were answered. It stays over every screen. Any other deck can be opened and used as usual, comment box and all.
 
 - **Tapping it** brings its deck back full size, at the same card, with its parts or comment box open if they were. If another deck was open, that one goes into the corner in its place, so they swap. Drafts in both are kept, because each deck saves its own as ever.
-- **Dragging it** to any corner moves it there, and it stays there. Dragging it never reaches the card underneath.
-- **While typing**, the keyboard takes the bottom, so it waits at the top of its side.
+- **Dragging it** anywhere and letting go, it glides to the nearest of the four corners and stays there. A drag the phone cancels for its own reasons counts where it got to. Dragging it never reaches the card underneath.
+- **While the keyboard is up**, it takes the bottom, so the mini player waits at the top of its side. That follows the keyboard itself, not which box has focus, so a box gone with its screen can't keep it up there.
+- **Shrinking and growing** are animated: the card shrinks into the corner, and grows from the mini player back to its place. Swapping, one does each.
 - It's kept on the phone, so it's still there after the app is closed.
 
 ## The buttons
 
-Undo, Notes, Skip and Grid. They act as the finger lifts.
+Undo, Notes and Skip. They act as the finger lifts.
 
 - **Undo:** brings back the last card, from the way it left, and takes back its answer. Also takes back a skip.
 - **Notes:** a scratchpad for the whole deck, for thoughts that don't fit the card on screen. It opens as a full sheet. Dragging it down, or tapping its head, returns to the same card. It's sent with the deck, and the same pad is on the end screen.
 - **Skip:** sends the card to the bottom of the deck.
-- **Grid:** the overview, the same as a pinch, for when only one hand is free.
 - A pinch on the card puts the deck in the mini player. See The mini player.
 
 ## The overview
 
-Grid lays out every card in the deck on a grid: its short title, its importance colour, and whether and how it was answered, with a mark if there's a comment. Handled cards have a green tick. Tapping one goes to it. An answered card shows what was said, and swiping it again changes the answer. It also has a way to the deck's notes, and two actions on the whole deck, each with a clear second step:
+The deck's name, in the crumbs at the top, lays out every card in the deck on a grid: its short title, its importance colour, and whether and how it was answered, with a mark if there's a comment. Handled cards have a green tick. Tapping one goes to it. An answered card shows what was said, and swiping it again changes the answer. It also has a way to the deck's notes, and two actions on the whole deck, each with a clear second step:
 
 - **Replan this deck:** asks for it to be rethought from the base. The answers stay.
 - **Start this deck over:** clears the swipes, and every card is dealt again. The second step offers keeping notes and comments (comments come back as drafts on their cards) or clearing those too. Anything unsent goes first, and anything already sent stays with the writer.
@@ -250,22 +252,27 @@ For picking from many pictures, where one big picture of them all can't be seen 
 
 The phone brings words down first, then thumbnails, then card pictures. A board's full pictures come one at a time as they're looked at, with the next and previous ones fetched ahead, because all of them could be a lot of data on a phone connection. So thumbnails work offline, and full pictures only once seen.
 
-## Bring to notes
+## Bring to comment
 
-Holding still on a picture or a film on a card's back (or its parts) for about half a second, or selecting words there, brings up a small "Bring to notes" button low on the screen, clear of the menu iPhones put over selected words (pages can't add to that menu). Holding still on a picture or film open full screen does the same, with the pen on or off. The system's own picture menu doesn't take these long presses.
+Holding still on a picture or a film on a card's back (or its parts) for about half a second, or selecting words there, brings up a small "Bring to comment" button low on the screen, clear of the menu iPhones put over selected words (pages can't add to that menu). Holding still on a picture or film open full screen does the same, with the pen on or off. The system's own picture menu doesn't take these long presses.
 
-Tapping it puts a reference into the deck's notes where the caret last was in them, on a line of its own, and says "In your notes". The notes show every reference as a chip above the pad, and a tap on one reopens it:
+Tapping it puts a reference where the caret was in the box being written in, and says where it went:
+
+- **A comment box open** (the card's, or a part's): there.
+- **Nothing open**: the card's comment box opens for it, or the part's for something from a part, without bringing the keyboard up.
+
+Each reference shows in the box as a short blue chip, its label only; the link itself is kept out of sight in the chip, and goes in full with the words. A tap on a chip reopens what it points at:
 
 - **A picture** opens full screen.
 - **A film** opens full screen at the moment it was stopped at, paused there.
-- **Words** are quoted, with a link to their card; the chip goes to that card.
-- **A drawing**: brought from full screen with lines drawn on the picture, the drawing comes along as a picture on the notes, instead of going onto the comment.
+- **Words** are quoted, with a link to their card or part, as a chip.
+- **A drawing**: brought from full screen with lines drawn on the picture, the drawing comes along as a picture on the same comment, with its reference.
 
-A reference is a link with a little more on it, so the writer reads it like any link: `[Film at 0:12, The walk](riffle:pack/deck/card?film=img/walk.mp4&t=12.4)`.
+A reference is a link with a little more on it, so the writer reads it like any link: `[Film at 0:12](riffle:pack/deck/card?film=img/walk.mp4&t=12.4)`.
 
 ## Details
 
-Up and down are swipes, so a card can't scroll. The face has a size limit, and tapping flips the card to its back: longer explanation, numbers and pictures, and a card's parts, scrolling, with swipes off. The turn eases in to edge-on at exactly halfway and out from there, and the hidden side swaps at that moment, so one side always shows. Once turned, the back is drawn flat, with nothing 3D about it, so typing and scrolling on it behave as anywhere else. The back has its own Comment button, which opens the comment box with the back still showing above it. So they can read, scroll and open pictures while they write, and flip back to swipe. Going to a picture and back keeps what's typed. If a card doesn't fit its face on a small phone, the type steps down. If it still doesn't fit, the end of its description is cut with a fade and "Tap to read the rest", and the whole of it is on the back, so no words are lost.
+Up and down are swipes, so a card can't scroll. The face has a size limit, and tapping flips the card to its back: longer explanation, numbers and pictures, and a card's parts, scrolling, with swipes off. A turn is two halves: the side showing turns away to edge-on, and only when that half has finished (its own end, not a clock, which an iPhone starting the animation late would outrun) do the sides swap and the other side turns in. So the back's words never show before the card is edge-on. At rest nothing about either side is 3D, so typing and scrolling on the back behave as anywhere else. The back has its own Comment button, which opens the comment box with the back still showing above it. So they can read, scroll and open pictures while they write, and flip back to swipe. Going to a picture and back keeps what's typed. If a card doesn't fit its face on a small phone, the type steps down. If it still doesn't fit, the end of its description is cut with a fade and "Tap to read the rest", and the whole of it is on the back, so no words are lost.
 
 ## Endings and rewards
 

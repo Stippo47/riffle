@@ -2,16 +2,16 @@
 import { DEMO_PACK } from './demo.js';
 import { DeckView, archiveWords, cardHTML, deckKey, deckSummary, markHTML, queueUnsentWords, sendWords, toolsHTML, wordsIn } from './deck.js';
 import { ThoughtsView, thoughtCount } from './thoughts.js';
-import { DEFAULT_DIRS, MEANING, confetti, esc, getDirs, icon, padInsert, paintNotices, safeIcon, setDirs, setNotice, tick } from './ui.js';
+import { DEFAULT_DIRS, MEANING, confetti, esc, getDirs, icon, onChipTap, padInsert, paintNotices, safeIcon, setDirs, setNotice, tick } from './ui.js';
 import * as store from './store.js';
 import * as sync from './sync.js';
 import * as push from './push.js';
 import { countWords } from './photos.js';
 import { addressOf, linkify, linkText, plainLinks, splitAddress } from './links.js';
-import { initIsland, islandNow, setIsland } from './island.js';
+import { initIsland, islandFrom, islandNow, islandRect, setIsland } from './island.js';
 import { MineView, deckFromFile, fileOf, liveCards, liveDecks, mergeDecks, mineKey, mineOf } from './mine.js';
 
-const VERSION = '0.10.0';
+const VERSION = '0.11.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -400,6 +400,7 @@ async function showHome() {
     <div class="home screen scroll">
       <div class="home-head">
         <div class="apptitle">Riffle</div>
+        <button class="iconbtn" data-go="search" aria-label="Search">${icon('search')}</button>
         <button class="iconbtn" data-go="settings" aria-label="Settings">${icon('settings')}</button>
       </div>
       <div class="appsub" id="statusline"></div>
@@ -419,6 +420,7 @@ async function showHome() {
     </div>`;
   app.querySelectorAll('[data-pack]').forEach(b => { b.onclick = () => showPack(b.dataset.pack); });
   app.querySelector('[data-go=settings]').onclick = showSettings;
+  app.querySelector('[data-go=search]').onclick = () => showSearch();
   push.setBadge(owed).catch(() => {});
   await refreshStatusLine();
 }
@@ -577,6 +579,7 @@ async function showPack(id, message = '', { topic = null, keepTrail = false } = 
         <button class="iconbtn" data-go="home" aria-label="Back">${icon('chevron-left')}</button>
         <div class="t">${esc(pack.title)}</div>
         <div class="n" data-slot="notice" data-plain="${packLeft(sums)} left"></div>
+        <button class="iconbtn" data-go="search" aria-label="Search">${icon('search')}</button>
       </div>
       ${message ? `<div class="set-text problem">${esc(message)}</div>` : ''}
       <button class="thoughtsrow" data-go="thoughts">${icon('lightbulb')}<span><strong>Thoughts</strong><small>${thoughts ? `${thoughts} filed` : 'Anything on your mind about this project'}</small></span></button>
@@ -603,6 +606,7 @@ async function showPack(id, message = '', { topic = null, keepTrail = false } = 
   paintNotices();
   app.querySelector('[data-go=home]').onclick = showHome;
   app.querySelector('[data-go=thoughts]').onclick = () => openThoughts(pack);
+  app.querySelector('.packpage [data-go=search]').onclick = () => showSearch({ packId: pack.id });
   if (pack.demo) await drawFeelWords(pack);
   app.querySelectorAll('[data-deck]').forEach(b => { b.onclick = () => openDeck(pack, b.dataset.deck); });
   app.querySelectorAll('[data-sort]').forEach(b => { b.onclick = async () => { await store.set('pack-sort', b.dataset.sort); showPack(id); }; });
@@ -701,12 +705,16 @@ async function openThoughts(pack, { keepTrail = false } = {}) {
 }
 
 // `at` is a place to open at: a card, its parts, and whether a comment was being written there.
-async function openDeck(pack, deckId, at = null, { keepTrail = false } = {}) {
+// Each open takes a number. One that a later open overtook while it waited steps aside, so the last asked for
+// is the one that stands, however long each took.
+let navSeq = 0;
+async function openDeck(pack, deckId, at = null, { keepTrail = false, seq = ++navSeq } = {}) {
   const deck = pack.decks.find(d => d.id === deckId);
   if (!deck) { showPack(pack.id, '', { keepTrail }); return; }
   if (!keepTrail) trail = [];
   const images = await imagesFor(pack, deck);
   const archived = isArchived(metaOf(pack, deck), ((await store.get(archiveKey(pack.id)).catch(() => null)) || {})[deck.id]);
+  if (seq !== navSeq) return;
   current = new DeckView({
     host: app, pack, deck, images,
     onExit: () => { current && current.close(); if (trail.length) goBack(); else showPack(pack.id); },
@@ -725,19 +733,30 @@ async function openDeck(pack, deckId, at = null, { keepTrail = false } = {}) {
     },
   });
   render = () => {};
+  // This view, kept apart from `current`: another open can start while this one waits on the phone's
+  // storage (a link tapped twice did), and this one must then step aside instead of handling that one.
+  const view = current;
+  let stage = 'read';
   try {
-    await current.open();
-    const view = current;
+    await view.open();
+    if (current !== view || seq !== navSeq) { if (current === view) current = null; view.close(); return; }
+    stage = 'place';
     if (at && at.card && view.cards.has(at.card)) {
       view.jump(at.card, at.partsOpen || at.part ? at.part || null : null);
       if ((at.partsOpen || at.flipped) && !view.flipped) view.flip(true);
       if (at.partComposing && at.part) view.openPartPad(at.part);
       else if (at.composing) view.openComposer();
     }
-  } catch {
+  } catch (e) {
+    console.error('Opening a deck:', e);
+    if (current !== view) return;
+    // The deck is open and only finding the place in it went wrong: it stays open where it is.
+    if (stage === 'place' && view.s) return;
     current = null;
-    setNotice({ text: 'Not saving on this phone', act: showSettings });
-    showPack(pack.id, "Couldn't read this deck's saved progress just now. Close Riffle and open it again.");
+    if ((e && e.storage) || store.troubleNow()) {
+      setNotice({ text: 'Not saving on this phone', act: showSettings });
+      showPack(pack.id, "Couldn't read this deck's saved progress just now. Close Riffle and open it again.");
+    } else showPack(pack.id, `Couldn't open ${deck.title} just now (${(e && e.message) || 'no reason given'}). Nothing you wrote is lost. Try it again.`);
   }
 }
 
@@ -747,13 +766,15 @@ async function openDeck(pack, deckId, at = null, { keepTrail = false } = {}) {
 // Followed from a link, the trail back is kept; anything else starts it again.
 async function openAddress(address, { linked = false } = {}) {
   const [packId, deckId, cardId, partId] = splitAddress(address);
+  const seq = ++navSeq;
   if (!linked) trail = [];
   if (current && current.close) current.close();
   current = null;
   const pack = packId && (await library()).find(p => p.id === packId);
+  if (seq !== navSeq) return;
   if (!pack) { showHome(); return; }
   if (!deckId || !pack.decks.some(d => d.id === deckId)) { showPack(pack.id, '', { keepTrail: linked }); return; }
-  await openDeck(pack, deckId, cardId ? { card: cardId, part: partId || null, partsOpen: !!partId } : null, { keepTrail: linked });
+  await openDeck(pack, deckId, cardId ? { card: cardId, part: partId || null, partsOpen: !!partId } : null, { keepTrail: linked, seq });
 }
 
 // ---------- links: following one, and coming back the same way
@@ -789,7 +810,13 @@ function placeLabel(p) {
   return 'the start';
 }
 
+let following = null;
 async function follow(address) {
+  if (following) return following;
+  following = followNow(address).finally(() => { following = null; });
+  return following;
+}
+async function followNow(address) {
   const from = whereNow();
   if (current && current.secure) await Promise.resolve(current.secure()).catch(() => {});
   trail.push(from);
@@ -821,21 +848,26 @@ async function shrink() {
   if (!(current instanceof DeckView)) return;
   const place = current.place();
   const packId = current.pack.id;
+  const from = current.shownRect();
   current.close();
   current = null;
   setIsland(place);
+  islandFrom(from); // the card shrinks into the corner
   showPack(packId);
 }
 
 // A tap on the island brings its deck back, and the deck open now takes its place.
 async function tapIsland(target) {
-  let next = null;
-  if (current instanceof DeckView) { next = current.place(); current.close(); }
+  let next = null, outgoing = null;
+  const from = islandRect();
+  if (current instanceof DeckView) { next = current.place(); outgoing = current.shownRect(); current.close(); }
   else if (current && current.close) current.close();
   current = null;
   setIsland(next);
+  islandFrom(outgoing); // the deck that was open shrinks into the corner as this one grows out of it
   trail = [];
   await restorePlace(target);
+  if (current instanceof DeckView) current.growFrom(from);
 }
 
 // ---------- linking a card from a box being typed in
@@ -886,35 +918,56 @@ function showLinkSheet({ pad, here = null, packId = null }) {
 }
 
 // Every card in every pack, this pack first, to pick one to link. A card in parts lists its parts too.
-async function showPicker(packId, done) {
+// One search over everything: packs, decks, cards and parts, and their own decks and cards. Opened from
+// the first screen or a pack's page, a result opens that card. Opened from the link button (`done` given),
+// a tap on a result links it, and its Open button goes there instead, as a link would.
+async function showSearch({ packId = null, done = null } = {}) {
+  const linking = !!done;
   const lib = await library();
-  const packs = [...lib.filter(p => p.id === packId), ...lib.filter(p => p.id !== packId && !p.demo)];
+  const packs = [...lib.filter(p => p.id === packId), ...lib.filter(p => p.id !== packId && !(p.demo && linking))];
+  const mineBy = new Map();
+  if (!linking) for (const p of packs) mineBy.set(p.id, liveDecks(await mergeMine(p).catch(() => ({ decks: {} }))));
   const el = document.createElement('div');
   el.className = 'picker';
   el.innerHTML = `
     <div class="ov-head">
       <button class="iconbtn" data-pk="close" aria-label="Back">${icon('chevron-left')}</button>
-      <div class="t">Pick a card to link</div>
+      <div class="t">${linking ? 'Pick a card to link' : 'Search'}</div>
     </div>
-    <input class="pk-search" type="search" placeholder="Search packs, decks, cards and parts" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Search">
+    <input class="pk-search" type="search" placeholder="${linking ? 'Search packs, decks, cards and parts' : 'Search every deck and card, yours too'}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search" aria-label="Search">
     <div class="picker-list scroll"></div>`;
   const list = el.querySelector('.picker-list');
+  // A result: the row itself, and when linking, a way to go there instead.
+  const row = ({ cls = '', address, label, mine = '', title, sub }) => {
+    const data = mine ? `data-mine="${esc(mine)}"` : `data-addr="${esc(address)}" data-label="${esc(label)}"`;
+    const open = linking && address ? `<button class="pk-open" data-open="${esc(address)}" aria-label="Open ${esc(label)}">${icon('external-link')}<span>Open</span></button>` : '';
+    return `<div class="pk-row"><button class="pk-card ${cls}" ${data}>${title}${sub ? `<small>${sub}</small>` : ''}</button>${open}</div>`;
+  };
+  const deckTree = p => topicsOf(p).topics.flatMap(t => t.decks).concat(topicsOf(p).misc)
+    .map(d => `<button class="pk-deck" data-pack="${esc(p.id)}" data-deck="${esc(d.id)}"><span>${esc(d.title)}</span><small>${d.cards.length}</small>${icon('chevron-right')}</button><div class="pk-cards" hidden></div>`).join('');
   const tree = () => packs.map(p => `<div class="pk-pack">${esc(p.title)}</div>
-    ${topicsOf(p).topics.flatMap(t => t.decks).concat(topicsOf(p).misc).map(d => `<button class="pk-deck" data-pack="${esc(p.id)}" data-deck="${esc(d.id)}"><span>${esc(d.title)}</span><small>${d.cards.length}</small>${icon('chevron-right')}</button><div class="pk-cards" hidden></div>`).join('')}`).join('');
-  // Everything whose words hold every word searched for, decks first, then cards, then parts.
+    ${deckTree(p)}
+    ${(mineBy.get(p.id) || []).map(d => row({ cls: 'pk-mine', mine: `${p.id}/${d.id}`, title: `${icon('notebook-pen')}<b>${esc(d.title || 'Untitled')}</b>`, sub: `Yours · ${liveCards(d).length} card${liveCards(d).length === 1 ? '' : 's'}` })).join('')}`).join('');
+  // Everything whose words hold every word searched for: decks first, then cards, then parts, then theirs.
   const found = q => {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
     const hit = (...texts) => { const t = texts.join(' ').toLowerCase(); return words.every(w => t.includes(w)); };
     const out = [];
     for (const p of packs) {
       for (const d of p.decks) {
-        if (hit(p.title, d.title)) out.push({ rank: 0, html: `<button class="pk-card pk-found" data-addr="${esc(addressOf(p.id, d.id))}" data-label="${esc(d.title)}"><b>${esc(d.title)}</b><small>A deck in ${esc(p.title)}</small></button>` });
+        if (hit(p.title, d.title)) out.push({ rank: 0, html: row({ cls: 'pk-found', address: addressOf(p.id, d.id), label: d.title, title: `<b>${esc(d.title)}</b>`, sub: `A deck in ${esc(p.title)}` }) });
         for (const c of d.cards) {
           const title = c.title || plainLinks(c.text || '');
-          if (hit(title, c.text, c.why)) out.push({ rank: 1, html: `<button class="pk-card pk-found ${esc(c.rarity || 'common')}" data-addr="${esc(addressOf(p.id, d.id, c.id))}" data-label="${esc(title)}"><b>${esc(title)}</b><small>${esc(p.title)} › ${esc(d.title)}</small></button>` });
+          if (hit(title, c.text, c.why, c.details)) out.push({ rank: 1, html: row({ cls: `pk-found ${esc(c.rarity || 'common')}`, address: addressOf(p.id, d.id, c.id), label: title, title: `<b>${esc(title)}</b>`, sub: `${esc(p.title)} › ${esc(d.title)}` }) });
           for (const pt of c.parts || []) {
-            if (hit(pt.title, pt.text)) out.push({ rank: 2, html: `<button class="pk-card pk-found pk-part ${esc(c.rarity || 'common')}" data-addr="${esc(addressOf(p.id, d.id, c.id, pt.id))}" data-label="${esc(`${title} › ${pt.title}`)}"><b>${esc(pt.title)}</b><small>${esc(d.title)} › ${esc(title)}</small></button>` });
+            if (hit(pt.title, pt.text)) out.push({ rank: 2, html: row({ cls: `pk-found pk-part ${esc(c.rarity || 'common')}`, address: addressOf(p.id, d.id, c.id, pt.id), label: `${title} › ${pt.title}`, title: `<b>${esc(pt.title)}</b>`, sub: `${esc(d.title)} › ${esc(title)}` }) });
           }
+        }
+      }
+      for (const d of mineBy.get(p.id) || []) {
+        if (hit(d.title)) out.push({ rank: 3, html: row({ cls: 'pk-found pk-mine', mine: `${p.id}/${d.id}`, title: `${icon('notebook-pen')}<b>${esc(d.title || 'Untitled')}</b>`, sub: `Your deck in ${esc(p.title)}` }) });
+        for (const c of liveCards(d)) {
+          if (hit(c.text, c.label, c.url)) out.push({ rank: 3, html: row({ cls: 'pk-found pk-mine', mine: `${p.id}/${d.id}/${c.id}`, title: `<b>${esc(plainLinks(c.text || c.label || c.url || 'A card'))}</b>`, sub: `Your deck ${esc(d.title || 'Untitled')}` }) });
         }
       }
     }
@@ -926,27 +979,46 @@ async function showPicker(packId, done) {
   search.addEventListener('input', () => { const q = search.value.trim(); list.innerHTML = q ? found(q) : tree(); list.scrollTop = 0; });
   app.append(el);
   document.body.classList.add('covered');
-  const finish = chosen => { el.remove(); document.body.classList.remove('covered'); done(chosen); };
+  if (!linking) search.focus();
+  const close = () => { el.remove(); document.body.classList.remove('covered'); };
+  const finish = chosen => { close(); if (done) done(chosen); };
+  // Going somewhere from here: a card or deck is opened as a link is, so Back comes back to where this began.
+  const go = async address => { close(); if (done) done(null); await follow(address); };
+  const goMine = async (packKey, deckId, cardId) => {
+    close();
+    if (done) done(null);
+    const pack = packs.find(p => p.id === packKey);
+    if (!pack) return;
+    if (current && current.secure) await Promise.resolve(current.secure()).catch(() => {});
+    if (current && current.close) current.close();
+    await openMine(pack, deckId);
+    if (cardId && current && current.edit) current.edit(cardId);
+  };
   el.onclick = e => {
     if (e.target.closest('[data-pk=close]')) { finish(null); return; }
+    const o = e.target.closest('[data-open]');
+    if (o) { go(o.dataset.open); return; }
+    const m = e.target.closest('[data-mine]');
+    if (m) { const [pk, dk, ck] = m.dataset.mine.split('/'); goMine(pk, dk, ck); return; }
     const c = e.target.closest('.pk-card');
-    if (c) { finish({ label: c.dataset.label, address: c.dataset.addr }); return; }
+    if (c) { if (linking) finish({ label: c.dataset.label, address: c.dataset.addr }); else go(c.dataset.addr); return; }
     const d = e.target.closest('.pk-deck');
     if (!d) return;
-    const list = d.nextElementSibling;
-    const open = list.hidden;
+    const cards = d.nextElementSibling;
+    const open = cards.hidden;
     d.classList.toggle('open', open);
-    list.hidden = !open;
-    if (!open || list.childElementCount) return;
+    cards.hidden = !open;
+    if (!open || cards.childElementCount) return;
     const pack = packs.find(p => p.id === d.dataset.pack);
     const deck = pack.decks.find(x => x.id === d.dataset.deck);
-    list.innerHTML = deck.cards.map(card => {
+    cards.innerHTML = deck.cards.map(card => {
       const title = card.title || plainLinks(card.text || '');
-      return `<button class="pk-card ${esc(card.rarity || 'common')}" data-addr="${esc(addressOf(pack.id, deck.id, card.id))}" data-label="${esc(title)}">${esc(title)}<small>${esc(plainLinks(card.text || ''))}</small></button>
-        ${(card.parts || []).map(pt => `<button class="pk-card pk-part ${esc(card.rarity || 'common')}" data-addr="${esc(addressOf(pack.id, deck.id, card.id, pt.id))}" data-label="${esc(`${title} › ${pt.title}`)}">${esc(pt.title)}</button>`).join('')}`;
+      return row({ cls: esc(card.rarity || 'common'), address: addressOf(pack.id, deck.id, card.id), label: title, title: esc(title), sub: esc(plainLinks(card.text || '')) })
+        + (card.parts || []).map(pt => row({ cls: `pk-part ${esc(card.rarity || 'common')}`, address: addressOf(pack.id, deck.id, card.id, pt.id), label: `${title} › ${pt.title}`, title: esc(pt.title) })).join('');
     }).join('') || '<div class="demo-note">No cards.</div>';
   };
 }
+const showPicker = (packId, done) => showSearch({ packId, done });
 
 // A notification's address rides in the page's hash: #open=pack/deck/card.
 const addressIn = url => {
@@ -1171,6 +1243,9 @@ async function start() {
   navigator.storage && navigator.storage.persist && navigator.storage.persist().catch(() => {});
   sync.onChange(() => { refreshNotice(); refreshStatusLine(); });
   await initIsland(tapIsland);
+  // A link's chip in a box: a deck opens what it points at itself (a picture, a film's moment); anywhere
+  // else it's followed like any link.
+  onChipTap(address => { if (current && current.openRef) current.openRef(address); else follow(String(address).split('?')[0]); });
   // A link tapped anywhere a deck isn't taking care of its own.
   app.addEventListener('click', e => {
     const l = e.target.closest('.rlink');

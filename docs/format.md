@@ -120,7 +120,7 @@ A card's face reads at a glance, so as a guide: `title` 26 characters, `text` 11
 
 Any words, on a card or in an answer, can link to a pack, deck, card or part: `[Label](riffle:pack/deck/card/part)`, with as many of the address's parts as are wanted, each URL-encoded if it holds a slash. The phone shows the label as a tappable link, and a plain `https://` address as a link to the web. `riffle link <pack> <deck> <card> [part]` prints one to paste. The words they type can hold links the same way, made with the comment box's link button.
 
-What they bring to a deck's notes is a link with a query on its address: `?pic=<path>` for a picture, `?film=<path>&t=<seconds>` for a moment of a film, and `?pic=<path>&drawing=answers/img/<id>.jpg` for their drawing over a picture, which is also one of the notes' `images`. Words they brought are quoted just before the link. `riffle answers` writes all of these out.
+What they bring into a comment (a card's or a part's) or a deck's notes is a link with a query on its address: `?pic=<path>` for a picture, `?film=<path>&t=<seconds>` for a moment of a film, and `?pic=<path>&drawing=answers/img/<id>.jpg` for their drawing over a picture, which is also one of that comment's (or the notes') `images`. Words they brought are quoted just before the link. `riffle answers` writes all of these out.
 
 ### Films
 
@@ -150,7 +150,7 @@ A report, question or design can be in **parts**: sections that are each read, m
 ```
 
 - Each part needs its own `id` and a `title`, and some `text`, `images` or `videos`. The face shows the first four titles, each on one line, so keep them under 40 characters. Twelve parts is a lot for one card.
-- A tap turns the card over, and its back holds the parts: the card's words, details and pictures on top, then each part with Good, Problem and Huh? (the card's own words for go, workshop and idk) and a comment box of its own.
+- A tap turns the card over, and its back holds the parts: the card's words, details and pictures on top, then each part with Good, Problem and Decent (the card's own words for go, workshop and idk) and a comment box of its own.
 - Parts don't go on option cards or boards.
 
 ### Option cards

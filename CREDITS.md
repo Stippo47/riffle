@@ -6,6 +6,6 @@
 - `card-pickup` by Quoting
 - `card-random` by Faithtoken
 
-**Button icons** from [Lucide](https://lucide.dev), under the ISC licence: see `vendor/lucide/LICENSE`.
+**Button icons** from [Lucide](https://lucide.dev), under the ISC licence: see `vendor/lucide/LICENSE`. The search and meh icons came from lucide-static 0.460.0 on unpkg.com, in 0.11.0.
 
 **Pixel font** for the Inventory look: [Pixelify Sans](https://github.com/eifetx/Pixelify-Sans) by its project authors, under the SIL Open Font Licence: see `vendor/fonts/LICENSE`.

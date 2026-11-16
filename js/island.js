@@ -32,6 +32,32 @@ export function setIsland(next) {
   draw();
 }
 
+// Where a corner is, in pixels: under the title rows at the top, over the home bar at the bottom. With
+// the keyboard up the bottom is taken, so the bottom corners wait at the top.
+let probe = null;
+function insets() {
+  if (!probe) {
+    probe = document.createElement('div');
+    probe.style.cssText = 'position:fixed;left:0;top:0;width:0;visibility:hidden;pointer-events:none;height:var(--sat);border-bottom:solid 0 transparent;border-bottom-width:var(--sab)';
+    document.body.append(probe);
+  }
+  const cs = getComputedStyle(probe);
+  return { sat: parseFloat(cs.height) || 0, sab: parseFloat(cs.borderBottomWidth) || 0 };
+}
+function spot(c) {
+  const { sat, sab } = insets();
+  const W = layer.clientWidth, H = layer.clientHeight, w = el.offsetWidth, h = el.offsetHeight;
+  const kb = document.documentElement.classList.contains('kb');
+  const x = c[1] === 'l' ? 10 : W - w - 10;
+  const y = kb ? sat + 10 : c[0] === 't' ? sat + 104 : H - h - (sab + 80);
+  return { x, y };
+}
+function place(x, y) {
+  el.style.setProperty('--ix', `${Math.round(x)}px`);
+  el.style.setProperty('--iy', `${Math.round(y)}px`);
+}
+const settle = () => { if (el && state && !layer.hidden && !el.classList.contains('dragging')) { const p = spot(corner); place(p.x, p.y); } };
+
 function build() {
   layer = document.createElement('div');
   layer.className = 'island-layer';
@@ -40,20 +66,18 @@ function build() {
   el.setAttribute('aria-label', 'The deck in the mini player. Tap to bring it back');
   layer.append(el);
   document.body.append(layer);
-  // While typing, the keyboard takes the bottom, so the island waits at the top.
-  const typing = () => {
-    const a = document.activeElement;
-    layer.classList.toggle('typing', !!(a && (a.isContentEditable || /^(INPUT|TEXTAREA)$/.test(a.tagName))));
-  };
-  document.addEventListener('focusin', typing);
-  document.addEventListener('focusout', () => setTimeout(typing, 0));
+  // Its corner follows the screen: turning the phone, the keyboard coming up or going.
+  addEventListener('resize', settle);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', settle);
+  new MutationObserver(settle).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
 
-  // Dragged anywhere, it settles in the nearest corner. A tap that barely moves brings it back.
+  // Dragged anywhere, it glides to the nearest corner when let go. A tap that barely moves brings it back.
+  // An iPhone can cancel a touch it takes for its own (a scroll or a swipe home): the drag still counts.
   let drag = null;
   el.addEventListener('pointerdown', e => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
-    const r = el.getBoundingClientRect();
-    drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, moved: false, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+    const at = spot(corner);
+    drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, moved: false, at };
     try { el.setPointerCapture(e.pointerId); } catch { /* synthetic pointers in tests */ }
   });
   el.addEventListener('pointermove', e => {
@@ -61,36 +85,70 @@ function build() {
     const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
     if (!drag.moved && Math.hypot(dx, dy) < TAP_MOVE) return;
     drag.moved = true;
+    drag.last = { x: e.clientX, y: e.clientY };
     el.classList.add('dragging');
-    el.style.transform = `translate(${dx}px,${dy}px)`;
+    place(drag.at.x + dx, drag.at.y + dy);
   });
   const end = (e, cancelled) => {
     if (!drag || drag.id !== e.pointerId) return;
     const d = drag;
     drag = null;
     el.classList.remove('dragging');
-    el.style.transform = '';
-    if (cancelled) return;
-    if (!d.moved) { if (state) onTap(state); return; }
-    const x = d.cx + (e.clientX - d.x0), y = d.cy + (e.clientY - d.y0);
-    corner = `${y < innerHeight / 2 ? 't' : 'b'}${x < innerWidth / 2 ? 'l' : 'r'}`;
+    if (!d.moved) { if (!cancelled && state) onTap(state); else settle(); return; }
+    const last = cancelled ? d.last : { x: e.clientX, y: e.clientY };
+    const w = el.offsetWidth, h = el.offsetHeight;
+    const cx = d.at.x + (last.x - d.x0) + w / 2, cy = d.at.y + (last.y - d.y0) + h / 2;
+    corner = `${cy < layer.clientHeight / 2 ? 't' : 'b'}${cx < layer.clientWidth / 2 ? 'l' : 'r'}`;
     store.set(CORNER_KEY, corner);
     el.dataset.corner = corner;
+    settle();
   };
   el.addEventListener('pointerup', e => end(e, false));
   el.addEventListener('pointercancel', e => end(e, true));
   // The tap is handled on the lift above. A click after it must not reach what's under the island.
   el.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); });
+  el.addEventListener('touchstart', e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
+  el.addEventListener('touchmove', e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
   el.addEventListener('touchend', e => { if (e.cancelable) e.preventDefault(); }, { passive: false });
+}
+
+// Where the mini player is on screen now, for a deck growing out of it.
+export function islandRect() {
+  return el && state && !layer.hidden ? el.getBoundingClientRect() : null;
+}
+
+// The mini player grows in from where a card was: it starts the card's size and place, and shrinks into its corner.
+export function islandFrom(rect) {
+  if (!el || !state || !rect || !el.animate || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const to = el.getBoundingClientRect();
+  if (!to.width) return;
+  const base = layer.getBoundingClientRect();
+  const sx = rect.width / to.width, sy = rect.height / to.height;
+  el.animate([
+    { transform: `translate3d(${rect.left - base.left}px,${rect.top - base.top}px,0) scale(${sx},${sy})`, opacity: 0.7 },
+    { transform: `translate3d(${to.left - base.left}px,${to.top - base.top}px,0) scale(1)`, opacity: 1 },
+  ], { duration: 340, easing: 'cubic-bezier(.2,.9,.3,1)' });
 }
 
 function draw() {
   if (!layer) build();
+  const appearing = layer.hidden || !el.style.getPropertyValue('--ix');
   layer.hidden = !state;
+  fill();
+  if (!state) return;
+  // Coming into view it's put in its corner at once; only moves after that glide.
+  if (appearing) el.classList.add('placing');
+  const p = spot(corner);
+  place(p.x, p.y);
+  if (appearing) { void el.offsetWidth; el.classList.remove('placing'); }
+}
+
+function fill() {
   document.body.classList.toggle('has-island', !!state);
   if (!state) return;
   const s = state.show || {};
   el.dataset.corner = CORNERS.includes(corner) ? corner : 'br';
+  corner = el.dataset.corner;
   // A finished deck looks like the end of a deck: dark, with what was answered. A card looks like a card.
   if (s.done) {
     el.className = 'island is-done';

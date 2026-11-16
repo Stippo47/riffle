@@ -7,7 +7,7 @@
   --card-common:#ffffff; --card-uncommon:#fff9d6; --card-rare:#cff5f5; --card-epic:#e7d6ff; --card-legendary:#ffdc9a;
   --edge-common:transparent; --edge-uncommon:#efdc78; --edge-rare:#62d3d3; --edge-epic:#b48cff; --edge-legendary:#ee9f12;
   --card-ink:#17161c; --card-dim:#55535f; --pick-bg:rgba(23,22,28,.06); --pick-rule:#17161c;
-  --go:#17a35a; --work:#e8741c; --idk:#2d7fd6; --note:#a87c00; --bad:#d8362f;
+  --go:#17a35a; --work:#e8741c; --idk:#a87c00; --note:#2d7fd6; --bad:#d8362f;
 }
 
 /* The looks. Each one is only tokens plus a few surfaces further down. */
@@ -99,7 +99,8 @@ svg{display:block}
 .linkbtn{display:inline-flex;margin:2px 0}
 
 /* ---------- the first screen */
-.home-head{display:flex;align-items:center;justify-content:space-between;min-height:44px}
+.home-head{display:flex;align-items:center;justify-content:flex-start;gap:2px;min-height:44px}
+.home-head .apptitle{margin-right:auto}
 .apptitle{font-family:var(--display);font-size:30px;font-weight:700;line-height:1}
 .appsub{font-size:14px;color:var(--dim);margin:0 0 12px;min-height:18px}
 .appsub.is-problem{color:var(--bad);font-weight:600;line-height:1.3}
@@ -244,7 +245,7 @@ svg{display:block}
 .deck .deckbar{order:1}
 .progress{order:2;height:3px;background:var(--line);overflow:hidden;flex:none}
 .progress b{display:block;height:100%;width:0;background:var(--ink);transition:width .2s}
-.tools{order:3;display:grid;grid-template-columns:repeat(4,1fr);background:var(--rail);box-shadow:inset 0 0 0 1px var(--rail-line);border-radius:var(--rail-radius);color:var(--rail-ink);flex:none}
+.tools{order:3;display:grid;grid-template-columns:repeat(3,1fr);background:var(--rail);box-shadow:inset 0 0 0 1px var(--rail-line);border-radius:var(--rail-radius);color:var(--rail-ink);flex:none}
 .tools button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:12px;min-height:48px;border-radius:var(--rail-radius)}
 .tools button svg{width:22px;height:22px;fill:none;stroke:currentColor}
 .tablewrap{order:4;position:relative;flex:1 1 0;min-height:0;margin-bottom:12px}
@@ -309,24 +310,22 @@ svg{display:block}
 [data-layout=story] .deck:not(.composing):not(.ended) .card:not(.tight) .why:not(.how){font-size:clamp(17px,5vw,19px)}
 
 /* The glow: at the edge the card is heading for, in the colour of what that means. */
-.glow{position:absolute;inset:0;opacity:0;pointer-events:none;z-index:31;--gc:var(--go);overflow:hidden;border-radius:var(--radius)}
+.glow{position:absolute;inset:0;opacity:0;pointer-events:none;z-index:6;--gc:var(--go);border-radius:var(--radius);
+  background:color-mix(in srgb,var(--gc) 20%,transparent);
+  box-shadow:inset 0 0 0 4px var(--gc),inset 0 0 26px color-mix(in srgb,var(--gc) 55%,transparent),0 0 24px 3px color-mix(in srgb,var(--gc) 65%,transparent)}
 .glow[data-act=left]{--gc:var(--work)}
 .glow[data-act=down]{--gc:var(--idk)}
-.glow[data-act=up]{--gc:#d9b200}
+.glow[data-act=up]{--gc:var(--note)}
 .glow[data-act=close]{--gc:#8c8f98}
 .glow[data-act=break]{--gc:#a35cff}
 .glow[data-act=break][data-rarity=legendary]{--gc:#ff9d00}
-.glow[data-dir=right]{background:radial-gradient(46% 62% at 100% 50%,color-mix(in srgb,var(--gc) 78%,transparent),transparent)}
-.glow[data-dir=left]{background:radial-gradient(46% 62% at 0% 50%,color-mix(in srgb,var(--gc) 78%,transparent),transparent)}
-.glow[data-dir=down]{background:radial-gradient(72% 34% at 50% 100%,color-mix(in srgb,var(--gc) 78%,transparent),transparent)}
-.glow[data-dir=up]{background:radial-gradient(72% 34% at 50% 0%,color-mix(in srgb,var(--gc) 78%,transparent),transparent)}
 
 /* What shows while swiping. The word and icon sit at the edge of the card's area, so they never
    cover the title or the buttons in any layout. */
 .edgemark{position:absolute;z-index:33;opacity:0;pointer-events:none;display:flex;align-items:center;justify-content:center;--s:1;--t:none;--mc:var(--go);transform:var(--t) scale(var(--s));transform-origin:center}
 .edgemark[data-act=left]{--mc:var(--work)}
 .edgemark[data-act=down]{--mc:var(--idk)}
-.edgemark[data-act=up]{--mc:#a88a00}
+.edgemark[data-act=up]{--mc:var(--note)}
 .edgemark[data-act=close]{--mc:#6c6f78}
 .edgemark[data-at=right]{right:-4px;top:50%;--t:translateY(-50%)}
 .edgemark[data-at=left]{left:-4px;top:50%;--t:translateY(-50%)}
@@ -355,24 +354,24 @@ svg{display:block}
 .card[data-pos="1"] .face{filter:brightness(calc(.93 + .07*var(--rise)))}
 .card[data-pos="2"] .face{filter:brightness(.86)}
 .card[data-pos="1"] .stamp,.card[data-pos="2"] .stamp{display:none}
-/* The turn eases in to edge-on at exactly halfway and out from there, and the hidden side swaps at that
-   moment, when neither side can be seen. Easing the whole turn in one curve put edge-on early, with both
-   sides hidden for a while: the flicker. Once turned, the back is drawn flat. See flip() in js/deck.js. */
-.flip{position:absolute;inset:0;transform-style:preserve-3d;-webkit-transform-style:preserve-3d}
-.flip.flipped{transform:perspective(1400px) rotateY(180deg)}
-.flip.turn-in{animation:turnIn .34s both}
-.flip.turn-out{animation:turnOut .34s both}
-@keyframes turnIn{0%{transform:perspective(1400px) rotateY(0deg);animation-timing-function:cubic-bezier(.45,0,.95,.6)}50%{transform:perspective(1400px) rotateY(90deg);animation-timing-function:cubic-bezier(.05,.4,.55,1)}100%{transform:perspective(1400px) rotateY(180deg)}}
-@keyframes turnOut{0%{transform:perspective(1400px) rotateY(180deg);animation-timing-function:cubic-bezier(.45,0,.95,.6)}50%{transform:perspective(1400px) rotateY(90deg);animation-timing-function:cubic-bezier(.05,.4,.55,1)}100%{transform:perspective(1400px) rotateY(0deg)}}
-.flip.flat{transform:none;-webkit-transform-style:flat;transform-style:flat}
-.flip.flat>.back{transform:none;visibility:visible;transition:none}
+/* A turn is two halves joined at edge-on: the side showing turns away, then the sides swap, then the
+   other side turns in. The swap waits for the first half's animationend, so the side coming in can't
+   show early even when an iPhone starts the animation late. At rest nothing is 3D. See flip() in js/deck.js. */
+.flip{position:absolute;inset:0}
+.flip.turn-away{animation:turnAway .17s cubic-bezier(.45,0,.95,.6) both}
+.flip.turn-in{animation:turnIn .19s cubic-bezier(.05,.4,.55,1) both}
+.flip.turn-back{animation:turnBack .17s cubic-bezier(.45,0,.95,.6) both}
+.flip.turn-home{animation:turnHome .19s cubic-bezier(.05,.4,.55,1) both}
+@keyframes turnAway{from{transform:perspective(1400px) rotateY(0deg)}to{transform:perspective(1400px) rotateY(90deg)}}
+@keyframes turnIn{from{transform:perspective(1400px) rotateY(-90deg)}to{transform:perspective(1400px) rotateY(0deg)}}
+@keyframes turnBack{from{transform:perspective(1400px) rotateY(0deg)}to{transform:perspective(1400px) rotateY(-90deg)}}
+@keyframes turnHome{from{transform:perspective(1400px) rotateY(90deg)}to{transform:perspective(1400px) rotateY(0deg)}}
 .flip.flat>.face{display:none}
-/* The hidden side goes away halfway through the turn, so it can't catch a touch or show through. */
-.face,.back{transition:visibility 0s .17s}
+/* Only the side showing can be seen or touched. */
 .flip.flipped>.face,.flip:not(.flipped)>.back{visibility:hidden}
 .face,.back{position:absolute;inset:0;border-radius:var(--radius);overflow:hidden;background:var(--tint);color:var(--card-ink);box-shadow:var(--shadow),inset 0 0 0 2px var(--rim,transparent);font-family:var(--font)}
 .face{display:flex;flex-direction:column;padding:16px 18px 12px}
-.back{transform:rotateY(180deg);display:flex;flex-direction:column}
+.back{display:flex;flex-direction:column}
 .common{--tint:var(--card-common);--rim:var(--edge-common)}
 .uncommon{--tint:var(--card-uncommon);--rim:var(--edge-uncommon)}
 .rare{--tint:var(--card-rare);--rim:var(--edge-rare)}
@@ -549,7 +548,7 @@ svg{display:block}
 .tile-state{display:flex;align-items:center;justify-content:space-between;gap:4px;font-size:12.5px;font-weight:800;letter-spacing:.02em;color:var(--card-dim)}
 .tile-state i{width:15px;height:15px;color:var(--card-ink)}
 .tile-state i svg{width:100%;height:100%;fill:none;stroke:currentColor}
-.dir-right.tile-state{color:#0d8146}.dir-left.tile-state{color:#bd5608}.dir-down.tile-state{color:#1c63b0}.dir-up.tile-state{color:#7c5c00}
+.dir-right.tile-state{color:#0d8146}.dir-left.tile-state{color:#bd5608}.dir-down.tile-state{color:#7c5c00}.dir-up.tile-state{color:#1c63b0}
 .ov-foot{grid-column:1/-1;display:flex;flex-direction:column;align-items:stretch;gap:2px;margin-top:8px}
 
 /* ---------- the end of a deck */
@@ -563,11 +562,11 @@ svg{display:block}
 .tally div{display:flex;flex-direction:column;align-items:center;gap:1px;min-width:0}
 .tally b{font-size:32px;font-variant-numeric:tabular-nums;line-height:1.05;font-family:var(--display)}
 .tally span{font-size:12px;color:var(--dim);text-align:center}
-.tally .dir-right b{color:#27c06f}.tally .dir-left b{color:#f08a3c}.tally .dir-down b{color:#5aa6f0}.tally .dir-up b{color:#e8c52a}
+.tally .dir-right b{color:#27c06f}.tally .dir-left b{color:#f08a3c}.tally .dir-down b{color:#e8c52a}.tally .dir-up b{color:#5aa6f0}
 [data-look=paper] .tally .dir-right b,[data-look=inventory] .tally .dir-right b{color:#0d8146}
 [data-look=paper] .tally .dir-left b,[data-look=inventory] .tally .dir-left b{color:#b85306}
-[data-look=paper] .tally .dir-down b,[data-look=inventory] .tally .dir-down b{color:#1c63b0}
-[data-look=paper] .tally .dir-up b,[data-look=inventory] .tally .dir-up b{color:#7c5c00}
+[data-look=paper] .tally .dir-down b,[data-look=inventory] .tally .dir-down b{color:#7c5c00}
+[data-look=paper] .tally .dir-up b,[data-look=inventory] .tally .dir-up b{color:#1c63b0}
 .endbox .padwrap{flex:1 1 110px;min-height:110px}
 /* While typing at the end of a deck, the pad gets the room. */
 .endbox:has(.pad:focus) :is(.end-title,.end-sub,.tally){display:none}
@@ -702,12 +701,12 @@ canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:
 .dir.on{box-shadow:inset 0 0 0 3px var(--ink)}
 .dir[data-act=right] strong{color:#27c06f}
 .dir[data-act=left] strong{color:#f08a3c}
-.dir[data-act=down] strong{color:#5aa6f0}
-.dir[data-act=up] strong{color:#e8c52a}
+.dir[data-act=down] strong{color:#e8c52a}
+.dir[data-act=up] strong{color:#5aa6f0}
 [data-look=paper] .dir[data-act=right] strong,[data-look=inventory] .dir[data-act=right] strong{color:#0d8146}
 [data-look=paper] .dir[data-act=left] strong,[data-look=inventory] .dir[data-act=left] strong{color:#b85306}
-[data-look=paper] .dir[data-act=down] strong,[data-look=inventory] .dir[data-act=down] strong{color:#1c63b0}
-[data-look=paper] .dir[data-act=up] strong,[data-look=inventory] .dir[data-act=up] strong{color:#7c5c00}
+[data-look=paper] .dir[data-act=down] strong,[data-look=inventory] .dir[data-act=down] strong{color:#7c5c00}
+[data-look=paper] .dir[data-act=up] strong,[data-look=inventory] .dir[data-act=up] strong{color:#1c63b0}
 [data-look=inventory] .dir{box-shadow:var(--tile-shadow);color:#fff}
 [data-look=inventory] .dir small{color:#efefef}
 .dirnote{margin-top:12px}
@@ -791,8 +790,8 @@ html.kb .viewer{bottom:auto;top:var(--vvt,0px);height:var(--vvh,100%)}
 .pp>span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pp-n{flex:none;width:22px;height:22px;border-radius:6px;background:rgba(23,22,28,.12);display:flex;align-items:center;justify-content:center;font-style:normal;font-size:12px;font-weight:800}
 .pp-mark{flex:none;font-style:normal;font-size:12px;font-weight:800;letter-spacing:.02em}
-.pp[data-mark=right] .pp-mark{color:#0d8146}.pp[data-mark=left] .pp-mark{color:#bd5608}.pp[data-mark=down] .pp-mark{color:#1c63b0}
-.pp[data-mark=right] .pp-n{background:#15803f;color:#fff}.pp[data-mark=left] .pp-n{background:#d8650f;color:#fff}.pp[data-mark=down] .pp-n{background:#2d7fd6;color:#fff}
+.pp[data-mark=right] .pp-mark{color:#0d8146}.pp[data-mark=left] .pp-mark{color:#bd5608}.pp[data-mark=down] .pp-mark{color:#7c5c00}
+.pp[data-mark=right] .pp-n{background:#15803f;color:#fff}.pp[data-mark=left] .pp-n{background:#d8650f;color:#fff}.pp[data-mark=down] .pp-n{background:var(--idk);color:#fff}
 .pp.said::after{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:#a87c00}
 .pp-more{justify-content:center;font-size:13px;color:var(--card-dim);background:none;min-height:22px}
 .tight .pp{min-height:26px;font-size:13.5px}
@@ -808,7 +807,7 @@ html.kb .viewer{bottom:auto;top:var(--vvt,0px);height:var(--vvh,100%)}
 .part{margin-top:12px;padding:12px 14px 10px;border-radius:min(var(--radius),14px);background:#fff;color:var(--card-ink);box-shadow:0 0 0 1px rgba(0,0,0,.08)}
 .part[data-mark=right]{box-shadow:inset 5px 0 0 #15803f,0 0 0 1px rgba(0,0,0,.08)}
 .part[data-mark=left]{box-shadow:inset 5px 0 0 #d8650f,0 0 0 1px rgba(0,0,0,.08)}
-.part[data-mark=down]{box-shadow:inset 5px 0 0 #2d7fd6,0 0 0 1px rgba(0,0,0,.08)}
+.part[data-mark=down]{box-shadow:inset 5px 0 0 var(--idk),0 0 0 1px rgba(0,0,0,.08)}
 .part h3{display:flex;align-items:center;gap:9px;font-family:var(--card-display);font-size:18px;line-height:1.2;margin-bottom:7px}
 .part h3 b{flex:none;width:26px;height:26px;border-radius:7px;background:rgba(23,22,28,.1);display:flex;align-items:center;justify-content:center;font-family:var(--font);font-size:13px}
 .part-body{font-size:16px;line-height:1.42;-webkit-user-select:text;user-select:text}
@@ -817,7 +816,7 @@ html.kb .viewer{bottom:auto;top:var(--vvt,0px);height:var(--vvh,100%)}
 .part-mark{flex:1;min-width:0;min-height:42px;padding:0 6px;border-radius:999px;box-shadow:inset 0 0 0 1.5px rgba(23,22,28,.22);font-size:14.5px;font-weight:700;color:var(--card-ink)}
 .part-mark.on[data-mark=right]{background:#15803f;box-shadow:none;color:#fff}
 .part-mark.on[data-mark=left]{background:#d8650f;box-shadow:none;color:#fff}
-.part-mark.on[data-mark=down]{background:#2d7fd6;box-shadow:none;color:#fff}
+.part-mark.on[data-mark=down]{background:var(--idk);box-shadow:none;color:#fff}
 .part-say{flex:none;width:46px;height:42px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:rgba(23,22,28,.08);color:var(--card-ink)}
 .part-say svg{width:21px;height:21px;fill:none;stroke:currentColor}
 .part .part-chip{margin-top:8px}
@@ -882,7 +881,8 @@ html.kb .viewer{bottom:auto;top:var(--vvt,0px);height:var(--vvh,100%)}
 .crumbs::-webkit-scrollbar{display:none}
 .crumbs.scrolled{-webkit-mask-image:linear-gradient(90deg,transparent,#000 18px);mask-image:linear-gradient(90deg,transparent,#000 18px)}
 .crumb{flex:none;white-space:nowrap;padding:10px 2px;color:var(--dim);font-weight:600}
-.crumb-deck{color:var(--ink)}
+.crumb-deck{color:var(--ink);display:inline-flex;align-items:center;gap:4px}
+.crumb-deck svg{width:13px;height:13px;fill:none;stroke:currentColor;opacity:.7;flex:none}
 .crumb-card{color:var(--ink);font-weight:800;padding-right:6px}
 .crumbs i{flex:none;font-style:normal;color:var(--dim);padding:0 3px;opacity:.7}
 /* Every layout shows every crumb, in a row that scrolls. */
@@ -895,14 +895,9 @@ html.kb .viewer{bottom:auto;top:var(--vvt,0px);height:var(--vvh,100%)}
 /* ---------- the mini player: one deck, small, floating in a corner */
 body.covered .island-layer{display:none}
 .island-layer{position:fixed;left:0;right:0;top:0;height:var(--vvh,100dvh);transform:translateY(var(--vvt,0px));pointer-events:none;z-index:150}
-.island{position:absolute;width:122px;height:156px;display:flex;flex-direction:column;gap:4px;padding:9px 10px 8px;border-radius:12px;background:var(--tint,#fff);color:var(--card-ink);text-align:left;box-shadow:0 8px 22px rgba(0,0,0,.5),0 0 0 2px rgba(255,255,255,.85),inset 0 0 0 2px var(--rim,transparent);pointer-events:auto;touch-action:none;transition:left .22s cubic-bezier(.2,.9,.3,1),right .22s cubic-bezier(.2,.9,.3,1),top .22s cubic-bezier(.2,.9,.3,1),bottom .22s cubic-bezier(.2,.9,.3,1);overflow:hidden;font-family:var(--font)}
-.island.dragging{transition:none;opacity:.92;box-shadow:0 14px 30px rgba(0,0,0,.55),0 0 0 2px #fff}
-.island[data-corner=tl],.island[data-corner=bl]{left:10px}
-.island[data-corner=tr],.island[data-corner=br]{right:10px}
-.island[data-corner=tl],.island[data-corner=tr]{top:calc(var(--sat) + 104px)}
-.island[data-corner=bl],.island[data-corner=br]{bottom:calc(var(--sab) + 80px)}
-.island-layer.typing .island[data-corner=bl],.island-layer.typing .island[data-corner=br]{bottom:auto;top:calc(var(--sat) + 10px)}
-.island-layer.typing .island[data-corner=tl],.island-layer.typing .island[data-corner=tr]{top:calc(var(--sat) + 10px)}
+.island{position:absolute;left:0;top:0;width:122px;height:156px;display:flex;flex-direction:column;gap:4px;padding:9px 10px 8px;border-radius:12px;background:var(--tint,#fff);color:var(--card-ink);text-align:left;box-shadow:0 8px 22px rgba(0,0,0,.5),0 0 0 2px rgba(255,255,255,.85),inset 0 0 0 2px var(--rim,transparent);pointer-events:auto;touch-action:none;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;transform:translate3d(var(--ix,0px),var(--iy,0px),0);transform-origin:0 0;transition:transform .32s cubic-bezier(.2,.9,.3,1);overflow:hidden;font-family:var(--font)}
+.island.dragging,.island.placing{transition:none}
+.island.dragging{opacity:.92;box-shadow:0 14px 30px rgba(0,0,0,.55),0 0 0 2px #fff}
 .isl-deck{font-size:10px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--card-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:none}
 .isl-title{flex:none;font-family:var(--card-display);font-size:14px;font-weight:800;line-height:1.15;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .isl-text{flex:1;min-height:0;font-size:12px;font-weight:500;line-height:1.22;color:var(--card-dim);overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical}
@@ -1030,7 +1025,7 @@ body.covered .island-layer{display:none}
 .back .part{margin-top:10px;background:rgba(23,22,28,.035);box-shadow:inset 0 0 0 1px rgba(23,22,28,.1)}
 .back .part[data-mark=right]{box-shadow:inset 5px 0 0 #15803f,inset 0 0 0 1px rgba(23,22,28,.1)}
 .back .part[data-mark=left]{box-shadow:inset 5px 0 0 #d8650f,inset 0 0 0 1px rgba(23,22,28,.1)}
-.back .part[data-mark=down]{box-shadow:inset 5px 0 0 #2d7fd6,inset 0 0 0 1px rgba(23,22,28,.1)}
+.back .part[data-mark=down]{box-shadow:inset 5px 0 0 var(--idk),inset 0 0 0 1px rgba(23,22,28,.1)}
 .back-scroll .part h3{font-size:17.5px;margin-bottom:6px}
 .back-scroll .part p{margin-bottom:8px}
 .back .part-pad .padwrap{height:140px}
@@ -1039,24 +1034,32 @@ body.covered .island-layer{display:none}
 /* Pictures and films on a back can be held: no picture menu, no callout. */
 .back-scroll img.mpic,.back-scroll .clip,.viewer-stage{-webkit-touch-callout:none}
 
-/* Bring to notes: low on the screen, clear of the menu iPhones put over selected words. */
+/* Bring to comment: low on the screen, clear of the menu iPhones put over selected words. */
 .bringpill{position:fixed;left:50%;bottom:calc(var(--sab) + 18px);transform:translateX(-50%);z-index:260;display:flex;align-items:center;gap:8px;min-height:48px;padding:0 20px;border-radius:999px;background:#17181b;color:#fff;font-family:var(--font);font-size:15.5px;font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.45),0 0 0 1.5px rgba(255,255,255,.25);animation:pillIn .16s ease-out;white-space:nowrap}
 .bringpill svg{width:20px;height:20px;fill:none;stroke:currentColor}
 .bringpill.done{background:#15803f}
 @keyframes pillIn{from{opacity:0;transform:translate(-50%,8px)}to{opacity:1;transform:translate(-50%,0)}}
 
 /* What's been brought to the notes, as chips that reopen it. */
-.noterefs{flex:none;display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;padding:2px 0 4px;touch-action:pan-x}
-.noterefs::-webkit-scrollbar{display:none}
-.noteref{flex:none;display:flex;align-items:center;gap:6px;max-width:240px;min-height:36px;padding:0 12px;border-radius:999px;background:var(--row-bg);box-shadow:inset 0 0 0 1px var(--row-line);font-size:13.5px;font-weight:600;color:var(--ink)}
-.noteref span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.noteref svg{width:16px;height:16px;fill:none;stroke:currentColor;flex:none}
-.endbox .noterefs{margin-bottom:6px}
-[data-look=inventory] .noteref{border-radius:0;box-shadow:var(--tile-shadow);color:#fff}
+/* A link in a box being typed in: a short blue chip with its label. The whole link is kept in it. */
+.pad .lchip{display:inline-flex;align-items:center;gap:4px;max-width:min(15em,80%);vertical-align:bottom;margin:1px 1px;padding:1px 8px 1px 6px;border-radius:7px;background:#2f8fe0;color:#fff;font-size:.92em;font-weight:600;line-height:1.35;white-space:nowrap;-webkit-user-select:none;user-select:none;cursor:pointer}
+.pad .lchip span{overflow:hidden;text-overflow:ellipsis}
+.pad .lchip svg{width:13px;height:13px;flex:none;fill:none;stroke:currentColor}
+[data-look=inventory] .pad .lchip{border-radius:0}
 
 /* Searching for a card to link. */
 input.pk-search{flex:none;margin:4px 0 6px;font-size:16px;border-radius:12px;min-height:44px}
-.pk-found{margin-top:6px}
+.pk-row{display:flex;gap:6px;align-items:stretch;margin-top:6px}
+.pk-cards .pk-row{margin-top:0}
+.pk-row .pk-card{flex:1;min-width:0;margin:0}
+.pk-open{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:58px;border-radius:10px;background:var(--row-bg);box-shadow:inset 0 0 0 1px var(--row-line);color:var(--ink);font-size:11.5px;font-weight:600}
+.pk-open svg{width:17px;height:17px;fill:none;stroke:currentColor}
+.pk-mine{background:var(--row-bg);color:var(--ink);box-shadow:inset 0 0 0 1px var(--row-line)}
+.pk-mine small{color:var(--dim)}
+.pk-mine svg{width:15px;height:15px;fill:none;stroke:currentColor;vertical-align:-2px;margin-right:5px}
+.pk-mine b{display:inline}
+[data-look=inventory] .pk-open{border-radius:0}
+.pk-found{margin-top:0}
 .pk-found b{display:block;font-size:15px}
 .pk-found small{margin-top:2px}
 
@@ -1070,7 +1073,6 @@ input.pk-search{flex:none;margin:4px 0 6px;font-size:16px;border-radius:12px;min
 .reward .ghostbtn{margin-top:4px}
 .endbox{touch-action:pan-y}
 /* The glow rides on the card: same box, same turning point, so the same transform puts it on the card. */
-.glow{transform-origin:50% 112%}
 /* A card's own Done reads on the white card in every look. */
 .mcard .mc-done{background:var(--card-ink);color:#fff;box-shadow:none}
 /* With the mini player out, a list can scroll its last rows up clear of it. */

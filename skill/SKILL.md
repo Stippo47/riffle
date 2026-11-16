@@ -128,7 +128,7 @@ If a card is technical with no context, they'll send it back. So:
 **Kinds:**
 
 - `question`: what you want to know, with your pick.
-- `report`: "this is what happened", with no pick. They say good, problem, or that they don't follow. A "don't follow" mostly needs nothing back: it just tells you where they are.
+- `report`: "this is what happened", with no pick. They say GOOD, PROBLEM, or DECENT: fine, but they're not happy with it yet, or don't quite follow. Ask which if it matters. Answers from before 0.11.0 say HUH? instead, meaning they didn't follow.
 - `design`: your design for something, to approve, send back, or add to.
 - `options`: 2 to 4 options, each with an `id` and `label`, and `pick` naming your choice. They tap some and swipe.
 - `board`: any number of pictures to pick from, 60 or more is fine. `items` is a list, each with an `id`, a short `label`, an `image`, and optionally `text`. `pick` lists your choices. They tap the card to open the grid, tap a picture to zoom into it, tick the ones they like, then swipe. Use this instead of one big picture of many things, which can't be seen well enough. `riffle deck` makes the thumbnails from the whole picture, and says what the board costs to download. Tiles are square and never crop, so where the whole picture won't read small, like two views stacked in one tall image, give the item its own `thumb`: a square of the part that matters. `riffle deck` keeps it.
@@ -139,13 +139,13 @@ If a card is technical with no context, they'll send it back. So:
 
 - **go, good, yes, fine:** do it.
 - **workshop, problem, rethink, redo:** don't go with that. Work on it, then deal it back. On option cards and boards, what they ticked is the direction to redo in.
-- **idk, huh:** they need more context. Add it and deal it back, or decide it yourself if it's technical. If they say idk twice on the same card, decide it yourself and say so.
+- **idk, huh, decent:** decent on a report means not happy yet, or not quite following: a comment usually says which, and if none does, show them more or ask. Otherwise they need more context. Add it and deal it back, or decide it yourself if it's technical. If they say idk twice on the same card, decide it yourself and say so.
 - **comment on its own:** their own suggestion. Read it.
 - **Comments and notes** are often the most useful part. Read every one. Pictures are listed with their path in the clone: open them.
 - **Links** in their words point at a card, like `[Gates](riffle:proj/paths/gates)`, made with the link button. `riffle answers` writes each out as where it goes: `[Gates → My project › Garden › Paths › Gates]`. "Like this one" with a link means that card.
-- **Things brought to notes**: their deck notes can hold references to a picture, a film at a moment, a drawing, or quoted words from a card, like `[Film at 0:12, The walk](riffle:...)`. `riffle answers` writes out which picture or film and when: look at it there.
+- **Things brought in**: a comment (or their notes) can hold references to a picture, a film at a moment, a drawing, or quoted words from a card, like `[Film at 0:12](riffle:...)`. They see each as a small blue chip. `riffle answers` writes out which picture or film and when: look at it there.
 - **Drawings** are pictures they drew on, to circle or arrow what they mean. `riffle answers` lists each with what it was drawn over. Open it: the circle is the point of the comment.
-- **Parts** show under their card: `part feet (Feet): PROBLEM, "they slide"`. A part can be marked or commented on without the card being swiped. `riffle redeal` lists parts marked problem or huh.
+- **Parts** show under their card: `part feet (Feet): PROBLEM, "they slide"`. A part can be marked or commented on without the card being swiped. `riffle redeal` lists parts marked problem, decent or huh.
 - **Board items** can have comments of their own, from the full-screen look at one: `item f1 (Spinning): "the spin wobbles"`, under their board.
 - **Deck: replan** means the whole deck's premise is off. Rethink it from the base. **Started over** means they want to go through it again.
 - **Feel test** lines are test answers, but they're still their words. See them with `riffle answers --pack feel-test`.

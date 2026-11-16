@@ -4,7 +4,8 @@ import { ICON } from './icons.js';
 // What each direction means on each kind of card. To change a stamp's word, change it here.
 export const KINDS = {
   question: { label: 'Question', pickLabel: 'My pick', right: 'GO', left: 'WORKSHOP', down: 'IDK', up: 'NOTE' },
-  report: { label: 'Report', right: 'GOOD', left: 'PROBLEM', down: 'HUH?', up: 'NOTE' },
+  // A report's down is "decent": fine, but not happy yet, or not quite following. It was HUH? before 0.11.0.
+  report: { label: 'Report', right: 'GOOD', left: 'PROBLEM', down: 'DECENT', up: 'NOTE', icons: { down: 'meh' } },
   design: { label: 'Design', pickLabel: 'My design', right: 'YES', left: 'RETHINK', down: 'IDK', up: 'NOTE' },
   options: { label: 'Options', pickLabel: 'My pick', right: 'GO', left: 'REDO', down: 'IDK', up: 'NOTE' },
   board: { label: 'Board', pickLabel: 'My pick', right: 'GO', left: 'REDO', down: 'IDK', up: 'NOTE' },
@@ -23,6 +24,8 @@ export const logicalOf = phys => dirs[phys];
 export const physicalOf = logical => Object.keys(dirs).find(k => dirs[k] === logical);
 export const MEANING = { right: 'Go', left: 'Workshop', down: 'IDK', up: 'Comment' };
 export const MARK_ICON = { right: 'check', left: 'x', down: 'circle-help', up: 'message-square-text' };
+// The icon for a meaning on this kind of card.
+export const markIcon = (card, logical) => ((card && !card.handled && kindOf(card).icons) || {})[logical] || MARK_ICON[logical];
 
 // Lets wording name a meaning and still be right whichever way it has been swapped to.
 const FILL = { go: 'right', workshop: 'left', idk: 'down', comment: 'up' };
@@ -108,10 +111,99 @@ export function padReady(el, onInput) {
     onInput && onInput(padText(el));
   });
 }
-export const padText = el => el.innerText.replace(/\n+$/, '');
+// A link in a box being typed in shows as a short blue chip with its label, and the whole link stays
+// out of sight, in the chip. The box's words, as saved and sent, have the link written out in full.
+const RLINK = /\[([^\]\n]{1,120})\]\(riffle:([^)\s]{1,400})\)/g;
+function chipFor(full, label, address) {
+  const c = document.createElement('span');
+  c.className = 'lchip';
+  c.contentEditable = 'false';
+  c.dataset.link = full;
+  c.dataset.addr = address;
+  const what = /[?&]film=/.test(address) ? 'play' : /[?&](pic|drawing)=/.test(address) ? 'image' : 'link';
+  c.innerHTML = `${ICON[what] || ''}<span>${esc(label.trim())}</span>`;
+  return c;
+}
+// Words as nodes for a box: text, and a chip for each link.
+function padNodes(text) {
+  const s = String(text || '');
+  const frag = document.createDocumentFragment();
+  let last = 0;
+  for (const m of s.matchAll(RLINK)) {
+    if (m.index > last) frag.append(document.createTextNode(s.slice(last, m.index)));
+    frag.append(chipFor(m[0], m[1], m[2]));
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) frag.append(document.createTextNode(s.slice(last)));
+  return frag;
+}
+// A box's words, links written out in full. Breaks the browser made with <br> or <div> are line breaks.
+function serial(nodes) {
+  let out = '';
+  const walk = list => {
+    for (const c of list) {
+      if (c.nodeType === 3) { out += c.nodeValue; continue; }
+      if (c.nodeType !== 1) continue;
+      if (c.dataset && c.dataset.link != null) { out += c.dataset.link; continue; }
+      if (c.tagName === 'BR') { out += '\n'; continue; }
+      const block = /^(DIV|P|LI)$/.test(c.tagName);
+      if (block && out && !out.endsWith('\n')) out += '\n';
+      walk(c.childNodes);
+      if (block && !out.endsWith('\n')) out += '\n';
+    }
+  };
+  walk(nodes);
+  return out.replace(/\u00a0/g, ' ');
+}
+export const padText = el => serial(el.childNodes).replace(/\n+$/, '');
 export function padSet(el, text) {
-  el.textContent = text || '';
+  el.replaceChildren(padNodes(text));
   el.classList.toggle('is-empty', !text);
+}
+// How far into a box's words its caret is, links counted in full. Null if it has no caret of its own.
+export function padOffset(el) {
+  const r = el.caret;
+  if (!r || !el.contains(r.startContainer)) return el.caretAt ?? null;
+  const pre = document.createRange();
+  pre.selectNodeContents(el);
+  try { pre.setEnd(r.startContainer, r.startOffset); } catch { return null; }
+  return serial(pre.cloneContents().childNodes).length;
+}
+// Puts the caret this far into a box's words, links counted in full.
+function caretAt(el, offset) {
+  let left = offset;
+  const r = document.createRange();
+  let done = false;
+  for (const c of el.childNodes) {
+    const len = c.nodeType === 3 ? c.nodeValue.length : serial([c]).length;
+    if (left <= len) {
+      if (c.nodeType === 3) r.setStart(c, left);
+      else if (left === 0) r.setStartBefore(c);
+      else r.setStartAfter(c);
+      done = true;
+      break;
+    }
+    left -= len;
+  }
+  if (!done) r.selectNodeContents(el);
+  r.collapse(done);
+  el.caret = r.cloneRange();
+  const sel = getSelection();
+  if (sel && document.activeElement === el) { sel.removeAllRanges(); sel.addRange(r); }
+}
+// Puts words into a box where its caret was, without focusing it (so no keyboard comes up), as if typed:
+// its input handler runs, so it's saved like anything typed. `line` puts them on a line of their own.
+export function padPut(el, text, { line = false } = {}) {
+  const now = padText(el);
+  const at = Math.max(0, Math.min(padOffset(el) ?? now.length, now.length));
+  const before = now.slice(0, at), after = now.slice(at);
+  const lead = !before ? '' : line ? (before.endsWith('\n') ? '' : '\n') : /\s$/.test(before) ? '' : ' ';
+  const tail = line ? (after.startsWith('\n') ? '' : '\n') : /^\s/.test(after) ? '' : ' ';
+  const next = before + lead + text + tail + after;
+  padSet(el, next);
+  el.caretAt = (before + lead + text + tail).length;
+  caretAt(el, el.caretAt);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
 }
 function caretToEnd(el) {
   const sel = getSelection();
@@ -203,6 +295,16 @@ document.addEventListener('click', e => {
   const pad = w.querySelector('.pad');
   if (pad) padFocus(pad);
 });
+// A tap on a link's chip, in a box to type in, opens what it links. The app says how, once.
+let openChip = () => {};
+export const onChipTap = fn => { openChip = fn; };
+document.addEventListener('click', e => {
+  const chip = e.target && e.target.closest && e.target.closest('.pad .lchip');
+  if (!chip) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openChip(chip.dataset.addr);
+}, true);
 // Any box that's focused is brought into view above the keyboard, wherever it is.
 document.addEventListener('focusin', e => { if (e.target && e.target.classList && e.target.classList.contains('pad')) revealPad(e.target); });
 
@@ -229,11 +331,21 @@ export function padInsert(el, text) {
   }
   // A space first, if it would otherwise run on from a word.
   const at0 = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
-  const before = at0 && at0.startContainer.nodeType === 3 ? at0.startContainer.textContent.slice(0, at0.startOffset) : padText(el);
+  const before = at0 && at0.startContainer.nodeType === 3 ? at0.startContainer.textContent.slice(0, at0.startOffset) : (() => { el.caret = at0; return (padText(el).slice(0, padOffset(el) ?? undefined)); })();
   if (before && !/\s$/.test(before)) text = ` ${text}`;
   let ok = false;
-  try { ok = document.execCommand('insertText', false, text); } catch { ok = false; }
-  if (!ok) {
+  RLINK.lastIndex = 0;
+  const hasLink = RLINK.test(text);
+  RLINK.lastIndex = 0;
+  if (!hasLink) { try { ok = document.execCommand('insertText', false, text); } catch { ok = false; } }
+  if (!ok && hasLink) { // a link goes in as its chip, with a space after it to carry on typing from
+    const at = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
+    const frag = padNodes(`${text} `);
+    const lastNode = frag.lastChild;
+    if (at) { at.deleteContents(); at.insertNode(frag); at.setStart(lastNode, lastNode.nodeValue.length); at.collapse(true); sel.removeAllRanges(); sel.addRange(at); } else el.append(frag);
+    el.caret = at ? at.cloneRange() : null;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  } else if (!ok) {
     const at = sel && sel.rangeCount ? sel.getRangeAt(0) : null;
     const node = document.createTextNode(text);
     if (at) { at.deleteContents(); at.insertNode(node); at.setStartAfter(node); at.collapse(true); } else el.append(node);

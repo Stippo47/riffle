@@ -46,11 +46,13 @@ PARTS_ON_FACE = 4  # the app shows this many part titles on the face, then "and 
 PARTS_MANY = 12
 WORDS = {
     'question': {'right': 'GO', 'left': 'WORKSHOP', 'down': 'IDK', 'up': 'COMMENT'},
-    'report': {'right': 'GOOD', 'left': 'PROBLEM', 'down': 'HUH?', 'up': 'COMMENT'},
+    # A report's down reads DECENT: fine, but not happy yet, or not quite following. Before 0.11.0 it read HUH?.
+    'report': {'right': 'GOOD', 'left': 'PROBLEM', 'down': 'DECENT', 'up': 'COMMENT'},
     'design': {'right': 'YES', 'left': 'RETHINK', 'down': 'IDK', 'up': 'COMMENT'},
     'options': {'right': 'GO', 'left': 'REDO', 'down': 'IDK', 'up': 'COMMENT'},
     'board': {'right': 'GO', 'left': 'REDO', 'down': 'IDK', 'up': 'COMMENT'},
 }
+OLD_WORDS = {'HUH?'}  # words a swipe once had, kept on answers given while it had them
 HANDLED_WORDS = {'right': 'FINE', 'left': 'WORKSHOP', 'down': 'IDK', 'up': 'COMMENT'}
 LINK = re.compile(r'\[([^\]\n]{1,120})\]\(riffle:([^)\s]{1,400})\)')  # a link to a pack, deck, card or part
 NAMED_DIRECTION = re.compile(r'\b(swip\w*|throw\w*|drag\w*|flick\w*|hold\w*|pull\w*|push\w*)\s+(it\s+|this\s+|this one\s+|the card\s+|that\s+)?(to the\s+)?(right|left|up|down)\b', re.I)
@@ -963,6 +965,8 @@ def card_in(pack, deck_id, card_id):
 
 def word_for(answer, card):
     table = HANDLED_WORDS if answer.get('handledAt') or (card and card.get('handled')) else WORDS.get(answer.get('kind', 'question'), WORDS['question'])
+    if answer.get('stamp') in OLD_WORDS:
+        return answer['stamp']  # said before the word changed, so shown as it was said
     return table.get(answer.get('swipe'), answer.get('swipe'))
 
 
@@ -985,6 +989,8 @@ def names_of(card, ids):
 
 def part_word(e):
     table = WORDS.get(e.get('kind', 'question'), WORDS['question'])
+    if e.get('mark') and e.get('stamp') in OLD_WORDS:
+        return e['stamp']
     return table.get(e.get('mark'), '') if e.get('mark') else ''
 
 
