@@ -936,6 +936,8 @@ def summarise(events):
             deck(e)['notes'] = e
         elif t == 'deck':
             deck(e)['verdict'] = e
+        elif t == 'wake':
+            deck(e)['wake'] = e
         elif t == 'deck-reset':
             d = deck(e)
             d['earlier'].extend(a for a in d['answers'].values() if a.get('comment'))
@@ -1087,6 +1089,9 @@ def cmd_answers(a):
             if d['verdict'] and d['verdict'] in shown:
                 v = d['verdict']
                 print(f'  DECK: {"done" if v.get("verdict") == "done" else "REPLAN FROM THE BASE"} ({v.get("answered")} of {v.get("total")} answered)')
+            if d.get('wake') and d['wake'] in shown:
+                w = d['wake']
+                print(f'  SENT SO FAR: start on what is answered ({w.get("answered")} of {w.get("total")}), the deck is not finished')
             if d.get('archive') and d['archive'] in shown:
                 print(f'  They {"archived this deck" if d["archive"].get("archived") else "brought this deck back from the archive"}.')
         for pack, items in sorted(thoughts.items(), key=lambda kv: str(kv[0])):
@@ -1637,6 +1642,129 @@ def start_waiter(wait):
         print(f'  warning: could not leave a process to send it later ({e}). The next send will.')
 
 
+# ---------- waiting for them
+
+WAIT_ON = ('deck', 'thought', 'mine')
+
+
+def remote_head():
+    """The hash of main on GitHub, or None with no signal. Reads only, so it never fights another clone user for a lock."""
+    r = git('ls-remote', 'origin', 'refs/heads/main', check=False)
+    return r.stdout.split()[0] if r.returncode == 0 and r.stdout.strip() else None
+
+
+def fetch_main():
+    """Updates origin/main without touching the working folder, so an agent writing a deck in this clone at the same time is safe."""
+    return git('fetch', '-q', 'origin', 'main', check=False).returncode == 0
+
+
+def tree_names(ref, folder):
+    r = git('ls-tree', '--name-only', f'{ref}:{folder}', check=False)
+    return set(r.stdout.split('\n')) - {''} if r.returncode == 0 else set()
+
+
+def blobs(ref, paths):
+    """Many files at one commit, in one git process. Unreadable ones come back as None."""
+    if not paths:
+        return {}
+    r = subprocess.run(['git', 'cat-file', '--batch'], cwd=DATA, input=''.join(f'{ref}:{p}\n' for p in paths).encode('utf-8'), capture_output=True)
+    out, at, found = r.stdout, 0, {}
+    for p in paths:
+        end = out.index(b'\n', at)
+        head = out[at:end].split()
+        at = end + 1
+        if len(head) < 3 or head[1] != b'blob':
+            found[p] = None
+            continue
+        size = int(head[2])
+        found[p] = out[at:at + size].decode('utf-8', 'replace')
+        at += size + 1
+    return found
+
+
+def wake_reasons(events, pack, decks, topics, on, since):
+    """What in these new events should wake the writer waiting on this pack."""
+    out = []
+    for e in events:
+        if e.get('pack') != pack or e.get('demo') or (since and seconds(e.get('at')) < since):
+            continue
+        t = e.get('type')
+        if t in ('deck', 'wake') and 'deck' in on:
+            if decks and e.get('deck') not in decks:
+                continue
+            if topics and e.get('topic') not in topics:
+                continue
+            n = f"{e.get('answered', '?')} of {e.get('total', '?')} answered"
+            what = {'done': "Deck's done", 'replan': 'Replan this deck'}.get(e.get('verdict'), 'Sent what they have so far')
+            out.append(f"deck {e.get('deck')}: {what} ({n})")
+        elif t == 'thought' and 'thought' in on:
+            out.append(f"a thought: \"{readable(e.get('text', ''))[:160]}\"")
+    return out
+
+
+def cmd_wait(a):
+    pack = pack_from(a)
+    if not pack:
+        die('Which pack? Give --pack, or run this inside a project with a .riffle-pack file.')
+    need_pack(pack)
+    decks, topics = set(a.deck or []), set(a.topic or [])
+    on = set(a.on.split(',')) if a.on else set(WAIT_ON)
+    if on - set(WAIT_ON):
+        die(f'--on takes {", ".join(WAIT_ON)}, joined by commas.')
+    # Thoughts and their own decks belong to the whole pack. Waiting on a few decks leaves them to the
+    # pack's other writers, unless asked for by name.
+    if (decks or topics) and not a.on:
+        on = {'deck'}
+    known = decks_of(pack)
+    for d in decks:
+        if d not in known:
+            print(f'  warning: no deck {d} in {pack} yet, waiting for it anyway')
+    since = seconds(a.since) if a.since else None
+    every = max(float(os.environ.get('RIFFLE_WAIT_FLOOR', 15)), a.every)  # the tests lower the floor
+    give_up = time.time() + a.hours * 3600
+
+    fetch_main()
+    base = git('rev-parse', 'origin/main', check=False).stdout.strip()
+    seen = set() if since else tree_names(base, 'answers')
+    last_head = None
+    what = ', '.join(sorted(decks)) if decks else (f'topic {", ".join(sorted(topics))}' if topics else 'the whole pack')
+    print(f'Waiting on {pack} ({what}) for {" and ".join(sorted(on))}, checking every {every} seconds.', flush=True)
+    while True:
+        head = remote_head()
+        if head and head != last_head and fetch_main():
+            last_head = head
+            ref = 'origin/main'
+            names = {n for n in tree_names(ref, 'answers') if n.endswith('.json') and not n.startswith('connect-check')}
+            fresh = sorted(names - seen)
+            reasons = []
+            for name, text in blobs(ref, [f'answers/{n}' for n in fresh]).items():
+                try:
+                    reasons += wake_reasons(json.loads(text or '{}').get('events', []), pack, decks, topics, on, since)
+                except ValueError:
+                    continue  # half a file can't be read; the next round will see it whole
+                seen.add(name.split('/', 1)[1])
+            if 'mine' in on:
+                changed = git('diff', '--name-only', base, ref, '--', f'packs/{pack}/mine/', check=False).stdout.split()
+                for path, text in blobs(ref, changed).items():
+                    try:
+                        mine = json.loads(text or '{}')
+                    except ValueError:
+                        continue
+                    if not mine.get('removed'):
+                        reasons.append(f"their own deck \"{mine.get('title') or pathlib.Path(path).stem}\" changed")
+                base = git('rev-parse', ref, check=False).stdout.strip() or base
+            if reasons:
+                print('Woke for:')
+                for r in dict.fromkeys(reasons):
+                    print(f'  - {r}')
+                print(f'Read them with: riffle answers --pack {pack}' + (' and riffle mine' if any('own deck' in r for r in reasons) else ''))
+                sys.exit(0)
+        if time.time() >= give_up:
+            print(f'Nothing yet after {a.hours:g} hours. Run wait again to keep waiting.')
+            sys.exit(2)
+        time.sleep(every)
+
+
 def cmd_notify_flush(a):
     """The process start_waiter leaves behind: waits out the gap, then sends what's waiting."""
     try:
@@ -1765,6 +1893,15 @@ def main():
     s.add_argument('--title', default='Riffle'); s.add_argument('--body', default=''); s.add_argument('--badge', type=int); s.add_argument('--tag', default='riffle')
     s.add_argument('--url', help='where a tap goes, like ./#open=pack/deck/card')
     s.set_defaults(fn=cmd_notify)
+
+    s = sub.add_parser('wait', help='wait until they finish or send a deck, or file a thought; run it in the background')
+    s.add_argument('--pack'); s.add_argument('--deck', action='append', help='only this deck; give it more than once for several')
+    s.add_argument('--topic', action='append', help='only decks in this topic')
+    s.add_argument('--on', help=f'what wakes it, of {",".join(WAIT_ON)}; all three by default, only deck with --deck or --topic')
+    s.add_argument('--since', help='also count what came after this time (ISO), not only what lands from now')
+    s.add_argument('--every', type=float, default=60, help='seconds between checks, 15 at least')
+    s.add_argument('--hours', type=float, default=12, help='give up after this long, with exit code 2')
+    s.set_defaults(fn=cmd_wait)
 
     s = sub.add_parser('notify-flush', help=argparse.SUPPRESS)
     s.add_argument('--wait', type=float, default=0)

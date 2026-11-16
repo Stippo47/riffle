@@ -1085,6 +1085,15 @@ await sleep(120);
 await tap('.crumb-deck');
 await sleep(700);
 ok(!(await text()).includes('Send this whole deck back'), 'the old button is gone');
+const wakeFilesBefore = new Set(await api('/__files'));
+await tap('[data-act=gridwake]');
+await sleep(2500);
+ok((await text()).includes('Sent to the writer'), 'the grid sends what is answered so far to the writer, and says so');
+const wakeEvents = [];
+for (const n of (await api('/__files')).filter(n => isBatch(n) && !wakeFilesBefore.has(n))) {
+  wakeEvents.push(...JSON.parse(await (await fetch(`${API}/__file?path=${encodeURIComponent(n)}`)).text()).events);
+}
+ok(wakeEvents.some(e => e.type === 'wake' && e.deck && e.total >= 1 && typeof e.answered === 'number'), 'as a wake event, sent at once', JSON.stringify(wakeEvents.concat(await queue())));
 await tap('[data-act=gridreplan]');
 await sleep(200);
 let scr = await text();

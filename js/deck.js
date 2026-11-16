@@ -4,7 +4,7 @@
 import { TUNE, decide, dominant, progress, track, watchPinch } from './gesture.js';
 import { blurHidden, clamp, dragToClose, esc, fillDirs, icon, KINDS, kindOf, logicalOf, markIcon, padBlur, padFocus, padHTML, padPut, padReady, padSet, paintNotices, paras, physicalOf, plainSlot, RARITY, revealPad, stampWord, tick } from './ui.js';
 import * as store from './store.js';
-import { eachAtOnce, enqueue, newId, photoPath, pictureUrl } from './sync.js';
+import { eachAtOnce, enqueue, flush, newId, photoPath, pictureUrl } from './sync.js';
 import { openViewer } from './viewer.js';
 import { countWords, discardPhoto, drawStrip, photoButton, saveDrawing, savePhoto, stripError } from './photos.js';
 import { addressOf, linkButton, linkify, linksIn, linkText, paraLinks, plainLinks, splitAddress } from './links.js';
@@ -641,6 +641,7 @@ export class DeckView {
       closegrid: () => this.hideOverview(),
       jump: () => this.jump(btn.dataset.id),
       gridnotes: () => { this.hideOverview(); if (this.topId()) this.toggleNotes(true); else padFocus(this.endBox.querySelector('#endnotes')); },
+      gridwake: () => this.wakeWriter(btn),
       gridreplan: () => { this.hideOverview(); this.showEnd('replan'); },
       gridover: () => { this.hideOverview(); this.showStartOver(); },
       gridarchive: () => this.nav.archive && this.nav.archive(),
@@ -2134,6 +2135,7 @@ export class DeckView {
         ${tiles}
         <div class="ov-foot">
           <button class="ghostbtn" data-act="gridnotes">${icon('notebook-pen')}Deck notes</button>
+          ${this.pack.demo ? '' : `<button class="ghostbtn" data-act="gridwake">${icon('bell')}Send what I have to the writer</button>`}
           <button class="ghostbtn" data-act="gridreplan">${icon('message-square-text')}Replan this deck</button>
           <button class="ghostbtn" data-act="gridover">${icon('rotate-ccw')}Start this deck over</button>
           ${this.nav.archive ? `<button class="ghostbtn" data-act="gridarchive">${icon(this.nav.archived ? 'archive-restore' : 'archive')}${this.nav.archived ? 'Bring this deck back' : 'Archive this deck'}</button>` : ''}
@@ -2289,6 +2291,17 @@ export class DeckView {
       if (t < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
+  }
+
+  // Tells the writer to start on what's answered so far, without finishing the deck. A writer waiting on
+  // this deck (riffle wait) wakes on it, as it does on "Deck's done".
+  wakeWriter(btn) {
+    this.sendNotes();
+    this.sendDrafts();
+    const sum = deckSummary(this.deck, this.s);
+    this.send({ type: 'wake', answered: sum.total - sum.left, total: sum.total });
+    setTimeout(() => flush().catch(() => {}), 300);
+    if (btn) { btn.disabled = true; btn.innerHTML = `${icon('check')}Sent to the writer`; }
   }
 
   verdict(which) {

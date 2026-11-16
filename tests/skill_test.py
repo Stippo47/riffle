@@ -547,6 +547,78 @@ write('d/race.json', deck(good_card('r1')))
 code, out = run('deck', str(work / 'd/race.json'), '--pack', 'proj', '--quiet')
 ok(code == 0 and (clone / 'answers/2026-11-02T12-03-00-000Z-ddd.json').exists(), 'a deck sent while answers land keeps both', out)
 
+print('Waiting for them')
+os.environ['RIFFLE_WAIT_FLOOR'] = '0.3'
+
+
+def start_wait(*args):
+    env = {**os.environ, 'RIFFLE_DATA': str(clone), 'HOME': str(home), 'USERPROFILE': str(home), 'PYTHONIOENCODING': 'utf-8', 'RIFFLE_WAIT_FLOOR': '0.3'}
+    w = subprocess.Popen([sys.executable, str(RIFFLE), 'wait', '--pack', 'proj', '--every', '0.3', *args], cwd=work, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=env)
+    time.sleep(2.5)  # its first look sets what counts as already there
+    return w
+
+
+def finished(w, most=15):
+    try:
+        out, _ = w.communicate(timeout=most)
+        return w.returncode, out
+    except subprocess.TimeoutExpired:
+        return None, ''
+
+
+def still_waiting(w, for_seconds=2.5):
+    time.sleep(for_seconds)
+    return w.poll() is None
+
+
+stamp = '2026-11-16T09:00:00.000Z'
+w = start_wait('--deck', 'first')
+phone_sends('2026-11-16T09-00-00-000Z-w01.json', {'eid': 'w1', 'at': stamp, 'type': 'answer', 'card': 'a', 'cardVersion': 1, 'title': 'A', 'kind': 'question', 'swipe': 'right', 'stamp': 'GO', 'comment': ''})
+ok(still_waiting(w), 'a plain answer does not wake a deck wait')
+phone_sends('2026-11-16T09-00-01-000Z-w02.json', {'eid': 'w2', 'at': stamp, 'type': 'wake', 'deck': 'other', 'answered': 1, 'total': 3})
+ok(still_waiting(w), 'nor does another deck being sent')
+phone_sends('2026-11-16T09-00-02-000Z-w03.json', {'eid': 'w3', 'at': stamp, 'type': 'thought', 'id': 't9', 'text': 'An idea', 'deck': None, 'topic': None})
+ok(still_waiting(w), 'nor a thought, when only some decks are waited on')
+phone_sends('2026-11-16T09-00-03-000Z-w04.json', {'eid': 'w4', 'at': stamp, 'type': 'deck', 'verdict': 'done', 'tally': {'right': 2}, 'answered': 2, 'total': 2, 'demo': True})
+ok(still_waiting(w), 'nor the Feel test')
+phone_sends('2026-11-16T09-00-04-000Z-w05.json', {'eid': 'w5', 'at': stamp, 'type': 'deck', 'verdict': 'done', 'tally': {'right': 2}, 'answered': 2, 'total': 2})
+code, out = finished(w)
+ok(code == 0 and "deck first: Deck's done (2 of 2 answered)" in out and 'riffle answers --pack proj' in out, "the deck's done wakes it, and says what to run", out)
+
+w = start_wait('--deck', 'first')
+phone_sends('2026-11-16T09-00-05-000Z-w06.json', {'eid': 'w6', 'at': stamp, 'type': 'wake', 'answered': 1, 'total': 4})
+code, out = finished(w)
+ok(code == 0 and 'Sent what they have so far (1 of 4 answered)' in out, 'so does sending a part-done deck', out)
+
+w = start_wait()
+phone_sends('2026-11-16T09-00-06-000Z-w07.json', {'eid': 'w7', 'at': stamp, 'type': 'thought', 'id': 't10', 'text': 'Try the river again', 'deck': None, 'topic': None})
+code, out = finished(w)
+ok(code == 0 and 'a thought: "Try the river again"' in out, 'a whole-pack wait wakes on a thought', out)
+
+w = start_wait('--topic', 'first', '--on', 'deck,thought')
+phone_sends('2026-11-16T09-00-07-000Z-w08.json', {'eid': 'w8', 'at': stamp, 'type': 'thought', 'id': 't11', 'text': 'Asked for by name', 'deck': None, 'topic': None})
+code, out = finished(w)
+ok(code == 0 and 'Asked for by name' in out, 'and a narrower one too, when thoughts are asked for', out)
+
+w = start_wait()
+(other / 'packs/proj/mine').mkdir(parents=True, exist_ok=True)
+(other / 'packs/proj/mine/wait-deck.json').write_text(json.dumps({'v': 1, 'id': 'wait-deck', 'title': 'Late ideas', 'cards': []}), encoding='utf-8')
+git(other, 'add', '-A'); git(other, 'commit', '-q', '-m', 'mine'); git(other, 'pull', '-q', '--rebase', 'origin', 'main'); git(other, 'push', '-q', 'origin', 'HEAD:main')
+code, out = finished(w)
+ok(code == 0 and 'their own deck "Late ideas" changed' in out and 'riffle mine' in out, 'and on one of their own decks changing', out)
+
+code, out = run('wait', '--pack', 'proj', '--deck', 'first', '--since', '2026-11-16T09:00:00.000Z', '--every', '0.3')
+ok(code == 0 and "Deck's done" in out, '--since counts what landed before it started', out)
+
+before = git(clone, 'status', '--porcelain').stdout
+code, out = run('wait', '--pack', 'proj', '--deck', 'first', '--every', '0.3', '--hours', '0.0003')
+ok(code == 2 and 'Nothing yet' in out, 'it gives up after --hours, with exit code 2', out)
+ok(git(clone, 'status', '--porcelain').stdout == before, 'and waiting never touches the working folder')
+code, out = run('answers', '--pack', 'proj', '--all')
+ok('SENT SO FAR: start on what is answered (1 of 4)' in out, 'answers shows a part-done deck sent to the writer', out)
+code, out = run('wait', '--pack', 'proj', '--on', 'cards')
+ok(code == 1 and '--on takes' in out, 'a wrong --on is refused', out)
+
 shutil.rmtree(work, ignore_errors=True)
 print(f'{failed} failed' if failed else 'all passed')
 sys.exit(1 if failed else 0)

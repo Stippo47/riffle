@@ -152,6 +152,25 @@ If a card is technical with no context, they'll send it back. So:
 
 Log what comes back the way your project logs what they say.
 
+## Waiting for them, then carrying on
+
+When your work is held up until they answer, don't stop and wait to be told. Send the deck, then run `riffle wait` **in the background** (the Bash tool's `run_in_background`), and end your turn. The command polls GitHub about once a minute and costs no tokens while it waits. When it exits, you're woken. Read what came back with `riffle answers` and carry on.
+
+```
+riffle wait --deck <deck-id>                every deck you're waiting on, one --deck each
+riffle wait --topic <topic-id>              any deck in your topic
+riffle wait                                 the whole pack: decks, thoughts and their own decks
+riffle wait --deck <deck-id> --on deck,thought   thoughts too
+```
+
+- **The pack** comes from the project's `.riffle-pack`, or `--pack`. A writer only ever wakes for its own pack.
+- **What wakes it:** "Deck's done" or "Replan this deck" at a deck's end, or **Send what I have to the writer** in a deck's grid, which they use to let you start before they've answered every card. A plain swipe never wakes it. Neither does the Feel test.
+- **Thoughts and their own decks** belong to the whole pack. A wait narrowed with `--deck` or `--topic` leaves them to the pack's other writers, unless you name them with `--on`.
+- **Only what lands after it starts counts.** If you start waiting a while after sending the deck, add `--since <time the deck went up>`.
+- **Exit 0** prints what woke it. **Exit 2** means nothing came within `--hours` (12 by default): run it again if you still need it.
+- It only reads, and never touches the clone's working folder, so you can send other decks while it runs.
+- This needs the session left open and the PC awake. A closed session has nothing to wake.
+
 ## Dealing a card back, and marking it handled
 
 ```
