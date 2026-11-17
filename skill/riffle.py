@@ -2050,7 +2050,7 @@ def main():
 
     s = sub.add_parser('wait', help='wait until they finish your decks or deal you in, or file a thought; run it in the background')
     s.add_argument('--pack'); s.add_argument('--deck', action='append', help='a deck you need; give it once for each, and every one must be finished')
-    s.add_argument('--quiet', type=float, default=5, help='minutes their phone must be quiet after finishing, unless they deal you in')
+    s.add_argument('--quiet', type=float, default=15, help='minutes their phone must be quiet after finishing, unless they deal you in')
     s.add_argument('--topic', action='append', help='only decks in this topic')
     s.add_argument('--on', help=f'what wakes it, of {",".join(WAIT_ON)}; all three by default, only deck with --deck or --topic')
     s.add_argument('--since', help='also count what came after this time (ISO), not only what lands from now')

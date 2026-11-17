@@ -944,7 +944,7 @@ await shot('42-grid-handled');
 await tap('[data-act=closegrid]');
 await sleep(120);
 const endWords = await text();
-ok(endWords.includes('Deal in now') && endWords.includes('put the phone down for 5 minutes'), "the end of a real deck offers Deal in now beside Deck's done, and says how each starts the writer", endWords);
+ok(endWords.includes('Deal in now') && endWords.includes('put the phone down for 15 minutes'), "the end of a real deck offers Deal in now beside Deck's done, and says how each starts the writer", endWords);
 await shot('42b-end-deal-in');
 await tap('[data-act=done]');
 await sleep(500);

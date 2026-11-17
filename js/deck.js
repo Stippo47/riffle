@@ -2193,7 +2193,7 @@ export class DeckView {
           <button class="${early ? 'primary' : 'secondary'}" data-act="replan">Replan this deck</button>
           ${early ? '<button class="ghostbtn" data-act="keepgoing">Never mind</button>' : ''}
         </div>
-        ${early || this.pack.demo ? '' : `<div class="end-sub small end-wake">Deck's done: Claude starts once you've put the phone down for 5 minutes${with_.length ? `, and once ${esc(with_.join(', '))} ${with_.length === 1 ? 'is' : 'are'} done too` : ''}. Deal in now: it starts straight away.</div>`}
+        ${early || this.pack.demo ? '' : `<div class="end-sub small end-wake">Deck's done: Claude starts once you've put the phone down for 15 minutes${with_.length ? `, and once ${esc(with_.join(', '))} ${with_.length === 1 ? 'is' : 'are'} done too` : ''}. Deal in now: it starts straight away.</div>`}
       </div>`;
     const pad = this.endBox.querySelector('#endnotes');
     padSet(pad, this.s.notes || '');
