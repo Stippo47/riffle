@@ -6,12 +6,13 @@ import { DEFAULT_DIRS, MEANING, confetti, esc, getDirs, icon, onChipTap, padInse
 import * as store from './store.js';
 import * as sync from './sync.js';
 import * as push from './push.js';
+import * as sound from './sound.js';
 import { countWords } from './photos.js';
 import { addressOf, linkify, linkText, plainLinks, splitAddress } from './links.js';
 import { initIsland, islandFrom, islandNow, islandRect, setIsland } from './island.js';
 import { MineView, deckFromFile, fileOf, liveCards, liveDecks, mergeDecks, mineKey, mineOf } from './mine.js';
 
-const VERSION = '0.13.1';
+const VERSION = '0.14.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -337,13 +338,14 @@ function topicsOf(pack) {
   return { topics: [...groups.values()].filter(g => g.decks.length), misc };
 }
 
-// The pictures and films a deck shows on its cards and their parts. Boards fetch their own, as they're looked at.
+// The pictures, films and sounds a deck shows on its cards and their parts. Boards fetch their own, as they're looked at.
 const filmPaths = list => (list || []).flatMap(v => (typeof v === 'string' ? [v] : v ? [v.src, v.poster] : [])).filter(Boolean);
+const soundPaths = list => [].concat(list || []).map(a => (typeof a === 'string' ? a : a && a.src)).filter(Boolean);
 const imagesFor = async (pack, deck) => {
   const urls = new Map();
   const wanted = deck.cards.flatMap(c => [
-    ...(c.images || []), ...(c.options || []).map(o => o.image), ...filmPaths(c.videos),
-    ...(c.parts || []).flatMap(pt => [...(pt.images || []), ...filmPaths(pt.videos)]),
+    ...(c.images || []), ...(c.options || []).map(o => o.image), ...filmPaths(c.videos), ...soundPaths(c.audio),
+    ...(c.parts || []).flatMap(pt => [...(pt.images || []), ...filmPaths(pt.videos), ...soundPaths(pt.audio)]),
   ]).filter(Boolean);
   for (const p of new Set(wanted)) urls.set(p, await sync.pictureUrl(pack.id, p, { get: false }));
   return p => urls.get(p) || null;
@@ -1281,5 +1283,5 @@ start();
 
 // For the tests in tests/, on a local test server only.
 if (isLocalHost) {
-  window.__riffle = { openMine, mergeMine, setArchived, get current() { return current; }, get trail() { return trail; }, showHome, showPack, showConnect, showSettings, showStyle, showDirections, setStyle, setDirs, getDirs, setNotice, onHide, openThoughts, openAddress, follow, goBack, shrink, tapIsland, islandNow, setIsland, library, sync, store };
+  window.__riffle = { openMine, mergeMine, setArchived, get current() { return current; }, get trail() { return trail; }, showHome, showPack, showConnect, showSettings, showStyle, showDirections, setStyle, setDirs, getDirs, setNotice, onHide, openThoughts, openAddress, follow, goBack, shrink, tapIsland, islandNow, setIsland, library, sync, store, sound };
 }

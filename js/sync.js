@@ -6,7 +6,7 @@ import * as store from './store.js';
 export const OWNER = 'Stippo47', REPO = 'riffle-data', BRANCH = 'main';
 const FULL = `${OWNER}/${REPO}`;
 const SEND_EVERY = 15000, MAX_BATCH = 200, KEEPALIVE_LIMIT = 40000, PULL_EVERY = 30000, MINE_EVERY = 8000;
-const PICTURE_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
+const PICTURE_TYPES = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm', m4a: 'audio/mp4', mp3: 'audio/mpeg', aac: 'audio/aac' };
 const isFilm = path => /\.(mp4|m4v|mov|webm)$/i.test(path);
 const CALL_TIMEOUT = 25000, STUCK_AFTER = 40000, STREAK_LIMIT = 3;
 const PHOTO_TIMEOUT = 120000, PHOTO_KEEP_DAYS = 30, PICTURE_TIMEOUT = 60000;
@@ -488,7 +488,10 @@ export async function pictureUrl(packId, rel, { get = true } = {}) {
     } catch { /* no signal: the caller says so */ }
   }
   if (!rec || !(rec.data instanceof Blob)) return null;
-  const url = URL.createObjectURL(rec.data);
+  // A file kept before the app knew its kind, like a sound clip that came down to an older version, gets its
+  // real type here: an iPhone won't play sound from a file that doesn't say what it is.
+  const type = PICTURE_TYPES[path.split('.').pop().toLowerCase()];
+  const url = URL.createObjectURL(type && rec.data.type !== type ? rec.data.slice(0, rec.data.size, type) : rec.data);
   pictureUrls.set(path, url);
   return url;
 }
@@ -498,6 +501,7 @@ const filmPaths = list => (list || []).flatMap(v => (typeof v === 'string' ? [v]
 
 // The full pictures and films of every board. These wait until they're looked at, unless a plain card
 // uses one too. A card's own pictures and films, and its parts', all come down ahead, to work offline.
+// Sound clips are small, so they all come down ahead, a board's too.
 async function boardPictures() {
   const out = new Set(), onCards = new Set();
   for (const f of await store.files.words()) {

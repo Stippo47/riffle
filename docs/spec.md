@@ -37,7 +37,7 @@ A deck's kind is what the writer says, or else what its cards are: all reports i
 | report | What happened, with nothing asked | GOOD | PROBLEM: something's wrong with where this is going | DECENT: fine, but not happy yet, or not quite following. Before 0.11.0 this read HUH?, and answers given then still read so |
 | design | The writer's design for something, to approve, deny or add to | YES | RETHINK | IDK |
 | options | Several options and a question: tap the ones wanted, then swipe | GO: only those. With nothing tapped, the writer's marked pick. With no pick either, it just bounces | REDO: even those weren't good, redo in their direction. With nothing tapped, all of them are bad | IDK |
-| board | Any number of pictures to pick from, 60 or more. See Boards below | As for options | As for options | IDK |
+| board | Any number of pictures, films or sounds to pick from, 60 or more. See Boards below | As for options | As for options | IDK |
 
 Comment always opens the comment box. These words live in `js/ui.js`. The table names the default directions; see Swipe directions below.
 
@@ -217,6 +217,18 @@ A film remembers where it was left, its moment, speed and whether it was playing
 
 A card's films come down ahead, after its pictures. A board's come when they're looked at, like its full pictures.
 
+## Sound
+
+A card or a part can carry sound clips beside its pictures and films, and a board's items can be sounds, to pick one by ear. It's kept quiet on purpose. Nothing ever plays by itself, a clip plays at whatever volume the phone is set to, with nothing before or after it, and only one plays at a time. Films stay silent.
+
+**On a card's back, and in a part,** each clip is a row: a round play button, its name, a bar that fills as it plays, and the time beside it. A tap plays it, another pauses it, and one more carries on from there. Tapping a different clip stops the first. Flipping the card back, going to another card, opening the overview or putting the app away stops it. A card's face says how many sounds are on its back, as it does for pictures and videos.
+
+**On a board,** a sound is a tile like any other, with a play button where a picture would be, or over its picture if it has one. A tap plays it there, without leaving the grid: the button turns to pause, and a bar along the tile's foot fills. Its tick and its label select it, as on any tile. A strip above "Back to the card" names the one last tapped, with its text if it has any, and has a speech bubble for a comment on that item alone, kept and sent like any item's comment. Looking at a picture, or leaving the board, stops the sound. Sounds aren't part of the full-screen look, so next and previous there go between the pictures and films.
+
+**When no sound comes.** An iPhone can leave a Home Screen app silent after it's been reopened ([WebKit bug 291892](https://bugs.webkit.org/show_bug.cgi?id=291892)). A page can't hear itself, so two signs are watched for: the phone refusing to play, and a clip that's meant to be playing while its clock stands still. Either puts "No sound played" on its row or its tile. A refusal says so at once. A still clock says so after a second and a half, and keeps trying for a few seconds more, because sound can be slow to start, through headphones that were asleep for one: if the clock then moves, the words go and the clip plays on, and if it never does, the clip stops. A tap on one that says so tries again with a fresh player. Nothing else about the card is touched. A clip that's silent while its clock runs can't be told from one that's heard.
+
+Clips are small AAC or MP3 files. They come down ahead with a card's pictures, a board's too, and are kept on the phone, so they play with no signal. One that hasn't come down yet is fetched by the tap, and says it needs signal if it can't be. An iPhone only starts sound during a tap, so after a fetch it may say "Tap again to play". Each clip is a plain `<audio>` element made by the tap: see `js/sound.js`.
+
 ## Drawing on pictures
 
 Any picture or film opened full screen can be drawn on: on a card's back, a part, an option or a board, and a paused frame of a film. Draw turns the pen on, which brings out four colours (red, yellow, blue, white), undo, clear, and Done.
@@ -229,7 +241,7 @@ Any picture or film opened full screen can be drawn on: on a card's back, a part
 
 ## Parts
 
-A card in parts shows the titles of its first four parts on its face, each with its mark once it has one, and a dot if it has words. "Tap to read the 3 parts" says how many. A tap turns it over, like any card with more on its back, even mid-comment, and its back holds everything: the card's own words, details, pictures and films on top, then how many parts have been answered, then each part as a section with its title, words, pictures and films. While a card in parts is turned over, its back takes the room the buttons had. A tap on a part's title on the face turns it over at that part.
+A card in parts shows the titles of its first four parts on its face, each with its mark once it has one, and a dot if it has words. "Tap to read the 3 parts" says how many. A tap turns it over, like any card with more on its back, even mid-comment, and its back holds everything: the card's own words, details, pictures, films and sounds on top, then how many parts have been answered, then each part as a section with its title, words, pictures, films and sounds. While a card in parts is turned over, its back takes the room the buttons had. A tap on a part's title on the face turns it over at that part.
 
 Under each part are three marks in the card's own words (Good, Problem, Huh? on a report), and a speech bubble. A mark goes as soon as it's tapped, and tapping it again takes it back. The bubble opens a comment box under that part only, with its own photo button. Its words go a few seconds after typing stops, and its new pictures when it closes, with Done or a drag down. A part's words keep the same protection as a comment. The card's own swipe and comment are separate from all of this. A second try of the card clears its parts' marks, and keeps their words.
 
@@ -249,8 +261,9 @@ For picking from many pictures, where one big picture of them all can't be seen 
 - A swipe on the card means done with these picks. It works as on an option card, and the answer carries `selected`.
 - Ticks are saved as they're made, so a half-finished selection survives the app being closed. They also go out as a draft a few seconds later, like comments. Plain ticks in the Feel test stay on the phone.
 - Opening the board from the comment box keeps what's typed, so they can look while writing.
+- An item can be a sound instead of a picture. Its tile plays on a tap, there in the grid. See Sound above.
 
-The phone brings words down first, then thumbnails, then card pictures. A board's full pictures come one at a time as they're looked at, with the next and previous ones fetched ahead, because all of them could be a lot of data on a phone connection. So thumbnails work offline, and full pictures only once seen.
+The phone brings words down first, then thumbnails, then card pictures. A board's full pictures come one at a time as they're looked at, with the next and previous ones fetched ahead, because all of them could be a lot of data on a phone connection. So thumbnails work offline, and full pictures only once seen. Sound clips are small, so a board's come down ahead with the card pictures.
 
 ## Bring to comment
 
@@ -316,4 +329,4 @@ On a local test server only: `?api=` points the app at a stand-in for GitHub, an
 
 ## The writer's side
 
-`skill/` holds a Claude Code skill, installed with `python skill/install.py`. It makes decks from files, with checks first; shrinks pictures and films and makes posters; finds icons; reads answers, parts and drawings; deals cards back; marks cards handled; answers thoughts; lists what needs a second look; and sends notifications that say where they're from. `skill/SKILL.md` has the commands. Its estimate of what fits the smallest iPhone is checked against real rendering in the app's tests, and must never be the optimist.
+`skill/` holds a Claude Code skill, installed with `python skill/install.py`. It makes decks from files, with checks first; shrinks pictures, films and sound clips, and makes posters; finds icons; reads answers, parts and drawings; deals cards back; marks cards handled; answers thoughts; lists what needs a second look; and sends notifications that say where they're from. `skill/SKILL.md` has the commands. Its estimate of what fits the smallest iPhone is checked against real rendering in the app's tests, and must never be the optimist.

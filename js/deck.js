@@ -9,6 +9,7 @@ import { openViewer } from './viewer.js';
 import { countWords, discardPhoto, drawStrip, photoButton, saveDrawing, savePhoto, stripError } from './photos.js';
 import { addressOf, linkButton, linkify, linksIn, linkText, paraLinks, plainLinks, splitAddress } from './links.js';
 import { photoUrl } from './photos.js';
+import { readySounds, stopSound, toggleSound } from './sound.js';
 
 const DIRS = ['right', 'left', 'down', 'up'];
 const UNIT = { right: [1, 0], left: [-1, 0], up: [0, -1], down: [0, 1] };
@@ -33,6 +34,10 @@ const withPictures = (pics, drawnOn = {}) => {
 // A film on a card, a part or a board: a path, or { src, poster }.
 export const videoOf = v => (typeof v === 'string' ? { src: v } : v && v.src ? v : null);
 const videosOf = holder => (holder.videos || []).map(videoOf).filter(Boolean);
+// A sound clip on a card or a part: a path, or { src, label }. A board item's `audio` makes it a sound.
+export const soundOf = a => (typeof a === 'string' && a ? { src: a } : a && a.src ? a : null);
+const soundsOf = holder => [].concat(holder.audio || []).map(soundOf).filter(Boolean);
+const itemSound = it => soundOf(it && it.audio);
 const PART_MARKS = ['right', 'left', 'down'];
 // A part's mark in the card's own words, without the shouting: Good, Problem, Decent
 const partWord = (card, m) => { const w = (KINDS[card.kind] || KINDS.question)[m] || ''; return w === 'IDK' ? w : w.charAt(0) + w.slice(1).toLowerCase(); };
@@ -41,8 +46,8 @@ const EMPTY_PART = '||';
 const PART_SEND_AFTER = 3000;
 const PARTS_ON_FACE = 4;
 
-// A card's or part's pictures and films, in order, for its back or its section. Paths ride along so a
-// drawing knows what it was drawn on, and a film not down yet can be fetched when it's looked at.
+// A card's or part's pictures, films and sounds, in order, for its back or its section. Paths ride along
+// so a drawing knows what it was drawn on, and a film or a sound not down yet can be fetched when it's wanted.
 export function mediaHTML(holder, images = () => null) {
   const pics = (holder.images || []).map(p => [p, images(p)]).filter(([, src]) => src);
   const clips = videosOf(holder).map(v => {
@@ -53,7 +58,17 @@ export function mediaHTML(holder, images = () => null) {
       <button class="clip-big" data-act="clipbig" aria-label="Watch it full screen">${icon('maximize-2')}</button>
     </div>`;
   });
-  return pics.map(([p, src]) => `<img class="mpic" src="${esc(src)}" data-path="${esc(p)}" alt="" draggable="false">`).join('') + clips.join('');
+  // A sound is a button: nothing plays until it's tapped. See sound.js.
+  const sounds = soundsOf(holder);
+  const rows = sounds.map((a, n) => {
+    const src = images(a.src), name = a.label || (sounds.length > 1 ? `Sound ${n + 1}` : 'Sound');
+    return `<button class="snd snd-row" data-act="sound" data-path="${esc(a.src)}"${src ? ` data-src="${esc(src)}"` : ''} aria-label="Play ${esc(name)}" aria-pressed="false">
+      <i class="snd-btn">${icon('play')}${icon('pause')}</i>
+      <span class="snd-body"><b class="snd-name">${esc(name)}</b><i class="snd-bar"><i></i></i><em class="snd-note" hidden></em></span>
+      <small class="snd-time"></small>
+    </button>`;
+  });
+  return pics.map(([p, src]) => `<img class="mpic" src="${esc(src)}" data-path="${esc(p)}" alt="" draggable="false">`).join('') + clips.join('') + rows.join('');
 }
 
 const countOf = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
@@ -98,7 +113,7 @@ function offerPill(kind, where, onTap) {
   pillTimer = setTimeout(hidePill, 6000);
 }
 
-// One part, on its card's back: its words, pictures and films, its marks, and a comment box of its own.
+// One part, on its card's back: its words, pictures, films and sounds, its marks, and a comment box of its own.
 function partHTML(card, pt, n, images, fill) {
   return `<section class="part" data-part="${esc(pt.id)}">
     <h3><b>${n + 1}</b><span>${esc(fill(pt.title || ''))}</span></h3>
@@ -370,10 +385,11 @@ export function cardHTML(card, images = () => null, fill = t => t) {
   const label = RARITY[rarity] && RARITY[rarity].label;
   const pics = (card.images || []).map(p => images(p)).filter(Boolean);
   const films = videosOf(card);
+  const sounds = soundsOf(card);
   const board = card.kind === 'board' ? (card.items || []) : null;
   const parts = !board && card.kind !== 'options' ? (card.parts || []) : [];
-  const hasMore = !board && (card.details || pics.length || films.length || parts.length);
-  const bits = [card.details ? 'details' : '', pics.length ? countOf(pics.length, 'picture') : '', films.length ? countOf(films.length, 'video') : ''].filter(Boolean);
+  const hasMore = !board && (card.details || pics.length || films.length || sounds.length || parts.length);
+  const bits = [card.details ? 'details' : '', pics.length ? countOf(pics.length, 'picture') : '', films.length ? countOf(films.length, 'video') : '', sounds.length ? countOf(sounds.length, 'sound') : ''].filter(Boolean);
   const moreText = parts.length ? `Tap to read the ${countOf(parts.length, 'part')}` : `Tap for ${bits.length > 1 ? `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}` : bits[0] || ''}`;
   const text = fill(card.text || ''), why = fill(card.why || ''), pick = board ? '' : fill(card.pick || '');
   const long = plainLinks(text).length > 70;
@@ -404,7 +420,7 @@ export function cardHTML(card, images = () => null, fill = t => t) {
         <button class="attached" data-act="opencomment" hidden>${icon('message-square-text')}<span></span></button>
         ${breaks ? `<div class="holdline">Hold ${esc(physicalOf('right'))} to break through</div>` : ''}
         <div class="more"${hasMore || board ? '' : ' hidden'}>${board ? `Tap to choose from ${board.length}` : hasMore ? esc(moreText) : ''}</div>
-        ${board && (card.details || pics.length || films.length) ? `<button class="more-link" data-act="flipfront">Details</button>` : ''}
+        ${board && (card.details || pics.length || films.length || sounds.length) ? `<button class="more-link" data-act="flipfront">Details</button>` : ''}
         <div class="stamp"></div>
       </div>
       <div class="back">
@@ -465,6 +481,7 @@ export class DeckView {
     this.untrack && this.untrack();
     if (this.unwatchBring) this.unwatchBring();
     hidePill();
+    stopSound();
     if (this.partsObserver) this.partsObserver.disconnect();
     if (this.openPart) this.closePartPad();
     this.sendNotes(true);
@@ -659,6 +676,10 @@ export class DeckView {
       rmphoto: () => this.dropPhoto(btn.dataset.photoId, btn.dataset.where, btn),
       keepgoing: () => this.deal(),
       clipbig: () => this.viewMedia(btn.closest('.clip')),
+      sound: () => toggleSound(btn, () => pictureUrl(this.pack.id, btn.dataset.path)),
+      boardsound: () => this.playItem(btn.dataset.id),
+      boardsay: () => this.openBoardSay(),
+      boardsaydone: () => this.closeBoardSay(),
       shrink: () => this.nav.shrink && this.nav.shrink(),
       crumbpack: () => this.nav.crumb && this.nav.crumb('pack'),
       crumbtopic: () => this.nav.crumb && this.nav.crumb('topic'),
@@ -810,7 +831,7 @@ export class DeckView {
     }
     this.jump(cardId, partId);
     const c = this.topCard();
-    if (c && !partId && (c.details || (c.images || []).length || videosOf(c).length)) this.flip(true);
+    if (c && !partId && (c.details || (c.images || []).length || videosOf(c).length || soundsOf(c).length)) this.flip(true);
   }
 
   // ---------- growing out of the mini player, and shrinking into it
@@ -922,6 +943,7 @@ export class DeckView {
 
   // Lays out the top three cards. A card moving up a place keeps its node, so it slides up.
   deal() {
+    stopSound(); // a clip belongs to the card it was on
     const ids = this.s.order.slice(0, 3);
     for (const [id, node] of this.nodes) {
       if (!ids.includes(id)) { node.remove(); this.nodes.delete(id); }
@@ -1062,9 +1084,11 @@ export class DeckView {
     const room = rows * BOARD_PREVIEW_ACROSS;
     const shown = order.slice(0, room);
     const extra = items.length - shown.length;
-    box.innerHTML = shown.map((it, i) => `<span class="bp${picked.includes(it.id) ? ' on' : ''}${it.video ? ' film' : ''}"><img alt="" draggable="false">${it.video ? `<i class="bp-film">${icon('play')}</i>` : ''}${extra && i === shown.length - 1 ? `<b class="bp-more">+${extra + 1}</b>` : ''}</span>`).join('');
-    const imgs = box.querySelectorAll('img');
-    eachAtOnce(shown.map((it, i) => [it, imgs[i]]), 6, async ([it, img]) => {
+    // A sound with no picture of its own is a play mark on a plain square.
+    const bare = it => itemSound(it) && !(it.thumb || it.image);
+    box.innerHTML = shown.map((it, i) => `<span class="bp${picked.includes(it.id) ? ' on' : ''}${it.video ? ' film' : ''}${itemSound(it) ? ' sound' : ''}">${bare(it) ? '' : '<img alt="" draggable="false">'}${it.video ? `<i class="bp-film">${icon('play')}</i>` : ''}${itemSound(it) ? `<i class="bp-snd">${icon('play')}</i>` : ''}${extra && i === shown.length - 1 ? `<b class="bp-more">+${extra + 1}</b>` : ''}</span>`).join('');
+    const cells = box.querySelectorAll('.bp');
+    eachAtOnce(shown.map((it, i) => [it, cells[i].querySelector('img')]).filter(([, img]) => img), 6, async ([it, img]) => {
       const url = await pictureUrl(this.pack.id, it.thumb || it.image);
       if (url) img.src = url;
     });
@@ -1077,6 +1101,15 @@ export class DeckView {
     if (this.composing) padBlur(this.comment);
     const items = card.items || [];
     const mine = [].concat(card.pick || []);
+    // A sound's tile plays it there. Any other tile opens the full-screen look.
+    const picOf = it => {
+      const sound = itemSound(it);
+      const said = `<i class="bt-said" aria-label="Has your comment">${icon('message-square-text')}</i>`;
+      if (!sound) return `<button class="bt-pic" data-act="boardview" data-id="${esc(it.id)}" aria-label="Look at ${esc(it.label)}"><img alt="" draggable="false">${it.video ? `<i class="bt-film">${icon('play')}</i>` : ''}${said}</button>`;
+      return `<button class="bt-pic snd" data-act="boardsound" data-id="${esc(it.id)}" data-path="${esc(sound.src)}" aria-label="Play ${esc(it.label)}" aria-pressed="false">${it.thumb || it.image ? '<img alt="" draggable="false">' : ''}<i class="snd-btn">${icon('play')}${icon('pause')}</i><i class="snd-bar"><i></i></i><em class="snd-note" hidden></em>${said}</button>`;
+    };
+    this.boardNow = null;
+    this.boardEl.classList.remove('saying');
     this.boardEl.innerHTML = `
       <div class="ov-head">
         <button class="iconbtn" data-act="closeboard" aria-label="Back to the card">${icon('chevron-left')}</button>
@@ -1084,23 +1117,43 @@ export class DeckView {
         <div class="n" id="boardcount"></div>
       </div>
       <div class="board-grid scroll">
-        ${items.map(it => `<div class="bt${it.video ? ' film' : ''}" data-item="${esc(it.id)}">
-          <button class="bt-pic" data-act="boardview" data-id="${esc(it.id)}" aria-label="Look at ${esc(it.label)}"><img alt="" draggable="false">${it.video ? `<i class="bt-film">${icon('play')}</i>` : ''}<i class="bt-said" aria-label="Has your comment">${icon('message-square-text')}</i></button>
+        ${items.map(it => `<div class="bt${it.video ? ' film' : ''}${itemSound(it) ? ' sound' : ''}" data-item="${esc(it.id)}">
+          ${picOf(it)}
           ${mine.includes(it.id) ? `<em class="bt-mine">${esc(kindOf(card).pickLabel)}</em>` : ''}
           <button class="bt-tick" data-act="boardtick" data-id="${esc(it.id)}" aria-label="Select ${esc(it.label)}"><i>${icon('check')}</i></button>
           <button class="bt-label" data-act="boardtick" data-id="${esc(it.id)}">${esc(it.label)}</button>
         </div>`).join('')}
       </div>
+      ${items.some(itemSound) ? `<div class="board-now" hidden>
+        <div class="bn-row">
+          <div class="bn-words"><b></b><small></small></div>
+          <button class="bn-say" data-act="boardsay" aria-label="Comment on this one">${icon('message-square-text')}</button>
+        </div>
+        <div class="bn-sayer" hidden>
+          ${padHTML('boardsay', 'Your comment on this one. Drag down to close.')}
+          <button class="ghostbtn bn-done" data-act="boardsaydone">Done</button>
+        </div>
+      </div>` : ''}
       <div class="board-bar"><button class="primary" data-act="closeboard">Back to the card</button></div>`;
     this.boardEl.hidden = false;
     this.syncBoard();
+    const sayPad = this.boardEl.querySelector('#boardsay');
+    if (sayPad) {
+      const sayer = this.boardEl.querySelector('.bn-sayer');
+      padReady(sayPad, text => { if (this.boardNow && !sayer.hidden) { this.partTyped(card.id, this.boardNow, text); this.syncBoard(); } });
+      dragToClose(sayer, () => sayPad, dy => { sayer.style.transform = dy > 0 ? `translateY(${dy * 0.8}px)` : ''; }, () => this.closeBoardSay());
+    }
     const tiles = [...this.boardEl.querySelectorAll('.bt')];
     // Small pictures only, so a big board is quick. The full ones come when one is looked at.
     eachAtOnce(items.map((it, i) => [it, tiles[i]]), 8, async ([it, tile]) => {
+      const img = tile.querySelector('img');
+      if (!img) return; // a sound with no picture of its own
       const url = await pictureUrl(this.pack.id, it.thumb || it.image);
-      if (url) tile.querySelector('img').src = url;
+      if (url) img.src = url;
       else tile.classList.add('missing');
     });
+    // Where each sound is on this phone, found now, so a tap can start it at once.
+    readySounds(this.boardEl, el => pictureUrl(this.pack.id, el.dataset.path));
   }
 
   syncBoard() {
@@ -1112,9 +1165,55 @@ export class DeckView {
     });
     const count = this.boardEl.querySelector('#boardcount');
     if (count) count.textContent = `${picked.length} selected`;
+    const say = this.boardEl.querySelector('.bn-say');
+    if (say) say.classList.toggle('has', !!((said[this.boardNow] || {}).text || '').trim());
+  }
+
+  // A sound on a board plays in its tile, without leaving the grid. There's no full-screen look at a
+  // sound, so a strip under the grid stands in for it: the item's label, its text, and a comment on it.
+  playItem(itemId) {
+    const card = this.topCard();
+    const it = card && (card.items || []).find(x => x.id === itemId);
+    const tile = [...this.boardEl.querySelectorAll('.bt.sound')].find(t => t.dataset.item === itemId);
+    if (!it || !tile) return;
+    if (this.boardNow !== itemId) this.closeBoardSay();
+    this.boardNow = itemId;
+    const strip = this.boardEl.querySelector('.board-now');
+    strip.querySelector('.bn-words b').textContent = it.label || '';
+    strip.querySelector('.bn-words small').textContent = it.text || '';
+    strip.hidden = false;
+    this.boardEl.querySelectorAll('.bt').forEach(t => t.classList.toggle('now', t === tile));
+    this.syncBoard();
+    const el = tile.querySelector('.snd');
+    toggleSound(el, () => pictureUrl(this.pack.id, el.dataset.path));
+  }
+
+  // A comment on the sound last tapped: a box in the strip, with the keyboard.
+  openBoardSay() {
+    const card = this.topCard();
+    const pad = this.boardEl.querySelector('#boardsay');
+    if (!card || !pad || !this.boardNow) return;
+    padSet(pad, ((this.s.parts[card.id] || {})[this.boardNow] || {}).text || '');
+    this.boardEl.querySelector('.bn-sayer').hidden = false;
+    this.boardEl.classList.add('saying');
+    padFocus(pad);
+  }
+
+  // Its words are kept as they're typed, and go when the box closes, like a comment made on a picture.
+  closeBoardSay() {
+    const sayer = this.boardEl.querySelector('.bn-sayer');
+    if (!sayer || sayer.hidden) return;
+    padBlur(this.boardEl.querySelector('#boardsay'));
+    sayer.hidden = true;
+    this.boardEl.classList.remove('saying');
+    this.sendParts(true);
+    this.syncBoard();
   }
 
   closeBoard() {
+    this.closeBoardSay();
+    stopSound();
+    this.boardNow = null;
     this.boardEl.hidden = true;
     this.boardEl.innerHTML = '';
     this.syncOptions();
@@ -1146,7 +1245,9 @@ export class DeckView {
 
   viewBoard(itemId) {
     const card = this.topCard();
-    const items = card.items || [];
+    const items = (card.items || []).filter(it => !itemSound(it)); // a sound is heard on its tile, not looked at
+    this.closeBoardSay();
+    stopSound();
     this.viewing = items.map(it => {
       const film = videoOf(it.video);
       return {
@@ -1730,7 +1831,7 @@ export class DeckView {
       this.syncOptions();
       return;
     }
-    if (c.details || (c.images || []).length || videosOf(c).length || this.topNode().classList.contains('clipped')) this.flip(true);
+    if (c.details || (c.images || []).length || videosOf(c).length || soundsOf(c).length || this.topNode().classList.contains('clipped')) this.flip(true);
     else {
       const top = this.topNode();
       top.animate && top.animate(
@@ -1748,6 +1849,9 @@ export class DeckView {
     const top = this.topNode();
     if (!top) return;
     if (!on && this.openPart) this.closePartPad();
+    // Sounds are on the back. Turning to it finds any not yet found, so a tap can start one at once.
+    if (on) readySounds(top, el => pictureUrl(this.pack.id, el.dataset.path));
+    else stopSound();
     this.flipped = on;
     this.table.classList.toggle('flipped', on);
     this.root.classList.toggle('reading', on && this.hasParts(this.topCard()));
@@ -2112,6 +2216,7 @@ export class DeckView {
   }
 
   showOverview() {
+    stopSound();
     this.toggleNotes(false);
     if (this.composing) this.closeComposer();
     const cur = this.topId();

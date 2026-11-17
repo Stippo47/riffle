@@ -10,6 +10,7 @@ packs/<pack-id>/order.json
 packs/<pack-id>/mine/<deck-id>.json
 packs/<pack-id>/mine-replies.json
 packs/<pack-id>/img/<picture>
+packs/<pack-id>/audio/<sound clip>
 answers/<time>-<random>.json
 answers/img/<id>.jpg
 push/<time>-<device>.json
@@ -104,7 +105,8 @@ The writer's replies on their own decks, written by `riffle reply`. A key is a d
   "pick": "The writer's pick. Leave it out on a report.",
   "details": "Longer text for the back.\n\nBlank lines make paragraphs.",
   "images": ["img/rivers.jpg"],
-  "videos": [{ "src": "img/rivers-flow.mp4", "poster": "img/poster/rivers-flow.jpg" }]
+  "videos": [{ "src": "img/rivers-flow.mp4", "poster": "img/poster/rivers-flow.jpg" }],
+  "audio": ["audio/rivers-water.m4a"]
 }
 ```
 
@@ -132,6 +134,16 @@ What they bring into a comment (a card's or a part's) or a deck's notes is a lin
 - **poster** is a still for before it plays, and for tiles. `riffle deck` makes one from early in the film, in `img/poster/`, or shrinks one you give like any picture. Without ffmpeg there's no poster, and the phone shows the film's first frame.
 - A card's films come down ahead, like its pictures, after them. A board's come when they're looked at.
 
+### Sound
+
+`audio` sits beside `images` and `videos`, on a card or a part. Each is a path, or `{ "src": ..., "label": ... }` to give the clip a name. On the card's back a clip is a play button with a bar that fills as it plays. Nothing plays by itself: a tap plays it and another pauses it, only one plays at a time, and leaving the card stops it. Films stay silent, so sound only ever comes from `audio`.
+
+- **src** is the clip. The phone wants a small AAC `.m4a` or an MP3. `riffle deck` keeps one that's already that and under half a megabyte, and turns anything else into mono AAC at about 64 kbps, using ffmpeg. It puts the clip in the pack's `audio/` folder, and says what each card's clips weigh.
+- **label** names it on the card. Without one it's "Sound", numbered when there are several.
+- A path starting `audio/` that isn't beside the deck file means a clip already in the pack.
+- Clips come down ahead with a card's pictures, a board's too, since they're small. So they play with no signal.
+- If the phone won't start a clip, or its clock stands still while it's meant to be playing, its button says "No sound played". An iPhone can do that to a Home Screen app after it's reopened. See Sound in spec.md.
+
 ### Parts
 
 A report, question or design can be in **parts**: sections that are each read, marked and commented on by themselves, apart from the card's own swipe.
@@ -151,7 +163,7 @@ A report, question or design can be in **parts**: sections that are each read, m
 }
 ```
 
-- Each part needs its own `id` and a `title`, and some `text`, `images` or `videos`. The face shows the first four titles, each on one line, so keep them under 40 characters. Twelve parts is a lot for one card.
+- Each part needs its own `id` and a `title`, and some `text`, `images`, `videos` or `audio`. The face shows the first four titles, each on one line, so keep them under 40 characters. Twelve parts is a lot for one card.
 - A tap turns the card over, and its back holds the parts: the card's words, details and pictures on top, then each part with Good, Problem and Decent (the card's own words for go, workshop and idk) and a comment box of its own.
 - Parts don't go on option cards or boards.
 
@@ -175,7 +187,7 @@ A report, question or design can be in **parts**: sections that are each read, m
 
 ### Boards
 
-Picking from many pictures, with any number of items.
+Picking from many pictures, films or sounds, with any number of items.
 
 ```json
 {
@@ -189,7 +201,8 @@ Picking from many pictures, with any number of items.
     { "id": "g1", "label": "Plain", "image": "pictures/plain.png" },
     { "id": "g2", "label": "Arched", "image": "pictures/arched.png", "text": "A longer note, shown when it's looked at." },
     { "id": "g3", "label": "Stacked views", "image": "pictures/stacked.png", "thumb": "pictures/stacked-square.png" },
-    { "id": "g4", "label": "Swinging", "video": "pictures/swing.mp4" }
+    { "id": "g4", "label": "Swinging", "video": "pictures/swing.mp4" },
+    { "id": "g5", "label": "Creaking", "audio": "sounds/creak.m4a", "text": "How the old hinge would sound." }
   ]
 }
 ```
@@ -197,6 +210,7 @@ Picking from many pictures, with any number of items.
 - **pick** lists the writer's marked items, and can be left out. With nothing ticked, going takes these. If there are none, it just bounces.
 - **image** is the picture.
 - **video** makes the item a film. `riffle deck` gives it its poster as its `image`, and a thumbnail from that, so a board of films and pictures looks the same in the grid, with a play mark on the films. Looking at one plays it.
+- **audio** makes the item a sound, to pick by ear: a path, as on a card. Its tile has a play button, and a tap plays it there, without leaving the grid. It needs no picture. With an `image` too, the picture is the tile's face, under the button. It's ticked and commented on like any item, and its `text` shows when it's played. An item is a film or a sound, never both.
 - **thumb** is the small one the grid loads first, and can be left out. Give your own when the whole picture won't read at that size, like two views stacked in one tall image: a square of the part that matters. `riffle deck` shrinks yours to 360 pixels if it's over, and keeps it. If there's none, it makes one from the whole picture. A deck file put in the repo by hand with no `thumb` loads the full pictures in the grid, slowly.
 - Tiles are square and never crop. A thumbnail that isn't square shows whole, with space beside it. So a square one fills its tile.
 - The phone brings down a board's thumbnails ahead of time. Its full pictures come one at a time, when they're looked at.

@@ -746,6 +746,51 @@ canvas.confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:
 .bt-film{left:6px;bottom:6px;width:28px;height:28px}
 .bt-film svg{width:14px;height:14px}
 
+/* ---------- sound: a button that plays a clip, on a card's back, in a part, on a board. See js/sound.js */
+.snd{position:relative;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.snd-btn{flex:none;width:44px;height:44px;border-radius:50%;background:var(--card-ink);color:#fff;display:flex;align-items:center;justify-content:center}
+.snd-btn svg{width:20px;height:20px;fill:currentColor;stroke:none}
+.snd-btn svg:first-child{margin-left:2px}
+.snd-btn svg:last-child,.snd.playing .snd-btn svg:first-child{display:none}
+.snd.playing .snd-btn svg:last-child{display:block}
+.snd.loading .snd-btn{opacity:.5}
+.snd-bar{display:block;height:4px;border-radius:2px;background:rgba(23,22,28,.16);overflow:hidden}
+.snd-bar i{display:block;height:100%;width:calc(var(--at,0)*100%);border-radius:2px;background:currentColor}
+.snd.playing .snd-bar i{transition:width .2s linear}
+.snd-note{font-style:normal;font-weight:600}
+.snd-row{display:flex;align-items:center;gap:12px;width:100%;min-height:60px;margin-bottom:12px;padding:8px 14px 8px 8px;border-radius:12px;background:rgba(23,22,28,.06);color:var(--card-ink);text-align:left}
+.snd-body{flex:1;min-width:0;display:grid;gap:6px}
+.snd-name{font-size:15.5px;line-height:1.2;overflow-wrap:anywhere}
+.snd-row .snd-note{font-size:13px;line-height:1.25;color:#a4271f}
+.snd-time{flex:none;font-size:13px;color:var(--card-dim);font-variant-numeric:tabular-nums}
+[data-look=inventory] .snd-row,[data-look=inventory] .snd-btn,[data-look=inventory] .snd-bar,[data-look=inventory] .snd-bar i{border-radius:0}
+/* On a board, the tile is the button, and the bar runs along its foot. */
+.bt.sound .bt-pic{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:var(--tile-ink)}
+.bt.sound .snd-btn{position:relative;width:54px;height:54px;background:rgba(0,0,0,.62)}
+.bt.sound .snd-btn svg{width:24px;height:24px}
+.bt.sound .snd.playing .snd-btn{background:#fff;color:#17161c;box-shadow:0 0 0 3px rgba(0,0,0,.62)}
+.bt.sound .snd-bar{position:absolute;left:8px;right:8px;bottom:8px;height:5px;background:rgba(127,127,127,.4)}
+.bt.sound .snd-note{position:relative;margin:0 4px;padding:3px 5px;border-radius:6px;background:rgba(0,0,0,.74);color:#fff;font-size:11.5px;line-height:1.15;text-align:center}
+.bt.sound .bt-said{top:46px;bottom:auto}
+.bt.now .bt-label{text-decoration:underline;text-underline-offset:3px}
+.bp-snd{position:absolute;left:50%;top:50%;width:26px;height:26px;margin:-13px 0 0 -13px;border-radius:50%;background:rgba(0,0,0,.62);color:#fff;display:flex;align-items:center;justify-content:center;pointer-events:none}
+.bp-snd svg{width:12px;height:12px;fill:currentColor;stroke:none;margin-left:1px}
+/* The strip under a board's grid, for the sound last tapped: its label, its text, and a comment on it. */
+.board-now{flex:none;padding-top:8px;box-shadow:0 -1px 0 var(--line)}
+.bn-row{display:flex;align-items:center;gap:10px;min-height:48px}
+.bn-words{flex:1;min-width:0;display:grid;gap:2px}
+.bn-words b{font-size:15.5px;line-height:1.2;overflow-wrap:anywhere}
+.bn-words small{font-size:13.5px;line-height:1.3;color:var(--dim);max-height:5.2em;overflow-y:auto;overflow-wrap:anywhere}
+.bn-words small:empty{display:none}
+.bn-say{position:relative;flex:none;width:52px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:var(--tile-bg);color:var(--tile-ink);box-shadow:var(--tile-shadow)}
+.bn-say svg{width:22px;height:22px;fill:none;stroke:currentColor}
+.bn-say.has::after{content:"";position:absolute;right:8px;top:8px;width:9px;height:9px;border-radius:50%;background:#ffd60a;box-shadow:0 0 0 2px var(--tile-bg)}
+.bn-sayer{display:flex;flex-direction:column;gap:6px;padding:8px 0 10px}
+.bn-sayer .pad{max-height:30vh;min-height:76px}
+.bn-done{min-height:44px}
+.boardview.saying .board-bar,.boardview.saying .bn-say{display:none}
+[data-look=inventory] .bn-say{border-radius:0}
+
 /* Films and the pen in the viewer */
 .viewer-film{display:flex;align-items:center;gap:8px}
 .viewer-play,.viewer-speed{flex:none;height:44px;display:flex;align-items:center;justify-content:center;border-radius:12px;background:rgba(255,255,255,.12);color:#fff}

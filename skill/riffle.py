@@ -31,15 +31,16 @@ ATTRIBUTION = 'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
 
 KINDS = {'question', 'report', 'design', 'options', 'board'}
 RARITIES = {'common', 'uncommon', 'rare', 'epic', 'legendary'}
-CARD_FIELDS = {'id', 'version', 'kind', 'rarity', 'title', 'text', 'why', 'pick', 'details', 'images', 'videos', 'parts', 'options', 'items', 'handled'}
+CARD_FIELDS = {'id', 'version', 'kind', 'rarity', 'title', 'text', 'why', 'pick', 'details', 'images', 'videos', 'audio', 'parts', 'options', 'items', 'handled'}
 DECK_FIELDS = {'title', 'topic', 'stack', 'order', 'misc', 'cards', 'kind', 'priority', 'tags', 'archived', 'updated'}
 DECK_KINDS = {'report', 'questions', 'board'}
 TAG_WORDS = {'working': 'being worked on', 'first': 'answer first', 'waiting': 'waiting on you'}
 MINE_KIND_WORDS = {'idea': 'Idea', 'picture': 'Picture', 'link': 'Web link', 'card': 'Riffle card'}
 OPTION_FIELDS = {'id', 'label', 'text', 'image'}
-ITEM_FIELDS = {'id', 'label', 'text', 'image', 'thumb', 'video'}
-PART_FIELDS = {'id', 'title', 'text', 'images', 'videos'}
+ITEM_FIELDS = {'id', 'label', 'text', 'image', 'thumb', 'video', 'audio'}
+PART_FIELDS = {'id', 'title', 'text', 'images', 'videos', 'audio'}
 VIDEO_FIELDS = {'src', 'poster'}
+AUDIO_FIELDS = {'src', 'label'}
 ITEM_LABEL_LIMIT = 36
 PART_TITLE_LIMIT = 40  # one line on the card's face
 PARTS_ON_FACE = 4  # the app shows this many part titles on the face, then "and N more"
@@ -82,6 +83,11 @@ VIDEO_TYPES = {'.mp4', '.m4v', '.mov', '.webm', '.mkv', '.avi'}
 VIDEO_AS_IS = {'.mp4', '.m4v'}
 VIDEO_LIMIT = 2_000_000  # bytes
 VIDEO_TRIES = [(1280, 26), (960, 29), (720, 32), (540, 35)]  # long side and quality, until it fits
+# Sound clips play when tapped, and all come down ahead of time, so they're kept small: mono, about 64 kbps.
+AUDIO_TYPES = {'.m4a', '.mp3', '.aac', '.wav', '.ogg', '.oga', '.opus', '.flac', '.aif', '.aiff', '.wma'}
+AUDIO_AS_IS = {'.m4a': 'aac', '.mp3': 'mp3'}  # what the phone plays, and the sound each should hold
+AUDIO_LIMIT = 500_000  # bytes
+AUDIO_RATE = '64k'
 
 
 def now():
@@ -267,7 +273,7 @@ def face_height(c, st):
             h += 26
     if rarity in ('epic', 'legendary'):
         h += st['line'] * 1.3 + st['linem']
-    if c.get('details') or c.get('images') or c.get('videos') or parts:
+    if c.get('details') or c.get('images') or c.get('videos') or c.get('audio') or parts:
         h += st['line'] * 1.3 + st['linem']
     return h
 
@@ -305,6 +311,34 @@ def check_films(name, where, films, errors, warnings):
             errors.append(f'{name}: {f["src"]} is not a film the app can play. Use an mp4')
         elif ext not in VIDEO_AS_IS and not shutil.which('ffmpeg'):
             errors.append(f'{name}: {f["src"]} needs ffmpeg to become an mp4, and ffmpeg is not installed here')
+
+
+def sound_of(v):
+    """A sound entry as {src, label}, from a path or an object. None if it's neither."""
+    if isinstance(v, str) and v:
+        return {'src': v}
+    if isinstance(v, dict) and v.get('src'):
+        return v
+    return None
+
+
+def check_sounds(name, where, sounds, errors, warnings):
+    if sounds is not None and not isinstance(sounds, list):
+        errors.append(f'{name}: {where}audio is a list of clips, like ["clips/voice.m4a"]')
+        return
+    for v in sounds or []:
+        s = sound_of(v)
+        if not s:
+            errors.append(f'{name}: {where}audio holds something that is neither a path nor {{"src": ..., "label": ...}}')
+            continue
+        if isinstance(v, dict):
+            for extra in sorted(set(v) - AUDIO_FIELDS):
+                warnings.append(f'{name}: the app ignores "{extra}" on a sound. Is it a typo?')
+        ext = pathlib.Path(str(s['src'])).suffix.lower()
+        if ext not in AUDIO_TYPES:
+            errors.append(f'{name}: {s["src"]} is not a sound the app can play. Use an m4a or an mp3')
+        elif ext not in AUDIO_AS_IS and not shutil.which('ffmpeg'):
+            errors.append(f'{name}: {s["src"]} needs ffmpeg to become an m4a, and ffmpeg is not installed here')
 
 
 def check_cards(cards, base=None, pack=None):
@@ -367,9 +401,13 @@ def check_cards(cards, base=None, pack=None):
                 errors.append(f'{name}: each item needs its own id')
             if not all(it.get('label') for it in items):
                 errors.append(f'{name}: each item needs a short label')
-            if not all(it.get('image') or it.get('video') for it in items):
-                errors.append(f'{name}: each item needs a picture, in image, or a film, in video')
+            if not all(it.get('image') or it.get('video') or it.get('audio') for it in items):
+                errors.append(f'{name}: each item needs a picture, in image, a film, in video, or a sound, in audio')
             check_films(name, 'an item\'s ', [it['video'] for it in items if it.get('video')], errors, warnings)
+            check_sounds(name, 'an item\'s ', [it['audio'] for it in items if it.get('audio')], errors, warnings)
+            for it in items:
+                if it.get('audio') and it.get('video'):
+                    errors.append(f'{name}: item {it.get("id")} has a film and a sound. An item is one or the other')
             picks = c.get('pick') or []
             picks = [picks] if isinstance(picks, str) else picks
             for p in picks:
@@ -383,6 +421,7 @@ def check_cards(cards, base=None, pack=None):
                 if len(str(it.get('label') or '')) > ITEM_LABEL_LIMIT:
                     warnings.append(f'{name}: item {it.get("id")}\'s label is {len(it["label"])} characters, over {ITEM_LABEL_LIMIT}. It sits under a small tile, and the item\'s text can say more')
         check_films(name, '', c.get('videos'), errors, warnings)
+        check_sounds(name, '', c.get('audio'), errors, warnings)
         parts = c.get('parts') or []
         if parts:
             if kind in ('options', 'board'):
@@ -396,11 +435,12 @@ def check_cards(cards, base=None, pack=None):
                     errors.append(f'{pname}: needs a short title, shown on the card\'s face')
                 elif len(str(pt['title'])) > PART_TITLE_LIMIT:
                     warnings.append(f'{pname}: its title is {len(str(pt["title"]))} characters, over {PART_TITLE_LIMIT}. It sits on one line of the card\'s face')
-                if not (pt.get('text') or pt.get('images') or pt.get('videos')):
-                    errors.append(f'{pname}: needs text, pictures or films')
+                if not (pt.get('text') or pt.get('images') or pt.get('videos') or pt.get('audio')):
+                    errors.append(f'{pname}: needs text, pictures, films or sound')
                 for extra in sorted(set(pt) - PART_FIELDS):
                     warnings.append(f'{pname}: the app ignores "{extra}" on a part. Is it a typo?')
                 check_films(pname, '', pt.get('videos'), errors, warnings)
+                check_sounds(pname, '', pt.get('audio'), errors, warnings)
             if len(parts) > PARTS_MANY:
                 warnings.append(f'{name}: {len(parts)} parts is a lot for one card. Could it be two cards, or a deck?')
         wording = {f: c.get(f) for f in ('text', 'why', 'pick', 'details') if c.get(f) and not (f == 'pick' and kind in ('options', 'board'))}
@@ -447,6 +487,15 @@ def check_cards(cards, base=None, pack=None):
                 continue  # it may well be in the pack, but no pack was named
             if base is not None and picture_source(image, base, pack)[0] is None:
                 errors.append(f'{name}: can\'t find the picture {image}')
+        listed = lambda holder: holder.get('audio') if isinstance(holder.get('audio'), list) else []
+        sounds = [*listed(c), *[it.get('audio') for it in items]]
+        for pt in (x for x in parts if isinstance(x, dict)):
+            sounds.extend(listed(pt))
+        for clip in (str(s['src']) for s in filter(None, map(sound_of, sounds))):
+            if clip.startswith('audio/') and not pack and not (base is not None and (base / clip).exists()):
+                continue  # it may well be in the pack, but no pack was named
+            if base is not None and picture_source(clip, base, pack)[0] is None:
+                errors.append(f'{name}: can\'t find the sound {clip}')
     return errors, warnings
 
 
@@ -540,10 +589,10 @@ def report_check(errors, warnings):
 
 def picture_source(rel, base, pack):
     """Where a picture path in a deck file points: beside the deck file first, then already in the pack.
-    Says which, and gives None if it's in neither."""
+    Says which, and gives None if it's in neither. A sound clip's path works the same way, under audio/."""
     if base is not None and (base / rel).exists():
         return base / rel, False
-    if rel.startswith('img/') and pack and DATA and (DATA / 'packs' / pack / rel).exists():
+    if rel.startswith(('img/', 'audio/')) and pack and DATA and (DATA / 'packs' / pack / rel).exists():
         return DATA / 'packs' / pack / rel, True
     return None, False
 
@@ -631,11 +680,50 @@ def make_poster(film, target):
     return None
 
 
+def probe_sound(path):
+    """What ffprobe says a sound clip holds: its codec. None without ffprobe, or if it can't tell."""
+    ff = shutil.which('ffprobe')
+    if not ff:
+        return None
+    r = subprocess.run([ff, '-v', 'error', '-show_entries', 'stream=codec_type,codec_name', '-of', 'json', str(path)], capture_output=True, text=True, encoding='utf-8', errors='replace')
+    try:
+        info = json.loads(r.stdout)
+    except ValueError:
+        return None
+    sound = next((x for x in info.get('streams', []) if x.get('codec_type') == 'audio'), None)
+    return {'codec': sound.get('codec_name')} if sound else None
+
+
+def make_sound(source, target):
+    """Copies a sound clip in, or turns it into mono AAC at about 64 kbps, which the phone plays. `target` has
+    no ending yet: a clip kept as it is keeps its own, and one that's made is an m4a. Returns the file."""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    source = pathlib.Path(source)
+    ext = source.suffix.lower()
+    info = probe_sound(source)
+    as_is = ext in AUDIO_AS_IS and source.stat().st_size <= AUDIO_LIMIT and (info is None or info['codec'] == AUDIO_AS_IS[ext])
+    ffmpeg = shutil.which('ffmpeg')
+    if as_is or not ffmpeg:
+        out = target.with_name(target.name + ext)
+        shutil.copyfile(source, out)
+        if not as_is:
+            print(f'  warning: {source.name} is not a small AAC or MP3 clip, and ffmpeg is not here to make it one. It went up as it is.')
+        return out
+    out = target.with_name(target.name + '.m4a')
+    r = subprocess.run([ffmpeg, '-y', '-v', 'error', '-i', str(source), '-vn', '-map_metadata', '-1', '-ac', '1', '-c:a', 'aac', '-b:a', AUDIO_RATE,
+                        '-movflags', '+faststart', str(out)], capture_output=True, text=True, encoding='utf-8', errors='replace')
+    if r.returncode:
+        die(f'ffmpeg could not turn {source.name} into an m4a:\n{r.stderr.strip()[:600]}')
+    if out.stat().st_size > AUDIO_LIMIT:
+        print(f'  warning: {source.name} is still {out.stat().st_size / 1e6:.1f} MB as a small clip. A shorter one would load faster on a phone.')
+    return out
+
+
 def bring_images(cards, base, pack, deck_id):
-    """Shrinks pictures for bus data and copies them in, keeps or makes a board's thumbnails, and brings
-    films in small with a poster frame each. Returns the files made."""
+    """Shrinks pictures for bus data and copies them in, keeps or makes a board's thumbnails, brings films
+    in small with a poster frame each, and brings sound clips in small. Returns the files made."""
     made = []
-    pictures, thumbs, films = {}, {}, {}
+    pictures, thumbs, films, sounds = {}, {}, {}, {}
     folder = DATA / 'packs' / pack / 'img'
 
     def free_name(stem, source, taken):
@@ -691,16 +779,32 @@ def bring_images(cards, base, pack, deck_id):
                 print(f'  warning: no poster for {f["src"]}, since ffmpeg is not here. The phone shows its first frame instead.')
         return f
 
+    def bring_sound(entry, heard):
+        """A sound clip, kept in the shape it was given in: a path, or {src, label}."""
+        s = dict(sound_of(entry))
+        source, in_pack = picture_source(s['src'], base, pack)
+        if not in_pack:
+            out = make_sound(source, folder.parent / 'audio' / free_name(f'{deck_id}-{source.stem}', source, sounds))
+            made.append(out)
+            s['src'] = f'audio/{out.name}'
+        heard.append(s['src'])
+        return s if isinstance(entry, dict) else s['src']
+
     for c in cards:
+        heard = []
         if c.get('images'):
             c['images'] = [bring(i) for i in c['images']]
         if c.get('videos'):
             c['videos'] = [bring_film(v) for v in c['videos']]
+        if c.get('audio'):
+            c['audio'] = [bring_sound(a, heard) for a in c['audio']]
         for pt in c.get('parts') or []:
             if pt.get('images'):
                 pt['images'] = [bring(i) for i in pt['images']]
             if pt.get('videos'):
                 pt['videos'] = [bring_film(v) for v in pt['videos']]
+            if pt.get('audio'):
+                pt['audio'] = [bring_sound(a, heard) for a in pt['audio']]
         for o in c.get('options') or []:
             if o.get('image'):
                 o['image'] = bring(o['image'])
@@ -711,15 +815,21 @@ def bring_images(cards, base, pack, deck_id):
                 it['video'] = f['src']
                 if not it.get('image') and f.get('poster'):
                     it['image'] = f['poster']  # its poster is the picture a board shows and the pen draws on
+            if it.get('audio'):
+                it['audio'] = bring_sound(sound_of(it['audio'])['src'], heard)
             if it.get('image'):
                 it['image'] = bring(it['image'])
                 thumb = thumb_of(it)
                 if thumb:
                     it['thumb'] = thumb
-        if items:
+        seen = [it for it in items if it.get('image')]  # a sound with no picture has nothing to look at
+        if seen:
             size = lambda key: sum((DATA / 'packs' / pack / it[key]).stat().st_size for it in items if it.get(key))
             n_films = sum(1 for it in items if it.get('video'))
-            print(f'  {c.get("id")}: {len(items)} pictures{f", {n_films} of them films" if n_films else ""}, {size("thumb") / 1e6:.1f} MB of thumbnails up front, and {(size("image") + size("video")) / len(items) / 1e6:.2f} MB for each one looked at')
+            print(f'  {c.get("id")}: {len(seen)} pictures{f", {n_films} of them films" if n_films else ""}, {size("thumb") / 1e6:.1f} MB of thumbnails up front, and {(size("image") + size("video")) / len(seen) / 1e6:.2f} MB for each one looked at')
+        if heard:
+            sizes = [(DATA / 'packs' / pack / p).stat().st_size for p in dict.fromkeys(heard)]  # one used twice counts once
+            print(f'  {c.get("id")}: {len(sizes)} sound clip{"" if len(sizes) == 1 else "s"}, {sum(sizes) / 1e3:.0f} KB in all up front, the biggest {max(sizes) / 1e3:.0f} KB')
     return made
 
 

@@ -277,6 +277,61 @@ ok(code == 1 and 'not a film the app can play' in out and 'neither a path' in ou
 code, out = run('check', str(write('d/nofilm.json', deck({**good_card('nf'), 'videos': ['nope.mp4']}))), '--pack', 'proj')
 ok(code == 1 and "can't find the picture nope.mp4" in out, 'a missing film is refused', out)
 
+print('Sound')
+if have_ffmpeg:
+    def tone(name, *extra, seconds=3):
+        subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=44100', '-t', str(seconds), *extra, str(work / 'd' / name)], check=True)
+
+    def heard(path):
+        said = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'stream=codec_name,codec_type,channels,bit_rate', '-of', 'json', str(path)], capture_output=True, text=True).stdout
+        return json.loads(said)['streams']
+    tone('hello.wav', '-ac', '2')
+    tone('small.m4a', '-c:a', 'aac', '-b:a', '64k')
+    tone('long.m4a', '-c:a', 'aac', '-b:a', '256k', '-ac', '2', seconds=40)
+    tone('lossless.m4a', '-c:a', 'alac')
+    has_mp3 = 'libmp3lame' in subprocess.run(['ffmpeg', '-v', 'error', '-encoders'], capture_output=True, text=True).stdout
+    if has_mp3:
+        tone('take.mp3', '-c:a', 'libmp3lame', '-b:a', '64k')
+    sound_card = {**good_card('heard'), 'kind': 'report', 'pick': None, 'audio': ['hello.wav', {'src': 'small.m4a', 'label': 'The second take'}, 'long.m4a', 'lossless.m4a', *(['take.mp3'] if has_mp3 else [])]}
+    sound_parts = {**good_card('sp', kind='report', pick=None), 'parts': [{'id': 'p', 'title': 'Only a sound', 'audio': ['hello.wav']}]}
+    voices = {**board, 'id': 'voices', 'pick': ['a'], 'items': [
+        {'id': 'a', 'label': 'Low', 'audio': 'hello.wav', 'text': 'A few words about it.'}, {'id': 'b', 'label': 'High', 'audio': 'small.m4a'},
+        {'id': 'c', 'label': 'A picture', 'image': 'tree1.png'}, {'id': 'd', 'label': 'With a face', 'audio': 'small.m4a', 'image': 'tree2.png'}]}
+    code, out = run('check', str(write('d/sound.json', deck(sound_card, sound_parts, voices))), '--pack', 'proj')
+    ok(code == 0 and 'warning' not in out, 'sound on a card and a part, and a board mixing sounds and pictures, pass the check', out)
+    code, out = run('fit', str(work / 'd/sound.json'))
+    ok(code == 0 and 'heard: fits' in out and 'voices: fits' in out, 'and fit has no complaint', out)
+    code, out = run('deck', str(work / 'd/sound.json'), '--pack', 'proj', '--quiet')
+    sents = json.loads((clone / 'packs/proj/decks/sound.json').read_text(encoding='utf-8'))['cards']
+    clips = sents[0]['audio']
+    ok(code == 0 and clips[0] == 'audio/sound-hello.m4a' and clips[1] == {'src': 'audio/sound-small.m4a', 'label': 'The second take'}, 'a clip comes into the pack, in the shape it was given', (out, clips))
+    ok((clone / 'packs/proj/audio/sound-small.m4a').read_bytes() == (work / 'd/small.m4a').read_bytes(), 'a small AAC clip is left as it is')
+    made = heard(clone / 'packs/proj/audio/sound-hello.m4a')
+    ok(len(made) == 1 and made[0]['codec_name'] == 'aac' and made[0]['channels'] == 1 and 40_000 < int(made[0]['bit_rate']) < 90_000, 'any other kind becomes mono AAC at about 64 kbps', made)
+    big, small = (work / 'd/long.m4a').stat().st_size, (clone / 'packs/proj/audio/sound-long.m4a').stat().st_size
+    ok(big > 500_000 and small < big / 2 and heard(clone / 'packs/proj/audio/sound-long.m4a')[0]['channels'] == 1, 'an AAC clip over half a megabyte is made small too', (big, small))
+    ok(heard(clone / 'packs/proj/audio/sound-lossless.m4a')[0]['codec_name'] == 'aac', 'and so is an m4a that holds something other than AAC')
+    if has_mp3:
+        ok(clips[4] == 'audio/sound-take.mp3' and (clone / 'packs/proj/audio/sound-take.mp3').read_bytes() == (work / 'd/take.mp3').read_bytes(), 'a small MP3 is left as it is', clips)
+    ok(sents[1]['parts'][0]['audio'] == ['audio/sound-hello.m4a'], "a part's clip is brought in too, and one used twice is one file", sents[1]['parts'])
+    items_s = sents[2]['items']
+    ok(items_s[0]['audio'] == 'audio/sound-hello.m4a' and 'image' not in items_s[0] and 'thumb' not in items_s[0], 'on a board, a sound needs no picture, and gets no thumbnail', items_s[0])
+    ok(items_s[3]['audio'] == 'audio/sound-small.m4a' and items_s[3]['image'] == 'img/sound-tree2.jpg' and items_s[3]['thumb'].startswith('img/thumb/'), 'one with a picture keeps it, with a thumbnail', items_s[3])
+    ok('sound clips' in out and 'KB in all' in out and 'voices: 2 pictures' in out, 'and riffle deck says what the clips weigh', out)
+    code, out = run('deck', str(clone / 'packs/proj/decks/sound.json'), '--pack', 'proj', '--quiet')
+    ok(code == 0 and 'Nothing changed' in out, 'sending it again from where it is changes nothing', out)
+else:
+    print('  (ffmpeg is not installed here, so the sound tests were skipped)')
+write('d/notasound.txt', 'x')
+code, out = run('check', str(write('d/badsound.json', deck({**good_card('bs'), 'audio': ['notasound.txt', 7]}))), '--pack', 'proj')
+ok(code == 1 and 'not a sound the app can play' in out and 'neither a path' in out, 'something that is not a sound is refused', out)
+code, out = run('check', str(write('d/nosound.json', deck({**good_card('ns'), 'audio': ['nope.m4a']}))), '--pack', 'proj')
+ok(code == 1 and "can't find the sound nope.m4a" in out, 'a missing clip is refused', out)
+code, out = run('check', str(write('d/onesound.json', deck({**good_card('os'), 'audio': 'nope.m4a'}))), '--pack', 'proj')
+ok(code == 1 and 'audio is a list' in out and 'Traceback' not in out, 'and so is a clip that is not in a list', out)
+code, out = run('check', str(write('d/both.json', deck({**board, 'id': 'both', 'pick': None, 'items': [{'id': 'a', 'label': 'A', 'audio': 'nope.m4a', 'video': 'nope.mp4'}, {'id': 'b', 'label': 'B'}]}))), '--pack', 'proj')
+ok(code == 1 and 'a film and a sound' in out and 'needs a picture' in out and "can't find the sound nope.m4a" in out, 'an item is a film or a sound, not both, and still needs one of the three', out)
+
 print('Parts')
 Image.new('RGB', (1200, 800), (40, 160, 90)).save(work / 'd' / 'part-pic.png')
 parts_card = {**good_card('walk', kind='report', pick=None), 'text': 'The walk, in four parts.', 'parts': [
@@ -292,7 +347,7 @@ code, out = run('fit', str(work / 'd/parts.json'))
 ok('walk: fits' in out or 'shrinks a little' in out, 'and fits, with its part titles on the face', out)
 bad_parts = {**parts_card, 'parts': [{'id': 'a', 'text': 'No title'}, {'id': 'a', 'title': 'Twice'}, {'id': 'b', 'title': 'Empty'}, {'id': 'c', 'title': 'Swipe left on this one', 'text': 'x'}]}
 code, out = run('check', str(write('d/badparts.json', deck(bad_parts))), '--pack', 'proj')
-ok(code == 1 and 'each part needs its own id' in out and 'needs a short title' in out and 'needs text, pictures or films' in out and 'part c names a swipe direction' in out, 'parts need an id, a title and something in them, and name no direction', out)
+ok(code == 1 and 'each part needs its own id' in out and 'needs a short title' in out and 'needs text, pictures, films or sound' in out and 'part c names a swipe direction' in out, 'parts need an id, a title and something in them, and name no direction', out)
 code, out = run('check', str(write('d/optparts.json', deck({**opt, 'options': [{'id': 'a', 'label': 'One'}, {'id': 'b', 'label': 'Two'}], 'parts': [{'id': 'x', 'title': 'X', 'text': 'y'}]}))), '--pack', 'proj')
 ok(code == 1 and 'not on options cards' in out, 'and go only on questions, reports and designs', out)
 code, out = run('check', str(write('d/longpart.json', deck({**parts_card, 'parts': [{'id': 'x', 'title': 'A title for a part that runs far too long for one line', 'text': 'y'}]}))), '--pack', 'proj')
@@ -302,7 +357,7 @@ sentp = json.loads((clone / 'packs/proj/decks/parts.json').read_text(encoding='u
 ok(code == 0 and sentp[0]['images'] == ['img/parts-part-pic.jpg'] and (clone / 'packs/proj/img/parts-part-pic.jpg').exists(), "a part's pictures are brought in too", (out, sentp[0]))
 
 print('Null fields')
-nulls = {'id': 'n', 'kind': 'question', 'title': 'Nulls', 'text': 'Any?', 'why': 'To check.', 'pick': 'Yes.', 'options': None, 'images': None, 'items': None, 'details': None, 'handled': None}
+nulls = {'id': 'n', 'kind': 'question', 'title': 'Nulls', 'text': 'Any?', 'why': 'To check.', 'pick': 'Yes.', 'options': None, 'images': None, 'videos': None, 'audio': None, 'items': None, 'details': None, 'handled': None}
 code, out = run('check', str(write('d/nulls.json', deck(nulls))), '--pack', 'proj')
 ok(code == 0, 'check copes with null fields', out)
 code, out = run('fit', str(work / 'd/nulls.json'))

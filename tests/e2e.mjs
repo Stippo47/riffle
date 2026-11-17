@@ -37,7 +37,8 @@ await closeLeftover();
 process.on('uncaughtException', e => { console.log(e); closeLeftover().finally(() => process.exit(1)); });
 
 const profile = mkdtempSync(join(tmpdir(), 'riffle-edge-'));
-spawn(EDGE, ['--headless=new', '--disable-gpu', `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, '--no-first-run', ...(process.env.RIFFLE_BROWSER ? ['--no-sandbox'] : []), 'about:blank'], { stdio: 'ignore', detached: true }).unref();
+// Muted, so the sound tests are never heard on the machine running them.
+spawn(EDGE, ['--headless=new', '--disable-gpu', '--mute-audio', `--remote-debugging-port=${PORT}`, `--user-data-dir=${profile}`, '--no-first-run', ...(process.env.RIFFLE_BROWSER ? ['--no-sandbox'] : []), 'about:blank'], { stdio: 'ignore', detached: true }).unref();
 
 let target = null;
 for (let i = 0; i < 40 && !target; i++) {
@@ -3083,12 +3084,13 @@ const opts = (n, l, d) => 'abcd'.split('').slice(0, n).map(id => ({ id, label: s
 const limitCards = [
   ...['common', 'uncommon', 'rare', 'epic', 'legendary'].map(rarity => ({ id: `q-${rarity}`, kind: 'question', rarity, title: say(lim.title), text: say(lim.text), why: say(lim.why), pick: say(lim.pick), details: 'More.' })),
   { id: 'r', kind: 'report', title: say(lim.title), text: say(lim.text), why: say(lim.why), details: 'More.' },
+  { id: 'r-sound', kind: 'report', title: say(lim.title), text: say(lim.text), why: say(lim.why), audio: ['audio/none.m4a'] },
   { id: 'o4', kind: 'options', title: 'Four', text: say(80), why: say(120), pick: 'a', options: opts(4, 30, 60) },
   { id: 'o4b', kind: 'options', title: 'Four, long', text: say(lim.text), why: say(200), pick: 'a', options: opts(4, 30, 70) },
   { id: 'o3', kind: 'options', rarity: 'legendary', title: 'Three', text: say(90), why: say(180), pick: 'a', details: 'More.', options: opts(3, 24, 80) },
   { id: 'o2', kind: 'options', title: 'Two', text: say(60), why: say(250), pick: 'a', options: opts(2, 30, 90) },
   { id: 'h', kind: 'question', rarity: 'epic', title: 'Handled', text: say(lim.text), handled: { how: say(300), at: '2026-01-01T00:00:00.000Z' } },
-  { id: 'nulls', kind: 'question', title: 'Nulls', text: say(60), why: say(60), pick: say(20), options: null, images: null, items: null, details: null, handled: null },
+  { id: 'nulls', kind: 'question', title: 'Nulls', text: say(60), why: say(60), pick: say(20), options: null, images: null, videos: null, audio: null, items: null, details: null, handled: null },
   { id: 'nullopts', kind: 'options', title: 'Null options', text: say(60), why: say(60), pick: null, options: null, images: null },
   { id: 'nullboard', kind: 'board', title: 'Null board', text: say(60), why: say(60), pick: null, items: null },
   { id: 'b60', kind: 'board', title: 'Board', text: say(lim.text), why: say(lim.why), pick: ['x1'], items: Array.from({ length: 60 }, (_, i) => ({ id: `x${i + 1}`, label: `Item ${i + 1}`, image: `img/none-${i}.jpg` })) },
@@ -3112,7 +3114,7 @@ for (const layout of LAYOUTS) {
   const seen = await ev(`(async()=>{const c=__riffle.current;const out={};for(let i=0;i<c.deck.cards.length;i++){await new Promise(r=>setTimeout(r,30));const n=c.topNode();const f=n.querySelector('.face');const box=f.getBoundingClientRect();const fade=n.classList.contains('clipped');const pick=f.querySelector('.pick');const more=f.querySelector('.more');out[c.topId()]={over:f.scrollHeight-f.clientHeight,step:fade?3:n.classList.contains('tighter')?2:n.classList.contains('tight')?1:0,more:more.hidden?'':more.textContent,pickInside:!pick||pick.getBoundingClientRect().bottom<=box.bottom+1,optInside:[...f.querySelectorAll('.option')].every(o=>o.getBoundingClientRect().bottom<=box.bottom+1),small:[...f.querySelectorAll('.opt-text small')].every(x=>getComputedStyle(x).display!=='none')};c.commit('down')}c.close();return out})()`);
   const cut = Object.entries(seen).filter(([, v]) => v.over > 1).map(([k, v]) => `${k} +${v.over}`);
   ok(cut.length === 0, `${layout}: no card is cut off at its bottom edge`, JSON.stringify(cut));
-  const atGuide = ['q-common', 'q-uncommon', 'q-rare', 'q-epic', 'q-legendary', 'r', 'o4', 'o2', 'h'].filter(k => seen[k].step === 3);
+  const atGuide = ['q-common', 'q-uncommon', 'q-rare', 'q-epic', 'q-legendary', 'r', 'r-sound', 'o4', 'o2', 'h'].filter(k => seen[k].step === 3);
   ok(atGuide.length === 0, `${layout}: cards at the guide lengths keep all their words on the face`, JSON.stringify(atGuide));
   ok(Object.values(seen).every(v => v.small), `${layout}: no option ever loses its description`);
   ok(seen.long.step === 3 && seen.long.more === 'Tap to read the rest', `${layout}: a card far too long fades its description and says so`, JSON.stringify(seen.long));
@@ -3139,6 +3141,202 @@ await ev('__riffle.current.close()');
 
 await send('Emulation.setDeviceMetricsOverride', { width: W, height: H, deviceScaleFactor: 1, mobile: true });
 await setStyle({ layout: 'rows', look: 'plain' });
+
+console.log('Sound');
+await go(APP);
+await sleep(600);
+const soundWork = mkdtempSync(join(tmpdir(), 'riffle-sound-test-'));
+const madeSound = JSON.parse(execFileSync('python', [fileURLToPath(new URL('./make_board.py', import.meta.url)), soundWork, '2', 'sound'], { maxBuffer: 1 << 24 }).toString());
+console.log(`  (riffle deck said: ${madeSound.said.trim().split('\n').filter(l => l.includes('sound clip')).map(l => l.trim()).join(' | ')})`);
+const soundRoot = join(madeSound.clone, 'packs');
+for (const f of walk(soundRoot)) {
+  const rel = `packs/${relative(soundRoot, f).replace(/\\/g, '/')}`;
+  await fetch(`${API}/__put?path=${encodeURIComponent(rel)}${f.endsWith('.json') ? '' : '&bin=1'}`, { method: 'POST', body: readFileSync(f) });
+}
+await api('/__served?clear=1');
+await ev('__riffle.sync.pull()');
+const sndPulled = (await api('/__served')).filter(p => p.startsWith('packs/sp/'));
+const sndClips = sndPulled.filter(p => p.includes('/audio/'));
+ok(sndClips.length === 6 && sndClips.every(p => /\/audio\/sound-[\w-]+\.m4a$/.test(p)), "every sound clip comes down ahead, a board's too, each a small m4a", JSON.stringify(sndPulled));
+const sndKept = await ev(`__riffle.store.files.get('packs/sp/audio/sound-low.m4a').then(f=>({type:f.data.type,size:f.data.size}))`);
+ok(sndKept.type === 'audio/mp4' && sndKept.size > 2000 && sndKept.size < 80000, 'kept on the phone as sound, a few tens of kilobytes', JSON.stringify(sndKept));
+// A clip that came down to a version from before sound was kept without its kind, and an iPhone won't play that.
+await ev(`__riffle.store.files.get('packs/sp/audio/sound-high.m4a').then(f=>__riffle.store.files.set(f.path,{...f,data:new Blob([f.data],{type:'application/octet-stream'})}))`);
+const sndTyped = await ev(`__riffle.sync.pictureUrl('sp','audio/sound-high.m4a').then(u=>fetch(u)).then(r=>r.blob()).then(b=>b.type)`);
+ok(sndTyped === 'audio/mp4', 'one kept by a version from before sound is still handed over as sound', sndTyped);
+
+await ev(`__riffle.showPack('sp')`);
+await sleep(250);
+await openDeckRow('Sound');
+ok((await deck()).top === 'heard', 'a card with sound is up');
+ok((await ev(`document.querySelector('.card[data-pos="0"] .more').textContent`)) === 'Tap for details and 2 sounds', 'its face says what is on the back, sounds too', await ev(`document.querySelector('.card[data-pos="0"] .more').textContent`));
+const sndTable = await rect('#table');
+await tapAt(sndTable.x, sndTable.top + sndTable.h * 0.5);
+await sleep(600);
+const snd1 = '.card[data-pos="0"] .back .snd', snd2 = '.card[data-pos="0"] .back .snd + .snd';
+const sndPlaying = () => ev('!!__riffle.sound.soundNow()');
+// How one sound's button stands, and its <audio> if it's the one going.
+const sndState = sel => ev(`(()=>{const e=document.querySelector(${JSON.stringify(sel)});const now=__riffle.sound.soundNow();const a=now&&now.el===e?now.audio:null;const note=e.querySelector('.snd-note'),time=e.querySelector('.snd-time'),name=e.querySelector('.snd-name');return {playing:e.classList.contains('playing'),held:e.classList.contains('held'),silent:e.classList.contains('silent'),note:note.hidden?'':note.textContent,at:+e.style.getPropertyValue('--at')||0,time:time?time.textContent:'',name:name?name.textContent:'',mine:!!a,paused:a?a.paused:null,t:a?a.currentTime:0,muted:a?a.muted:null,loop:a?a.loop:null,pause:getComputedStyle(e.querySelector('.snd-btn svg:last-child')).display!=='none'}})()`);
+const sndGoing = async sel => { for (let i = 0; i < 40 && !((await sndState(sel)).t > 0.25); i++) await sleep(100); return sndState(sel); };
+const sndRows = await ev(`[...document.querySelectorAll('.card[data-pos="0"] .back .snd')].map(e=>({name:e.querySelector('.snd-name').textContent,src:(e.dataset.src||'').slice(0,5),tag:e.tagName,h:e.getBoundingClientRect().height}))`);
+ok(sndRows.length === 2 && sndRows[0].name === 'Sound 1' && sndRows[1].name === 'The second take' && sndRows.every(r => r.src === 'blob:' && r.tag === 'BUTTON' && r.h >= 44), 'each sound on the back is a button with its name, already on the phone', JSON.stringify(sndRows));
+await sleep(700);
+ok(!(await sndPlaying()) && !(await ev(`!!document.querySelector('.snd.playing')`)), 'nothing plays by itself');
+await tap(snd1);
+let sndNow = await sndGoing(snd1);
+ok(sndNow.playing && sndNow.mine && sndNow.paused === false && sndNow.t > 0.25 && sndNow.muted === false && sndNow.loop === false, 'a tap plays it, with its sound on, once through', JSON.stringify(sndNow));
+ok(sndNow.at > 0.03 && sndNow.at < 0.7 && /^0:0\d \/ 0:04$/.test(sndNow.time) && sndNow.pause, 'its bar fills as it plays, beside the time, and its button turns to pause', JSON.stringify(sndNow));
+await shot('90-sound-back');
+await tap(snd1);
+await sleep(250);
+const sndHeld = await sndState(snd1);
+ok(!sndHeld.playing && sndHeld.held && sndHeld.paused === true && sndHeld.t > 0 && !sndHeld.pause, 'another tap pauses it', JSON.stringify(sndHeld));
+await tap(snd1);
+await sleep(600);
+sndNow = await sndState(snd1);
+ok(sndNow.playing && sndNow.t > sndHeld.t + 0.2, 'and one more carries on from there', JSON.stringify([sndHeld.t, sndNow.t]));
+await tap(snd2);
+const sndTwo = await sndGoing(snd2);
+const sndOne = await sndState(snd1);
+ok(sndTwo.playing && sndTwo.mine && sndTwo.name === 'The second take' && !sndOne.playing && !sndOne.mine && sndOne.at === 0 && (await ev(`document.querySelectorAll('.snd.playing').length`)) === 1, 'tapping another clip stops the first: one plays at a time', JSON.stringify([sndOne, sndTwo]));
+ok(sndOne.time === '0:04', 'and the first then says how long it runs', sndOne.time);
+await ev(`(()=>{const a=__riffle.sound.soundNow().audio;a.currentTime=a.duration-0.3})()`);
+await sleep(1000);
+ok(!(await sndPlaying()) && !(await sndState(snd2)).playing && (await sndState(snd2)).at === 0, 'at its end it stops, and does not start again', JSON.stringify(await sndState(snd2)));
+await tap(snd1);
+await sndGoing(snd1);
+await tap('.card[data-pos="0"] .back-hint');
+await sleep(450);
+ok(!(await sndPlaying()) && !(await deck()).flipped, 'flipping the card back stops it');
+// What can be caught of an iPhone's silent Home Screen app: the phone refusing to play, and a clock standing still.
+await ev(`window.__realPlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){return Promise.reject(new DOMException('Refused','NotAllowedError'))}`);
+await tapAt(sndTable.x, sndTable.top + sndTable.h * 0.5);
+await sleep(600);
+await tap(snd1);
+await sleep(300);
+let sndBad = await sndState(snd1);
+ok(sndBad.silent && sndBad.note === 'No sound played' && !sndBad.playing && !(await sndPlaying()) && await seenBox(`${snd1} .snd-note`), 'a clip the phone refuses to play says No sound played, on the clip itself', JSON.stringify(sndBad));
+await shot('91-sound-none');
+await ev(`HTMLMediaElement.prototype.play=function(){return new Promise(()=>{})}`);
+await tap(snd2);
+await sleep(300);
+sndBad = await sndState(snd2);
+ok(sndBad.playing && !sndBad.silent, 'one the phone seems to start shows as playing', JSON.stringify(sndBad));
+await sleep(1900);
+sndBad = await sndState(snd2);
+ok(sndBad.silent && sndBad.note === 'No sound played' && sndBad.mine, 'and says so too once its clock has stood still for a moment, while it keeps trying', JSON.stringify(sndBad));
+await sleep(4400);
+sndBad = await sndState(snd2);
+ok(sndBad.silent && sndBad.note === 'No sound played' && !sndBad.playing && !(await sndPlaying()), 'a few seconds more and it stops trying, and still says so', JSON.stringify(sndBad));
+// Sound that is only slow to start, as through headphones that were asleep: the words go once it's going.
+await ev(`HTMLMediaElement.prototype.play=function(){const a=this;Object.defineProperty(a,'paused',{get:()=>false,configurable:true});return new Promise(done=>setTimeout(()=>{delete a.paused;window.__realPlay.call(a).then(done,done)},2300))}`);
+await tap(snd2);
+await sleep(2000);
+const sndSlow = await sndState(snd2);
+sndNow = await sndGoing(snd2);
+ok(sndSlow.silent && sndSlow.mine && sndNow.playing && sndNow.t > 0.25 && !sndNow.silent && sndNow.note === '', 'a clip that was only slow to start loses the words once it is going', JSON.stringify([sndSlow, sndNow]));
+await ev(`HTMLMediaElement.prototype.play=window.__realPlay`);
+await tap(snd1);
+sndNow = await sndGoing(snd1);
+ok(sndNow.playing && !sndNow.silent && sndNow.note === '' && !(await sndState(snd2)).playing, 'and a tap on one that said so tries it again', JSON.stringify(sndNow));
+// One that isn't on the phone yet is fetched by the tap. One that can't be fetched says it needs signal.
+await ev(`__riffle.sound.stopSound();delete document.querySelector(${JSON.stringify(snd2)}).dataset.src`);
+await tap(snd2);
+sndNow = await sndGoing(snd2);
+ok(sndNow.playing && sndNow.mine, 'a clip not yet found on the phone is fetched by the tap', JSON.stringify(sndNow));
+await ev(`(()=>{const e=document.querySelector(${JSON.stringify(snd1)});delete e.dataset.src;e.dataset.path='audio/nowhere.m4a'})()`);
+await tap(snd1);
+await sleep(400);
+sndBad = await sndState(snd1);
+ok(!sndBad.playing && !sndBad.silent && sndBad.note === 'This sound comes down when there is signal.' && !(await sndPlaying()), 'and one that has not come down says it needs signal', JSON.stringify(sndBad));
+await ev(`__riffle.current.flip(false)`);
+await sleep(450);
+await throwCard('right');
+await sleep(300);
+ok((await deck()).answers.heard?.swipe === 'right' && (await deck()).top === 'sparts', 'and the card still takes its swipe');
+
+await tapAt(sndTable.x, sndTable.top + sndTable.h * 0.3);
+await sleep(600);
+const sndPart = '.card[data-pos="0"] .part[data-part=p2] .snd';
+await tap(sndPart);
+const sndInPart = await sndGoing(sndPart);
+ok(sndInPart.playing && sndInPart.name === 'Sound', "a part's sound plays from its own section", JSON.stringify(sndInPart));
+await tap('.part[data-part=p2] .part-mark[data-mark=right]');
+await sleep(200);
+ok((await sndState(sndPart)).playing && (await ev(`__riffle.current.s.parts.sparts.p2.mark`)) === 'right', 'and the part can be marked while it plays');
+await ev(`__riffle.current.jump('voices')`);
+await sleep(350);
+ok(!(await sndPlaying()), 'going to another card stops it');
+
+ok((await deck()).top === 'voices', 'a board with sounds is up');
+const sndBp = await ev(`(()=>{const c=[...document.querySelectorAll('.card[data-pos="0"] .bp')];return {n:c.length,sound:c.filter(x=>x.classList.contains('sound')&&x.querySelector('.bp-snd')).length,imgs:c.filter(x=>x.querySelector('img')).length,more:document.querySelector('.card[data-pos="0"] .more').textContent}})()`);
+ok(sndBp.n === 4 && sndBp.sound === 3 && sndBp.imgs === 2 && sndBp.more === 'Tap to choose from 4', 'its sounds are marked on the card, with a picture only where one was given', JSON.stringify(sndBp));
+await shot('92-sound-board-card');
+await tapAt(sndTable.x, sndTable.top + sndTable.h * 0.5);
+for (let i = 0; i < 40 && !(await ev(`document.querySelectorAll('.bt .snd[data-src]').length===3&&[...document.querySelectorAll('.bt img')].every(i=>i.naturalWidth>0)`)); i++) await sleep(100);
+const sndTiles = Object.fromEntries((await ev(`[...document.querySelectorAll('.bt')].map(t=>({id:t.dataset.item,sound:t.classList.contains('sound'),img:t.querySelector('img')?t.querySelector('img').naturalWidth:-1,missing:t.classList.contains('missing'),src:((t.querySelector('.snd')||{dataset:{}}).dataset.src||'').slice(0,5),act:t.querySelector('.bt-pic').dataset.act}))`)).map(t => [t.id, t]));
+ok(sndTiles.v1.sound && sndTiles.v1.img === -1 && !sndTiles.v1.missing && sndTiles.v1.src === 'blob:' && sndTiles.v1.act === 'boardsound', 'a sound is a tile with a play button and no picture, ready to play', JSON.stringify(sndTiles.v1));
+ok(sndTiles.v3.sound && sndTiles.v3.img > 0 && !sndTiles.v4.sound && sndTiles.v4.img > 0 && sndTiles.v4.act === 'boardview', 'one given a picture shows it, beside ordinary picture tiles', JSON.stringify([sndTiles.v3, sndTiles.v4]));
+ok(!(await seenBox('.board-now')) && !(await sndPlaying()), 'and nothing plays until one is tapped');
+await shot('93-sound-board');
+const sndTile = id => `.bt[data-item=${id}] .snd`;
+const sndStrip = () => ev(`(()=>{const s=document.querySelector('.board-now');return {shown:!s.hidden,label:s.querySelector('b').textContent,text:s.querySelector('small').textContent,has:s.querySelector('.bn-say').classList.contains('has')}})()`);
+await tap(sndTile('v1'));
+let sndOnTile = await sndGoing(sndTile('v1'));
+ok(sndOnTile.playing && sndOnTile.pause && sndOnTile.at > 0 && await seenBox('.boardview .board-grid') && !(await ev(`!!document.querySelector('.viewer')`)), "a tap on a sound's tile plays it there, without leaving the grid", JSON.stringify(sndOnTile));
+let sndSays = await sndStrip();
+ok(sndSays.shown && sndSays.label === 'Low' && sndSays.text === 'A few words about this voice.' && await seenBox('.board-now .bn-say'), 'and a strip under the grid shows its label and its text', JSON.stringify(sndSays));
+await shot('94-sound-board-playing');
+await tap('.bt[data-item=v1] .bt-tick');
+await sleep(150);
+ok((await ev(`document.getElementById('boardcount').textContent`)) === '1 selected' && (await ev(`document.querySelector('.bt[data-item=v1]').classList.contains('on')`)) && (await sndState(sndTile('v1'))).playing, 'its tick selects it like any tile, and it plays on');
+await tap(sndTile('v2'));
+sndOnTile = await sndGoing(sndTile('v2'));
+sndSays = await sndStrip();
+ok(sndOnTile.playing && !(await sndState(sndTile('v1'))).playing && (await ev(`document.querySelectorAll('.snd.playing').length`)) === 1 && sndSays.label === 'High' && sndSays.text === '', 'tapping another stops the first, and the strip follows', JSON.stringify([sndOnTile, sndSays]));
+// A comment on one sound, apart from the card's own comment, like a comment on one picture.
+await tap('.bn-say');
+await sleep(300);
+ok(await seenBox('.bn-sayer .pad') && (await ev(`document.activeElement===document.querySelector('#boardsay')`)) && !(await seenBox('.board-bar')), "the strip's speech bubble opens a box for this one, ready to type");
+await typeText('Too bright');
+await sleep(150);
+ok((await ev(`__riffle.current.s.parts.voices.v2.text`)) === 'Too bright', 'its words are kept as they are typed');
+await ev(`document.documentElement.classList.add('kb');document.documentElement.style.setProperty('--vvh','480px')`);
+await sleep(250);
+const sndSayRoom = await ev(`(()=>{const p=document.querySelector('#boardsay').getBoundingClientRect(),d=document.querySelector('.bn-done').getBoundingClientRect(),g=document.querySelector('.board-grid').getBoundingClientRect();return {padH:p.height,doneBottom:d.bottom,gridH:g.height}})()`);
+ok(sndSayRoom.doneBottom <= 481 && sndSayRoom.padH >= 60 && sndSayRoom.gridH >= 80, 'with the keyboard up, the box fits above it, with some of the grid still showing', JSON.stringify(sndSayRoom));
+await shot('95-sound-comment');
+await ev(`document.documentElement.classList.remove('kb');document.documentElement.style.removeProperty('--vvh')`);
+await tap('.bn-done');
+await sleep(400);
+const sndEv = (await everyEvent()).filter(e => e.type === 'part' && e.card === 'voices' && e.part === 'v2').pop();
+ok(sndEv && sndEv.item === true && sndEv.partTitle === 'High' && sndEv.comment === 'Too bright', 'Done sends it, named by its item', JSON.stringify(sndEv));
+ok((await ev(`document.querySelector('.bt[data-item=v2]').classList.contains('said')`)) && await seenBox('.bt[data-item=v2] .bt-said') && (await sndStrip()).has && await seenBox('.board-bar'), 'and its tile and the speech bubble show it has words');
+await ev(`HTMLMediaElement.prototype.play=function(){return Promise.reject(new DOMException('Refused','NotAllowedError'))}`);
+await tap(sndTile('v3'));
+await sleep(300);
+sndBad = await sndState(sndTile('v3'));
+const sndNoteBox = await ev(`(()=>{const n=document.querySelector('.bt[data-item=v3] .snd-note').getBoundingClientRect(),t=document.querySelector('.bt[data-item=v3] .bt-pic').getBoundingClientRect();return {inside:n.left>=t.left-0.5&&n.right<=t.right+0.5&&n.top>=t.top&&n.bottom<=t.bottom,h:n.height}})()`);
+ok(sndBad.silent && sndBad.note === 'No sound played' && !sndBad.playing && sndNoteBox.inside && sndNoteBox.h > 0, 'a sound that does not play says No sound played on its tile', JSON.stringify([sndBad, sndNoteBox]));
+await shot('96-sound-board-none');
+await ev(`HTMLMediaElement.prototype.play=window.__realPlay`);
+await tap(sndTile('v3'));
+ok((await sndGoing(sndTile('v3'))).playing && !(await sndState(sndTile('v3'))).silent, 'and plays on the next tap');
+await tap('.bt[data-item=v4] .bt-pic');
+for (let i = 0; i < 40 && !(await ev(`!!document.querySelector('.viewer img.ready')`)); i++) await sleep(100);
+ok(!(await sndPlaying()) && (await ev(`document.querySelector('.viewer-words b').textContent`)) === 'A picture' && !(await ev(`!!document.querySelector('.viewer-next')`)), 'looking at a picture stops the sound, and sounds stay out of the full-screen look');
+await tap('.viewer-x');
+await sleep(250);
+await tap(sndTile('v1'));
+await sndGoing(sndTile('v1'));
+await tap('.boardview [data-act=closeboard]');
+await sleep(250);
+ok(!(await sndPlaying()) && (await ev(`document.querySelector('#boardview').hidden`)), 'leaving the board stops it');
+await throwCard('right');
+await sleep(300);
+const sndAnswer = (await deck()).answers.voices;
+ok(sndAnswer?.swipe === 'right' && JSON.stringify(sndAnswer.selected) === '["v1"]', 'and the board is answered with what was ticked', JSON.stringify(sndAnswer));
+await ev('__riffle.current.close()');
 
 console.log('iPhone Safari');
 await send('Emulation.setUserAgentOverride', { userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1' });

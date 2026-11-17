@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Makes a made-up board through the real `riffle deck`, in a throwaway repo, and prints the clone's
-path. It never touches the real data repo. Run by tests/e2e.mjs: make_board.py <folder> <count> [media]
-With `media` it makes a pack of films, parts and a board mixing films and pictures instead. That needs ffmpeg."""
+path. It never touches the real data repo. Run by tests/e2e.mjs: make_board.py <folder> <count> [media|sound]
+With `media` it makes a pack of films, parts and a board mixing films and pictures instead. With `sound` it
+makes a pack with sound on a card, a part and a board. Both need ffmpeg."""
 import json
 import os
 import pathlib
@@ -15,6 +16,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 work = pathlib.Path(sys.argv[1])
 count = int(sys.argv[2])
 media = len(sys.argv) > 3 and sys.argv[3] == 'media'
+sound = len(sys.argv) > 3 and sys.argv[3] == 'sound'
 source = work / 'source'
 source.mkdir(parents=True)
 bare, clone, home = work / 'data.git', work / 'clone', work / 'home'
@@ -114,6 +116,40 @@ if media:
     steps = (['pack', 'mp', '--title', 'Film pack', '--color', '#d9622b'],
              ['topic', 'films', '--pack', 'mp', '--title', 'Films'],
              ['deck', str(films_file), '--pack', 'mp', '--quiet'])
+
+if sound:
+    # Made-up clips: plain tones four seconds long, in the kinds of file a writer might have.
+    def tone(name, hz, *extra):
+        subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', f'sine=frequency={hz}:sample_rate=44100', '-t', '4', *extra, str(source / name)], check=True)
+    tone('hello.wav', 440, '-ac', '2')
+    tone('take-two.m4a', 330, '-c:a', 'aac', '-b:a', '64k')
+    tone('part.wav', 550)
+    tone('low.wav', 220)
+    tone('high.m4a', 880, '-c:a', 'aac', '-b:a', '64k')
+    tone('face.wav', 660)
+    sounds = {
+        'title': 'Sound',
+        'topic': 'voices',
+        'order': 1,
+        'cards': [
+            {'id': 'heard', 'kind': 'report', 'title': 'A sound', 'text': 'This card has two sounds on its back.', 'why': 'Flip it to listen.',
+             'audio': ['source/hello.wav', {'src': 'source/take-two.m4a', 'label': 'The second take'}], 'details': 'A few words under the sounds.'},
+            {'id': 'sparts', 'kind': 'report', 'title': 'In parts', 'text': 'This report has two parts.', 'why': 'One of them has a sound.',
+             'parts': [
+                 {'id': 'p1', 'title': 'Words', 'text': 'Words only.'},
+                 {'id': 'p2', 'title': 'With a sound', 'text': 'A sound to hear.', 'audio': ['source/part.wav']},
+             ]},
+            {'id': 'voices', 'kind': 'board', 'title': 'Pick a voice', 'text': 'Which of these voices do you like?', 'why': 'Tap one to hear it.', 'pick': ['v2'],
+             'items': [{'id': 'v1', 'label': 'Low', 'audio': 'source/low.wav', 'text': 'A few words about this voice.'}, {'id': 'v2', 'label': 'High', 'audio': 'source/high.m4a'},
+                       {'id': 'v3', 'label': 'With a face', 'audio': 'source/face.wav', 'image': 'source/item-01.png'}, {'id': 'v4', 'label': 'A picture', 'image': 'source/item-02.png'}]},
+            {'id': 'after', 'kind': 'question', 'title': 'After', 'text': 'A plain card after the sounds.', 'why': 'To show nothing else changed.', 'pick': 'Yes.'},
+        ],
+    }
+    sound_file = work / 'sound.json'
+    sound_file.write_text(json.dumps(sounds), encoding='utf-8')
+    steps = (['pack', 'sp', '--title', 'Sound pack', '--color', '#7a5be0'],
+             ['topic', 'voices', '--pack', 'sp', '--title', 'Voices'],
+             ['deck', str(sound_file), '--pack', 'sp', '--quiet'])
 
 env = {**os.environ, 'RIFFLE_DATA': str(clone), 'HOME': str(home), 'USERPROFILE': str(home), 'PYTHONIOENCODING': 'utf-8'}
 riffle = ROOT / 'skill' / 'riffle.py'

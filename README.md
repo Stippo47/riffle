@@ -25,7 +25,7 @@ node tests/e2e.mjs
 
 These need nothing running: `python tests/skill_test.py` tries the writer's commands on a throwaway git repo, and `node tests/push.mjs` checks the notification sending.
 
-Films need [ffmpeg](https://ffmpeg.org) on the PATH, for `riffle deck` to make small mp4s and posters, and for the tests that make made-up films. The skill's tests skip theirs without it.
+Films and sound need [ffmpeg](https://ffmpeg.org) on the PATH, for `riffle deck` to make small mp4s, posters and sound clips, and for the tests that make made-up films and tones. The skill's tests skip theirs without it. The test browser runs with its sound muted.
 
 ## Changing it
 
