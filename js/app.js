@@ -110,7 +110,7 @@ function sampleHome() {
   const packs = [['Project one', 'poker-hand', '#2f8fe0', 12, .4], ['Project two', 'card-pickup', '#d9622b', 30, .2], ['Odds and ends', 'card-random', '#2fa56f', 4, .7]];
   return `<div class="home screen">
     <div class="home-head"><div class="apptitle">Riffle</div><span class="iconbtn">${icon('settings')}</span></div>
-    <div class="appsub">Everything sent. 46 cards waiting.</div>
+    <div class="appsub">Everything sent. 46 cards left.</div>
     <div class="packs">${packs.map(([name, ic, color, left, part]) => packTile({ id: name, title: name, icon: ic, color }, left, Math.round(left / (1 - part)))).join('')}</div>
   </div>`;
 }
@@ -362,7 +362,7 @@ function statusLine(st, left) {
   if (st.photoProblem) return st.photoProblem;
   if (st.waiting) return `${st.waiting} waiting to send${st.noSignal ? ', when there is signal' : ''}.`;
   if (st.photosWaiting) return `${countWords(st.photosWaiting)} waiting to send.`;
-  return left ? `Everything sent. ${left} card${left === 1 ? '' : 's'} waiting.` : 'Everything sent. Nothing waiting.';
+  return left ? `Everything sent. ${left} card${left === 1 ? '' : 's'} left.` : 'Everything sent. Nothing left to answer.';
 }
 
 async function refreshStatusLine() {

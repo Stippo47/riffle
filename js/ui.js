@@ -3,14 +3,14 @@ import { ICON } from './icons.js';
 
 // What each direction means on each kind of card. To change a stamp's word, change it here.
 export const KINDS = {
-  question: { label: 'Question', pickLabel: 'My pick', right: 'GO', left: 'WORKSHOP', down: 'IDK', up: 'NOTE' },
+  question: { label: 'Question', pickLabel: 'My pick', right: 'GO', left: 'WORKSHOP', down: 'IDK', up: 'COMMENT' },
   // A report's down is "decent": fine, but not happy yet, or not quite following. It was HUH? before 0.11.0.
-  report: { label: 'Report', right: 'GOOD', left: 'PROBLEM', down: 'DECENT', up: 'NOTE', icons: { down: 'meh' } },
-  design: { label: 'Design', pickLabel: 'My design', right: 'YES', left: 'RETHINK', down: 'IDK', up: 'NOTE' },
-  options: { label: 'Options', pickLabel: 'My pick', right: 'GO', left: 'REDO', down: 'IDK', up: 'NOTE' },
-  board: { label: 'Spread', pickLabel: 'My pick', right: 'GO', left: 'REDO', down: 'IDK', up: 'NOTE' },
+  report: { label: 'Report', right: 'GOOD', left: 'PROBLEM', down: 'DECENT', up: 'COMMENT', icons: { down: 'meh' } },
+  design: { label: 'Design', pickLabel: 'My design', right: 'YES', left: 'RETHINK', down: 'IDK', up: 'COMMENT' },
+  options: { label: 'Options', pickLabel: 'My pick', right: 'GO', left: 'REDO', down: 'IDK', up: 'COMMENT' },
+  board: { label: 'Spread', pickLabel: 'My pick', right: 'GO', left: 'REDO', down: 'IDK', up: 'COMMENT' },
 };
-const HANDLED_WORDS = { right: 'FINE', left: 'WORKSHOP', down: 'IDK', up: 'NOTE' };
+const HANDLED_WORDS = { right: 'FINE', left: 'WORKSHOP', down: 'IDK', up: 'COMMENT' };
 export const kindOf = card => KINDS[card.kind] || KINDS.question;
 export const stampWord = (card, dir) => (card.handled ? HANDLED_WORDS : kindOf(card))[dir];
 

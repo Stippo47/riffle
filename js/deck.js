@@ -193,7 +193,9 @@ export function deckSummary(deck, s) {
   const due = deck.cards.filter(c => owed(c, answers[c.id]));
   const handled = deck.cards.filter(c => c.handled).length;
   const nothingOwed = handled === deck.cards.length && handled > 0;
-  const finished = nothingOwed || !!(s && s.verdict && s.verdictSig === deckSig(deck));
+  // Done is Deck's done with nothing owed. A card owed again since (an Undo) makes it "1 left" again, or every
+  // row says Done while the pack says 1 left. Replan stands as said.
+  const finished = nothingOwed || !!(s && s.verdict && s.verdictSig === deckSig(deck) && (s.verdict === 'replan' || !due.length));
   const RANK = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5 };
   return {
     total: deck.cards.length - handled, left: due.length, handled, finished,
@@ -202,6 +204,8 @@ export function deckSummary(deck, s) {
     verdict: finished && s ? s.verdict : null,
   };
 }
+
+const undoReachesVisit = () => { try { return localStorage.getItem('riffle-undo-reach') === 'visit'; } catch { return false; } };
 
 function fresh(deck) {
   return { order: deck.cards.map(c => c.id), answers: {}, log: [], notes: '', drafts: {}, draftsSent: {}, wordsSent: {}, draftPhotos: {}, notesPhotos: [], notesPhotosSent: [], selections: {}, picksDirty: {}, handledSkipped: {}, parts: {}, partsV: {}, drawnOn: {}, pins: {}, reviewing: null, verdict: null, startedAt: Date.now() };
@@ -522,6 +526,10 @@ export class DeckView {
     this.s.drawnOn = this.s.drawnOn || {};
     this.s.pins = this.s.pins || {};
     reconcile(this.s, this.deck);
+    // How far back Undo reaches. Reached by a link, only to what's done here from now: the deck's log is kept
+    // for good, so Undo could take back an answer days old, on a card not on screen.
+    // Everywhere, only with `riffle-undo-reach` set to `visit` (off for now).
+    this.logFloor = (this.nav && this.nav.backBy) || undoReachesVisit() ? this.s.log.length : 0;
     this.render();
     this.deal();
     this.save();
@@ -1062,7 +1070,7 @@ export class DeckView {
     const done = sum.total - sum.left;
     plainSlot(this.countEl, sum.total ? `${done} / ${sum.total}` : `${sum.handled} handled`);
     this.barEl.style.width = `${(done / Math.max(1, sum.total)) * 100}%`;
-    this.undoBtn.disabled = !this.s.log.length;
+    this.undoBtn.disabled = this.s.log.length <= (this.logFloor || 0);
     this.skipBtn.disabled = !this.topId();
   }
 
@@ -1173,7 +1181,7 @@ export class DeckView {
         ${items.map(it => `<div class="bt${it.video ? ' film' : ''}${itemSound(it) ? ' sound' : ''}" data-item="${esc(it.id)}">
           ${picOf(it)}
           ${mine.includes(it.id) ? `<em class="bt-mine">${esc(kindOf(card).pickLabel)}</em>` : ''}
-          <button class="bt-tick" data-act="boardtick" data-id="${esc(it.id)}" aria-label="Select ${esc(it.label)}"><i>${icon('check')}</i></button>
+          <button class="bt-tick" data-act="boardtick" data-id="${esc(it.id)}" aria-label="Pick ${esc(it.label)}"><i>${icon('check')}</i></button>
           <button class="bt-label" data-act="boardtick" data-id="${esc(it.id)}">${esc(it.label)}</button>
         </div>`).join('')}
       </div>
@@ -1218,7 +1226,7 @@ export class DeckView {
       t.classList.toggle('said', !!((said[t.dataset.item] || {}).text || '').trim() || pinned.has(t.dataset.item));
     });
     const count = this.boardEl.querySelector('#boardcount');
-    if (count) count.textContent = `${picked.length} selected`;
+    if (count) count.textContent = `${picked.length} picked`;
     const say = this.boardEl.querySelector('.bn-say');
     if (say) say.classList.toggle('has', !!((said[this.boardNow] || {}).text || '').trim());
   }
@@ -2144,6 +2152,7 @@ export class DeckView {
   // ---------- top row
 
   undo() {
+    if (this.s.log.length <= (this.logFloor || 0)) return;
     const e = this.s.log.pop();
     if (!e) return;
     this.toggleNotes(false);
@@ -2383,7 +2392,7 @@ export class DeckView {
       const cls = [c.rarity || 'common', c.id === cur ? 'current' : '', fresher ? 'answered' : '', c.handled ? 'handled' : ''].join(' ');
       return `<button class="tile ${cls}" data-act="jump" data-id="${esc(c.id)}">
         <span class="tile-title">${c.handled ? `<i class="tile-tick">${icon('check')}</i>` : ''}${esc(c.title || c.text)}</span>
-        <span class="tile-state ${fresher ? 'dir-' + a.swipe : ''}">${esc(stamp) || (c.handled ? 'Handled' : 'Waiting')}${a && a.comment ? `<i>${icon('message-square-text')}</i>` : ''}${livePins(this.s, c.id).length ? `<i class="tile-pins">${icon('pin')}</i>` : ''}</span>
+        <span class="tile-state ${fresher ? 'dir-' + a.swipe : ''}">${esc(stamp) || (c.handled ? 'Handled' : 'Not answered')}${a && a.comment ? `<i>${icon('message-square-text')}</i>` : ''}${livePins(this.s, c.id).length ? `<i class="tile-pins">${icon('pin')}</i>` : ''}</span>
       </button>`;
     }).join('');
     const sum = deckSummary(this.deck, this.s);
@@ -2509,6 +2518,7 @@ export class DeckView {
     }
     this.send({ type: 'deck-reset', keptNotes: keep }, false);
     const next = fresh(this.deck);
+    this.logFloor = 0; // a fresh log: Undo reaches all of it
     next.wordsSent = this.s.wordsSent || {};
     next.draftsSent = {};
     if (keep) {

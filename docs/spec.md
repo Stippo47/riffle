@@ -23,6 +23,8 @@ Riffle is a phone web app for answering questions and reading reports one card a
 
 Suggested, Importance and Newest are lists of full-width rows in every layout, each saying the deck's **kind** (Report, Questions or Board), its topic, the writer's priority as a small number, and its **tags**: "Answer first", "Waiting on you", "Being worked on", or any other word the writer uses. In Topics, rows show the kind and tags under the title where there's room, and tiles leave them out.
 
+**Done and left.** A deck is done once "Deck's done" was pressed and nothing in it is owed; its row says Done. If a card becomes owed again after that (an Undo, or a writer's second try), the row says "1 left" again, and the deck counts as not finished until it's answered: in Suggested order, in a stack, and for the topic and pack. "Sent back" (Replan) stands whatever is owed. Cards not answered are "left" everywhere ("46 cards left" on the first screen, "Not answered" on the deck's grid); "waiting" only ever means something not sent yet, apart from the writer's tag "Waiting on you".
+
 A deck's kind is what the writer says, or else what its cards are: all reports is a report, mostly boards is a board, anything else is questions.
 
 **Archived.** A deck the writer archives, or they archive from its overview ("Archive this deck"), leaves the list for a closed Archived section at the end of the page, with a count. Opening the section lists them, each with Bring back. An archived deck can still be opened and answered. What it owes leaves every count: the pack, the first screen and the number on the icon. Whichever said it last, the writer or the phone, stands. Nothing is ever deleted.
@@ -189,7 +191,7 @@ A pinch on a card puts the deck into a small floating card in a corner and goes 
 
 Undo, Notes and Skip. They act as the finger lifts.
 
-- **Undo:** brings back the last card, from the way it left, and takes back its answer. Also takes back a skip.
+- **Undo:** brings back the last card, from the way it left, and takes back its answer. Also takes back a skip. In a deck reached by following a link, it only takes back what was done there since, never an answer from an earlier visit, which may be days old and on a card not on screen. The same can be had everywhere, switched off for now: `localStorage['riffle-undo-reach'] = 'visit'`.
 - **Notes:** a scratchpad for the whole deck, for thoughts that don't fit the card on screen. It opens as a full sheet. Dragging it down, or tapping its head, returns to the same card. It's sent with the deck, and the same pad is on the end screen.
 - **Skip:** sends the card to the bottom of the deck.
 - A pinch on the card puts the deck in the mini player. See The mini player.
@@ -225,7 +227,7 @@ A card or a part can carry sound clips beside its pictures and films, and a boar
 
 **On a card's back, and in a part,** each clip is a row: a round play button, its name, a bar that fills as it plays, and the time beside it. A tap plays it, another pauses it, and one more carries on from there. Tapping a different clip stops the first. Flipping the card back, going to another card, opening the overview or putting the app away stops it. A card's face says how many sounds are on its back, as it does for pictures and videos.
 
-**On a board,** a sound is a tile like any other, with a play button where a picture would be, or over its picture if it has one. A tap plays it there, without leaving the grid: the button turns to pause, and a bar along the tile's foot fills. Its tick and its label select it, as on any tile. A strip above "Back to the card" names the one last tapped, with its text if it has any, and has a speech bubble for a comment on that item alone, kept and sent like any item's comment. Looking at a picture, or leaving the board, stops the sound. Sounds aren't part of the full-screen look, so next and previous there go between the pictures and films.
+**On a board,** a sound is a tile like any other, with a play button where a picture would be, or over its picture if it has one. A tap plays it there, without leaving the grid: the button turns to pause, and a bar along the tile's foot fills. Its tick and its label pick it, as on any tile. A strip above "Back to the card" names the one last tapped, with its text if it has any, and has a speech bubble for a comment on that item alone, kept and sent like any item's comment. Looking at a picture, or leaving the board, stops the sound. Sounds aren't part of the full-screen look, so next and previous there go between the pictures and films.
 
 **When no sound comes.** An iPhone can leave a Home Screen app silent after it's been reopened ([WebKit bug 291892](https://bugs.webkit.org/show_bug.cgi?id=291892)). A page can't hear itself, so two signs are watched for: the phone refusing to play, and a clip that's meant to be playing while its clock stands still. Either puts "No sound played" on its row or its tile. A refusal says so at once. A still clock says so after a second and a half, and keeps trying for a few seconds more, because sound can be slow to start, through headphones that were asleep for one: if the clock then moves, the words go and the clip plays on, and if it never does, the clip stops. A tap on one that says so tries again with a fresh player. Nothing else about the card is touched. A clip that's silent while its clock runs can't be told from one that's heard.
 
@@ -264,7 +266,7 @@ The writer gets the card, the part, the picture or film, the time and frame, the
 
 A card in parts shows the titles of its first four parts on its face, each with its mark once it has one, and a dot if it has words. "Tap to read the 3 parts" says how many. A tap turns it over, like any card with more on its back, even mid-comment, and its back holds everything: the card's own words, details, pictures, films and sounds on top, then how many parts have been answered, then each part as a section with its title, words, pictures, films and sounds. While a card in parts is turned over, its back takes the room the buttons had. A tap on a part's title on the face turns it over at that part.
 
-Under each part are three marks in the card's own words (Good, Problem, Huh? on a report), and a speech bubble. A mark goes as soon as it's tapped, and tapping it again takes it back. The bubble opens a comment box under that part only, with its own photo button. Its words go a few seconds after typing stops, and its new pictures when it closes, with Done or a drag down. A part's words keep the same protection as a comment. The card's own swipe and comment are separate from all of this. A second try of the card clears its parts' marks, and keeps their words.
+Under each part are three marks in the card's own words (Good, Problem, Decent on a report), and a speech bubble. A mark goes as soon as it's tapped, and tapping it again takes it back. The bubble opens a comment box under that part only, with its own photo button. Its words go a few seconds after typing stops, and its new pictures when it closes, with Done or a drag down. A part's words keep the same protection as a comment. The card's own swipe and comment are separate from all of this. A second try of the card clears its parts' marks, and keeps their words.
 
 ## Looking at pictures
 
@@ -274,11 +276,11 @@ A tap on an option's picture opens it, and a tap anywhere else on the option tic
 
 ## Boards
 
-For picking from many pictures, where one big picture of them all can't be seen well enough. Up and down are swipes, so a long grid can't scroll on the card itself. So the card shows a few small pictures, with the ticked ones first, and a tap opens the board's own screen: a scrolling grid, three across, with each tile's picture, label and tick. The count of selected ones shows at the top.
+For picking from many pictures, where one big picture of them all can't be seen well enough. Up and down are swipes, so a long grid can't scroll on the card itself. So the card shows a few small pictures, with the ticked ones first, and a tap opens the board's own screen: a scrolling grid, three across, with each tile's picture, label and tick. How many are picked shows at the top ("2 picked"), and the full-screen look says Pick or Picked, the same word as "Picked:" on the card.
 
 - A tile shows its thumbnail whole and never crops it, on the card too. An item can bring its own thumbnail, for pictures that don't read when shrunk whole. Looking at it still opens the whole picture.
 - Tapping a tile's picture looks at it, with next, previous and a tick there too, and a speech bubble beside Draw for a comment on that item alone. The bubble opens a box under the picture with the keyboard up; its words are kept as they're typed and go when it closes (Done, a drag down, the next item, or leaving). The bubble has a dot once the item has words, and so does its tile on the grid. It's sent like a part's comment, apart from the card's own comment and swipe.
-- Tapping its tick or label selects it. Any number can be selected.
+- Tapping its tick or label picks it. Any number can be picked.
 - A swipe on the card means done with these picks. It works as on an option card, and the answer carries `selected`.
 - Ticks are saved as they're made, so a half-finished selection survives the app being closed. They also go out as a draft a few seconds later, like comments. Plain ticks in the Feel test stay on the phone.
 - Opening the board from the comment box keeps what's typed, so they can look while writing.

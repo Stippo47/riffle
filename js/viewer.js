@@ -193,12 +193,12 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
     const it = items[i];
     $('.viewer-words b').textContent = it.label || '';
     $('.viewer-words small').textContent = it.text || '';
-    const parts = [many ? `${i + 1} of ${items.length}` : '', picks && picks.count() ? `${picks.count()} selected` : ''];
+    const parts = [many ? `${i + 1} of ${items.length}` : '', picks && picks.count() ? `${picks.count()} picked` : ''];
     $('.viewer-words span').textContent = parts.filter(Boolean).join(' · ');
     if (picks) {
       const on = picks.isOn(i);
       $('.viewer-tick').classList.toggle('on', on);
-      $('.viewer-tick span').textContent = on ? 'Selected' : 'Select';
+      $('.viewer-tick span').textContent = on ? 'Picked' : 'Pick';
     }
     if (many) {
       $('.viewer-prev').disabled = i === 0;
