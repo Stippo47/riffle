@@ -252,7 +252,7 @@ if have_ffmpeg:
     code, out = run('deck', str(work / 'd/films.json'), '--pack', 'proj', '--quiet')
     sentf = json.loads((clone / 'packs/proj/decks/films.json').read_text(encoding='utf-8'))['cards']
     vids = sentf[0]['videos']
-    ok(code == 0 and vids[0] == {'src': 'img/films-walk.mp4', 'poster': 'img/poster/films-walk.jpg'}, 'a film comes in with a poster made from it', (out, vids))
+    ok(code == 0 and vids[0] == {'src': 'img/films-walk.mp4', 'poster': 'img/poster/films-walk.jpg', 'fps': 24}, 'a film comes in with a poster made from it, and its frame rate, for stepping it frame by frame', (out, vids))
     ok((clone / 'packs/proj/img/films-walk.mp4').read_bytes() == (work / 'd/walk.mp4').read_bytes(), 'a small mp4 is left as it is')
     turned = clone / 'packs/proj/img/films-turn.mp4'
     ok(vids[1]['src'] == 'img/films-turn.mp4' and turned.exists() and turned.stat().st_size <= 2_000_000, 'another kind of film becomes a small mp4', vids[1])
@@ -264,6 +264,7 @@ if have_ffmpeg:
         ok(im.size == (480, 270), 'the poster is a full frame of the film', im.size)
     items_f = sentf[1]['items']
     ok(items_f[0]['video'] == 'img/films-walk.mp4' and items_f[0]['image'] == 'img/poster/films-walk.jpg' and items_f[0]['thumb'].startswith('img/thumb/'), 'on a board, a film gets its poster as its picture, and a thumbnail', items_f[0])
+    ok(items_f[0].get('fps') == 24 and 'fps' not in items_f[1], 'and its frame rate beside it', items_f)
     ok('1 of them films' in out, 'and riffle deck says how many are films', out)
     code, out = run('deck', str(clone / 'packs/proj/decks/films.json'), '--pack', 'proj', '--quiet')
     ok(code == 0 and 'Nothing changed' in out, 'sending it again from where it is changes nothing', out)
@@ -473,6 +474,101 @@ phone_sends('2026-11-02T12-01-30-000Z-pic.json',
             {'eid': 'p1', 'at': '2026-11-02T12:01:30.000Z', 'type': 'notes', 'text': 'With a picture', 'images': ['answers/img/nope.jpg']})
 code, out = run('answers', '--pack', 'proj')
 ok('answers/img/nope.jpg (still uploading)' in out, 'pictures are listed, and one not arrived yet says so', out)
+
+print('Pins')
+code, out = run('check', str(write('d/sides.json', deck({**good_card('sd'), 'videos': [{'src': 'walk.mp4', 'sides': ['Before', 'After']}]}))), '--pack', 'proj')
+ok(code == 0 or not have_ffmpeg, 'a film can name its views from left to right', out)
+code, out = run('check', str(write('d/badsides.json', deck({**good_card('sd'), 'videos': [{'src': 'walk.mp4', 'sides': 'Before'}]}))), '--pack', 'proj')
+ok(code == 1 and '"sides" on a film names its views' in out, 'and a wrong one is refused', out)
+if have_ffmpeg:
+    def utc(shift=0):
+        return time.strftime('%Y-%m-%dT%H:%M:%S.000Z', time.gmtime(time.time() + shift))
+
+    def pin(eid, card, n, on, x, y, **more):
+        return {'eid': eid, 'deck': 'films', 'at': utc(), 'type': 'pin', 'card': card, 'cardVersion': 1, 'title': 'A title', 'kind': 'report', 'pin': f'pin-{eid}', 'n': n, 'on': on, 'x': x, 'y': y, 'note': '', **more}
+    # Frame 27 of the 24-a-second test film, as the phone sends it: the middle of that frame.
+    walk_pin = pin('n1', 'films', 1, 'img/films-walk.mp4', 0.3, 0.6, w=480, h=270, film=True, t=round(26.5 / 24, 4), frame=27, fps=24, frames=48, note='The count says 26 [A title](riffle:proj/first/a)')
+    time.sleep(1.2)
+    phone_sends('2026-11-02T12-02-00-000Z-pin.json',
+                walk_pin,
+                pin('n2', 'films', 2, 'img/films-walk.mp4', 0.9, 0.5, film=True, t=0.3),
+                pin('n3', 'films', 3, 'img/films-my-poster.jpg', 0.25, 0.75),
+                pin('n4', 'clips', 1, 'img/films-walk.mp4', 0.5, 0.5, part='w', partTitle='Walk', item=True, film=True, t=1.99, note='At the very end'),
+                pin('n5', 'films', 4, 'img/films-walk.mp4', 0.1, 0.1, film=True, t=0.5, note='Dropped by mistake'),
+                {**pin('n6', 'films', 4, 'img/films-walk.mp4', 0.1, 0.1, film=True, t=0.5, note='Dropped by mistake', removed=True), 'pin': 'pin-n5'})
+    code, out = run('answers', '--pack', 'proj')
+    ok('films (A title): not swiped yet. On its pins:' in out, 'pins show under their card', out)
+    ok('pin 1 on film img/films-walk.mp4 at 0:01.10, frame 27 of 48, 30% across, 60% down: "The count says 26 [A title → A project › First › A deck › A title]"' in out, 'each with its film, moment, frame, spot and words', out)
+    ok('pin 2 on film img/films-walk.mp4 at 0:00.30, 90% across, 50% down: no words' in out and 'pin 3 on picture img/films-my-poster.jpg, 25% across, 75% down: no words' in out, 'one with no words, and one on a still picture', out)
+    ok('pin 1 on item w (Walk), film img/films-walk.mp4 at 0:01.99' in out, "one on a board's item names the item", out)
+    ok('Dropped by mistake' not in out, 'one taken off before it was read is never mentioned', out)
+    ok('riffle pins --pack proj --deck films --out <folder>' in out, 'and it says how to see them', out)
+    code, out = run('redeal', '--pack', 'proj')
+    ok('Spots they pinned' in out and 'proj films films pin 1 on film img/films-walk.mp4' in out, 'redeal lists pinned spots', out)
+    code, out = run('pins', '--pack', 'proj', '--deck', 'films')
+    ok(code == 0 and '1. proj/films/films (A title), pin 1' in out and 'frame 27 of 48' in out and 'in the left half' in out and 'pixel 144, 162 of 480x270' in out, 'riffle pins lists them in words, with the pixel and which half', out)
+    ok('2. proj/films/films (A title), pin 2' in out and 'frame 8 of 48' in out and 'in the right half' in out, 'and works the frame out from the time when the phone had no frame rate', out)
+    ok('proj/films/clips (' in out and '), item w (Walk), pin 1' in out and 'frame 48 of 48' in out and 'Dropped by mistake' not in out, "an item's too, and never one taken off", out[-700:])
+    ok('Add --out <folder>' in out, 'and says how to get pictures', out)
+    spots = work / 'spots'
+    code, out = run('pins', '--pack', 'proj', '--deck', 'films', '--out', str(spots))
+    made_pics = sorted(p.name for p in spots.iterdir())
+    ok(code == 0 and made_pics == ['01-films-films-pin1-close.jpg', '01-films-films-pin1-frame.jpg', '02-films-films-pin2-close.jpg', '02-films-films-pin2-frame.jpg', '03-films-films-pin3-close.jpg', '03-films-films-pin3-frame.jpg', '04-films-clips-w-pin1-close.jpg', '04-films-clips-w-pin1-frame.jpg', 'pins.txt'], 'with --out, each spot becomes two pictures, and a list', (out, made_pics))
+    listing = (spots / 'pins.txt').read_text(encoding='utf-8')
+    ok('01-films-films-pin1-frame.jpg' in listing and 'note: "The count says 26' in listing and 'whole picture, ringed' in listing, 'the list names each picture beside its note', listing)
+
+    def frame_of(n, name):
+        subprocess.run(['ffmpeg', '-y', '-v', 'error', '-i', str(work / 'd/walk.mp4'), '-vf', f'select=eq(n\\,{n})', '-frames:v', '1', str(work / name)], check=True)
+        return Image.open(work / name).convert('RGB')
+
+    def apart(a, b, box):
+        """How different two pictures are inside a box, on average, per channel."""
+        pa, pb = a.crop(box).tobytes(), b.crop(box).tobytes()
+        return sum(abs(x - y) for x, y in zip(pa, pb)) / len(pa)
+
+    def changed(a, b, box):
+        """How many pixels inside a box are plainly different: a digit that changed, not a JPEG's grain."""
+        pa, pb = a.crop(box).tobytes(), b.crop(box).tobytes()
+        return sum(1 for i in range(0, len(pa), 3) if max(abs(pa[i + k] - pb[i + k]) for k in range(3)) > 64)
+    with Image.open(spots / '01-films-films-pin1-frame.jpg') as im:
+        ringed = im.convert('RGB')
+    count_box = (0, 0, 100, 40)  # the test film writes its time and frame number in this corner, clear of the ring
+    diffs = {n: changed(ringed, frame_of(n, f'ref-{n}.png'), count_box) for n in (25, 26, 27)}
+    ok(ringed.size == (480, 270) and diffs[26] <= 2 and diffs[25] > 10 and diffs[27] > 10, 'the frame is the very frame that was on their screen, not the one before or after', diffs)
+    cx, cy, radius = 0.3 * 480, 0.6 * 270, 0.05 * 270
+    red = lambda px: px[0] > 180 and px[1] < 120 and px[2] < 120
+    on_ring = sum(red(ringed.getpixel((round(cx + radius * dx), round(cy + radius * dy)))) for dx, dy in ((1, 0), (0, 1), (0.7071, 0.7071), (0.7071, -0.7071)))
+    ok(on_ring >= 3, 'with a red ring around the spot', on_ring)
+    ok(apart(ringed, frame_of(26, 'ref-26.png'), (int(cx) - 3, int(cy) - 3, int(cx) + 3, int(cy) + 3)) < 12, 'which leaves the spot itself untouched')
+    with Image.open(spots / '01-films-films-pin1-close.jpg') as im:
+        ok(im.size == (576, 576), 'the close-up is a square around the spot, enlarged', im.size)
+    with Image.open(spots / '03-films-films-pin3-frame.jpg') as im:
+        still = im.convert('RGB')
+        ok(still.size == (480, 270) and red(still.getpixel((round(0.25 * 480 + 0.05 * 270), round(0.75 * 270)))), 'a pin on a still picture is ringed on the picture', still.size)
+    # The film is replaced after they pinned it: the pictures still come from the one they saw.
+    time.sleep(1.2)
+    subprocess.run(['ffmpeg', '-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=blue:size=480x270:rate=24', '-t', '2', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', str(work / 'd/walk.mp4')], check=True)
+    code, out = run('deck', str(work / 'd/films.json'), '--pack', 'proj', '--quiet')
+    code, out = run('pins', '--pack', 'proj', '--deck', 'films', '--card', 'films', '--out', str(work / 'spots2'))
+    with Image.open(work / 'spots2' / '01-films-films-pin1-frame.jpg') as im:
+        kept = im.convert('RGB')
+    with Image.open(work / 'ref-26.png') as im:
+        ok('has been replaced since they pinned it' in out and changed(kept, im.convert('RGB'), count_box) <= 2, 'a film replaced since is shown as it was when they pinned it', out)
+    ok('clips' not in out, '--card keeps to one card', out)
+    # A second try of the card: its pins were about the version before.
+    code, out = run('second-try', 'proj', 'films', 'films', '--why', 'A new take.', '--quiet')
+    code, out = run('pins', '--pack', 'proj', '--deck', 'films')
+    ok('films (A title), pin' not in out and '3 more are on an earlier version of their cards: --all shows them.' in out, 'pins made on an earlier version of a card are left out', out)
+    code, out = run('pins', '--pack', 'proj', '--deck', 'films', '--all')
+    ok('[made on version 1 of this card, which is now version 2]' in out, 'unless asked for', out)
+    code, out = run('answers', '--pack', 'proj', '--mark-read')
+    phone_sends('2026-11-02T12-02-30-000Z-pin.json', {**walk_pin, 'eid': 'n7', 'at': utc(), 'removed': True})
+    code, out = run('answers', '--pack', 'proj')
+    ok('pin 1: taken off again' in out, 'a pin taken off after it was read says so', out)
+    code, out = run('pins', '--pack', 'nope')
+    ok(code == 1 and 'No pack called nope' in out, 'a pack that is not there says so', out)
+else:
+    print('  (ffmpeg is not installed here, so the pin tests were skipped)')
 
 print('Dealing back')
 code, out = run('redeal', '--pack', 'proj')

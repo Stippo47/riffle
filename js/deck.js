@@ -1383,7 +1383,7 @@ export class DeckView {
       list: i => { const w = where(i); return (this.s.pins[cardId] || []).filter(p => !p.removed && there(p, w)); },
       add: (i, spot) => {
         const w = where(i);
-        const n = all().filter(p => there(p, w)).reduce((m, p) => Math.max(m, p.n || 0), 0) + 1;
+        const n = all().reduce((m, p) => Math.max(m, p.n || 0), 0) + 1; // numbered across the card, so "pin 3" means one spot
         const pin = { id: newId(), n, ...w, film: spot.t !== undefined, ...spot, note: '', at: Date.now(), v: (card && card.version) || 1, sent: '' };
         all().push(pin);
         kept();

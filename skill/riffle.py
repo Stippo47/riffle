@@ -4,6 +4,7 @@
 Everything goes through a local clone of the private data repo, with plain git. See SKILL.md.
 """
 import argparse
+import bisect
 import getpass
 import json
 import os
@@ -37,9 +38,9 @@ DECK_KINDS = {'report', 'questions', 'board'}
 TAG_WORDS = {'working': 'being worked on', 'first': 'answer first', 'waiting': 'waiting on you'}
 MINE_KIND_WORDS = {'idea': 'Idea', 'picture': 'Picture', 'link': 'Web link', 'card': 'Riffle card'}
 OPTION_FIELDS = {'id', 'label', 'text', 'image'}
-ITEM_FIELDS = {'id', 'label', 'text', 'image', 'thumb', 'video', 'audio'}
+ITEM_FIELDS = {'id', 'label', 'text', 'image', 'thumb', 'video', 'audio', 'fps'}
 PART_FIELDS = {'id', 'title', 'text', 'images', 'videos', 'audio'}
-VIDEO_FIELDS = {'src', 'poster'}
+VIDEO_FIELDS = {'src', 'poster', 'fps', 'sides'}
 AUDIO_FIELDS = {'src', 'label'}
 ITEM_LABEL_LIMIT = 36
 PART_TITLE_LIMIT = 40  # one line on the card's face
@@ -306,6 +307,9 @@ def check_films(name, where, films, errors, warnings):
         if isinstance(v, dict):
             for extra in sorted(set(v) - VIDEO_FIELDS):
                 warnings.append(f'{name}: the app ignores "{extra}" on a film. Is it a typo?')
+            sides = v.get('sides')
+            if sides is not None and not (isinstance(sides, list) and len(sides) >= 2 and all(isinstance(x, str) and x for x in sides)):
+                errors.append(f'{name}: {where}"sides" on a film names its views from left to right, like ["Before", "After"]')
         ext = pathlib.Path(f['src']).suffix.lower()
         if ext not in VIDEO_TYPES:
             errors.append(f'{name}: {f["src"]} is not a film the app can play. Use an mp4')
@@ -626,7 +630,7 @@ def probe(path):
     ff = shutil.which('ffprobe')
     if not ff:
         return None
-    r = subprocess.run([ff, '-v', 'error', '-show_entries', 'stream=codec_type,codec_name,width,height:format=duration', '-of', 'json', str(path)], capture_output=True, text=True, encoding='utf-8', errors='replace')
+    r = subprocess.run([ff, '-v', 'error', '-show_entries', 'stream=codec_type,codec_name,width,height,avg_frame_rate:format=duration', '-of', 'json', str(path)], capture_output=True, text=True, encoding='utf-8', errors='replace')
     try:
         info = json.loads(r.stdout)
     except ValueError:
@@ -638,7 +642,12 @@ def probe(path):
         length = float(info.get('format', {}).get('duration') or 0)
     except ValueError:
         length = 0
-    return {'codec': video.get('codec_name'), 'width': video.get('width'), 'height': video.get('height'), 'duration': length}
+    try:
+        top, _, under = str(video.get('avg_frame_rate') or '').partition('/')
+        rate = float(top) / float(under or 1)
+    except (ValueError, ZeroDivisionError):
+        rate = 0
+    return {'codec': video.get('codec_name'), 'width': video.get('width'), 'height': video.get('height'), 'duration': length, 'fps': round(rate, 3) if 1 <= rate <= 240 else 0}
 
 
 def make_film(source, target):
@@ -777,6 +786,10 @@ def bring_images(cards, base, pack, deck_id):
                 f['poster'] = f'img/poster/{poster.name}'
             else:
                 print(f'  warning: no poster for {f["src"]}, since ffmpeg is not here. The phone shows its first frame instead.')
+        # Its frame rate, read from the film itself, so the phone can step it frame by frame from the first tap.
+        rate = (probe(DATA / 'packs' / pack / f['src']) or {}).get('fps')
+        if rate:
+            f['fps'] = int(rate) if float(rate).is_integer() else rate
         return f
 
     def bring_sound(entry, heard):
@@ -813,6 +826,8 @@ def bring_images(cards, base, pack, deck_id):
             if it.get('video'):
                 f = bring_film(it['video'])
                 it['video'] = f['src']
+                if f.get('fps'):
+                    it['fps'] = f['fps']
                 if not it.get('image') and f.get('poster'):
                     it['image'] = f['poster']  # its poster is the picture a board shows and the pen draws on
             if it.get('audio'):
@@ -1025,7 +1040,7 @@ def summarise(events):
     decks, thoughts, thought_drafts = {}, {}, {}
 
     def deck(e):
-        return decks.setdefault((e.get('pack'), e.get('deck')), {'answers': {}, 'drafts': {}, 'parts': {}, 'notes': None, 'verdict': None, 'earlier': [], 'resets': [], 'topic': e.get('topic')})
+        return decks.setdefault((e.get('pack'), e.get('deck')), {'answers': {}, 'drafts': {}, 'parts': {}, 'pins': {}, 'notes': None, 'verdict': None, 'earlier': [], 'resets': [], 'topic': e.get('topic')})
     for e in events:
         t = e.get('type')
         if t == 'answer' and e.get('eid') not in undone:
@@ -1034,6 +1049,8 @@ def summarise(events):
             d['drafts'].pop(e['card'], None)
         elif t == 'part':
             deck(e)['parts'].setdefault(e.get('card'), {})[e.get('part')] = e
+        elif t == 'pin':  # the latest for a pin stands, one taken off included. Starting a deck over leaves them: they were said
+            deck(e)['pins'].setdefault(e.get('card'), {})[e.get('pin')] = e
         elif t == 'draft' and e.get('thought'):
             thought_drafts[e.get('pack')] = e
         elif t == 'draft':
@@ -1126,6 +1143,41 @@ def part_line(e, card):
     return line
 
 
+def moment(t):
+    """A time in a film, to the hundredth: 0:01.10."""
+    t = float(t or 0)
+    return f'{int(t // 60)}:{t % 60:05.2f}'
+
+
+def pin_where(e):
+    """Where a pin is, in words: which part or item, which picture or film and when, and where on it."""
+    bits = []
+    if e.get('part'):
+        bits.append(f'{"item" if e.get("item") else "part"} {e["part"]} ({e.get("partTitle") or e["part"]})')
+    if e.get('film'):
+        frame = f', frame {e["frame"]} of {e["frames"]}' if e.get('frame') and e.get('frames') else ''
+        bits.append(f'film {e.get("on")} at {moment(e.get("t"))}{frame}')
+    else:
+        bits.append(f'picture {e.get("on")}')
+    x, y = float(e.get('x') or 0), float(e.get('y') or 0)
+    bits.append(f'{x * 100:.0f}% across, {y * 100:.0f}% down')
+    return ', '.join(bits)
+
+
+def pin_line(e):
+    if e.get('removed'):
+        return f'      pin {e.get("n")}: taken off again ({pin_where(e)})'
+    said = f'"{readable(e["note"])}"' if e.get('note') else 'no words'
+    return f'      pin {e.get("n")} on {pin_where(e)}: {said}'
+
+
+def pin_order(card):
+    """A key that puts pins in the card's own order: those on its own pictures first, then part by part, each
+    by its number, which is the order they were dropped in."""
+    order = [p.get('id') for p in [*((card or {}).get('parts') or []), *((card or {}).get('items') or []), *((card or {}).get('options') or [])]]
+    return lambda e: (order.index(e.get('part')) + 1 if e.get('part') in order else 0, e.get('n') or 0, str(e.get('at')))
+
+
 def answer_line(a, card):
     title = a.get('title') or (card or {}).get('title') or a['card']
     parts = [word_for(a, card)]
@@ -1155,6 +1207,9 @@ def cmd_answers(a):
         print(json.dumps({'events': shown}, ensure_ascii=False, indent=1))
     else:
         touched = {}
+        pinned = set()
+        files_read = {p: set(v.get('files', [])) for p, v in state.get('packs', {}).items()}
+        pins_read = {(e.get('pack'), e.get('deck'), e.get('pin')) for e in events if e.get('type') == 'pin' and e['_file'] in files_read.get(e.get('pack'), ())}
         for e in shown:
             touched.setdefault((e.get('pack'), e.get('deck')), set()).add(e.get('card'))
         if not shown:
@@ -1178,13 +1233,20 @@ def cmd_answers(a):
                     if dr.get('images'):
                         print(f'      pictures: {pictures(dr)}')
                 parts_here = [p for p in d['parts'].get(card_id, {}).values() if p in shown]
-                if parts_here:
+                # One they took off again is only worth a line if you had already read it.
+                pins_here = [p for p in d['pins'].get(card_id, {}).values() if p in shown and (not p.get('removed') or (pack, deck_id, p.get('pin')) in pins_read)]
+                if parts_here or pins_here:
                     if card_id not in d['answers'] and card_id not in d['drafts']:
-                        which = 'items' if (card or {}).get('kind') == 'board' or parts_here[0].get('item') else 'parts'
-                        print(f'  {card_id} ({(card or {}).get("title") or parts_here[0].get("title") or card_id}): not swiped yet. On its {which}:')
+                        which = 'pins' if not parts_here else 'items' if (card or {}).get('kind') == 'board' or parts_here[0].get('item') else 'parts'
+                        first = (parts_here or pins_here)[0]
+                        print(f'  {card_id} ({(card or {}).get("title") or first.get("title") or card_id}): not swiped yet. On its {which}:')
                     order = [p.get('id') for p in [*((card or {}).get('parts') or []), *((card or {}).get('items') or [])]]
                     for p in sorted(parts_here, key=lambda e: order.index(e.get('part')) if e.get('part') in order else 99):
                         print(part_line(p, card))
+                    for p in sorted(pins_here, key=pin_order(card)):
+                        print(pin_line(p))
+                        if not p.get('removed'):
+                            pinned.add((pack, deck_id))
             if d['notes'] and d['notes'] in shown:
                 print(f'  Deck notes: "{readable(d["notes"].get("text", ""))}"')
                 if d['notes'].get('images'):
@@ -1204,6 +1266,8 @@ def cmd_answers(a):
                 print(f'  DEALT IN: start now on what is answered ({w.get("answered")} of {w.get("total")}), the deck is not finished')
             if d.get('archive') and d['archive'] in shown:
                 print(f'  They {"archived this deck" if d["archive"].get("archived") else "brought this deck back from the archive"}.')
+            if (pack, deck_id) in pinned:
+                print(f'  Pins point at a spot. To see each one, its frame and a close-up: riffle pins --pack {pack} --deck {deck_id} --out <folder>')
         for pack, items in sorted(thoughts.items(), key=lambda kv: str(kv[0])):
             new = [t for t in items if t in shown]
             if new:
@@ -1239,12 +1303,213 @@ def cmd_answers(a):
         publish('Answers read', DATA / 'read.json')
 
 
+# ---------- pins: the spot they pointed at, as pictures to look at
+
+PIN_RING = 0.05      # the ring's radius, as a share of the picture's shorter side
+PIN_CLOSE_UP = 1 / 3  # how much of the shorter side the close-up takes in
+PIN_CLOSE_UP_SIDE = 720  # and how big it's shown, at most six times its size
+
+
+def frame_times(path):
+    """When each frame of a film starts showing, in order, by ffprobe. Empty if it can't tell."""
+    ff = shutil.which('ffprobe')
+    if not ff:
+        return []
+    r = subprocess.run([ff, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'packet=pts_time', '-of', 'csv=p=0', str(path)], capture_output=True, text=True, encoding='utf-8', errors='replace')
+    times = []
+    for line in r.stdout.split():
+        try:
+            times.append(float(line.strip(',')))
+        except ValueError:
+            pass
+    return sorted(times)
+
+
+def picture_size(path):
+    """A picture's or a film's width and height, by ffprobe. None if it can't tell."""
+    ff = shutil.which('ffprobe')
+    if not ff:
+        return None
+    r = subprocess.run([ff, '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', str(path)], capture_output=True, text=True, encoding='utf-8', errors='replace')
+    try:
+        w, h = (int(x) for x in r.stdout.split()[0].strip(',').split(',')[:2])
+        return w, h
+    except (ValueError, IndexError):
+        return None
+
+
+def as_it_was(rel, when):
+    """A file in the clone as it was at a time, if it has been replaced since: a temporary copy to delete
+    after, and the commit it's from. (None, None) if it's still the same file, or was never there."""
+    latest = git('log', '-1', '--format=%H', '--', rel, check=False).stdout.strip()
+    when = re.sub(r'\.\d+', '', str(when or ''))  # git reads a time to the second
+    then = git('log', '-1', '--format=%H', f'--until={when}', '--', rel, check=False).stdout.strip() if when else ''
+    if not latest or not then or latest == then:
+        return None, None
+    r = subprocess.run(['git', 'show', f'{then}:{rel}'], cwd=DATA, capture_output=True)
+    if r.returncode or not r.stdout:
+        return None, None
+    with tempfile.NamedTemporaryFile('wb', suffix=pathlib.Path(rel).suffix, delete=False) as f:
+        f.write(r.stdout)
+    return pathlib.Path(f.name), then
+
+
+def which_side(x, sides=None):
+    """Which side of the picture a spot is in: a half, or one of the views a film names from left to right."""
+    if sides:
+        n = min(len(sides) - 1, int(x * len(sides)))
+        return f'in "{sides[n]}", view {n + 1} of {len(sides)} from the left'
+    return 'in the left half' if x < 0.5 else 'in the right half'
+
+
+def film_entry(card, e):
+    """The film a pin is on, as its card has it, for its sides. None if it isn't there now."""
+    holders = [card or {}]
+    if e.get('part') and not e.get('item'):
+        holders = [p for p in (card or {}).get('parts') or [] if p.get('id') == e['part']]
+    for h in holders:
+        for v in h.get('videos') or []:
+            f = film_of(v)
+            if f and f['src'] == e.get('on'):
+                return f
+    return None
+
+
+def pin_pictures(source, out_frame, out_crop, x, y, frame=None):
+    """Writes the whole picture with a ring on the spot, and a close-up around it, with ffmpeg. `frame` picks
+    one frame of a film, counted from 0. Returns the picture's size, or None if ffmpeg couldn't."""
+    size = picture_size(source)
+    ffmpeg = shutil.which('ffmpeg')
+    if not size or not ffmpeg:
+        return None
+    w, h = size
+    cx, cy = x * w, y * h
+    radius = max(14.0, PIN_RING * min(w, h))
+    line = max(2.0, radius * 0.1)
+    edge = max(1.0, line * 0.6)
+    far = f'hypot(X-{cx:.1f},Y-{cy:.1f})'
+    # Red, with a white edge either side so it shows on anything. Inside the ring nothing is touched.
+    colour = lambda red, plane: f"if(between({far},{radius - line:.1f},{radius + line:.1f}),{red},if(between({far},{radius - line - edge:.1f},{radius + line + edge:.1f}),255,{plane}(X,Y)))"
+    ring = f"format=gbrp,geq=r='{colour(255, 'r')}':g='{colour(59, 'g')}':b='{colour(48, 'b')}'"
+    side = int(min(w, h, max(96, min(w, h) * PIN_CLOSE_UP))) // 2 * 2
+    left = int(min(max(cx - side / 2, 0), w - side))
+    top = int(min(max(cy - side / 2, 0), h - side))
+    shown = int(min(PIN_CLOSE_UP_SIDE, side * 6)) // 2 * 2
+    pick = f'select=eq(n\\,{frame}),' if frame is not None else ''
+    graph = f'[0:v]{pick}{ring},split[whole][near];[near]crop={side}:{side}:{left}:{top},scale={shown}:{shown}:flags=lanczos[close]'
+    r = subprocess.run([ffmpeg, '-y', '-v', 'error', '-i', str(source), '-filter_complex', graph,
+                        '-map', '[whole]', '-frames:v', '1', '-q:v', '2', '-pix_fmt', 'yuvj444p', '-update', '1', str(out_frame),
+                        '-map', '[close]', '-frames:v', '1', '-q:v', '2', '-pix_fmt', 'yuvj444p', '-update', '1', str(out_crop)], capture_output=True, text=True, encoding='utf-8', errors='replace')
+    if r.returncode or not pathlib.Path(out_frame).exists():
+        print(f'  warning: ffmpeg could not make the pictures for {pathlib.Path(source).name}: {r.stderr.strip()[:300]}')
+        return None
+    return w, h
+
+
+def cmd_pins(a):
+    """The spots they pinned, each as words and, with --out, as two pictures: the whole picture or the exact
+    frame of the film with a ring on the spot, and a close-up around it."""
+    sync()
+    pack = pack_from(a)
+    if not pack:
+        die('Which pack? Use --pack, or a .riffle-pack file.')
+    need_pack(pack)
+    decks, _, _ = summarise(read_events())
+    files = decks_of(pack)
+    wanted = a.deck or sorted(d for (p, d) in decks if p == pack and d in files)
+    for deck_id in wanted:
+        if deck_id not in files:
+            die(f'No deck {deck_id} in {pack}.')
+    out = pathlib.Path(a.out).resolve() if a.out else None
+    if out:
+        out.mkdir(parents=True, exist_ok=True)
+        if not shutil.which('ffmpeg') or not shutil.which('ffprobe'):
+            die('The pictures need ffmpeg and ffprobe, and they are not installed here. Without --out this lists the pins in words.')
+    safe = lambda text: re.sub(r'[^\w-]+', '-', str(text)).strip('-')
+    lines, count, earlier = [], 0, 0
+    for deck_id in wanted:
+        d = decks.get((pack, deck_id)) or {}
+        cards = {c.get('id'): c for c in files[deck_id].get('cards', [])}
+        for card_id in [c for c in cards if c in d.get('pins', {})] + [c for c in d.get('pins', {}) if c not in cards]:
+            card = cards.get(card_id)
+            if a.card and card_id != a.card:
+                continue
+            for e in sorted(d['pins'][card_id].values(), key=pin_order(card)):
+                if e.get('removed'):
+                    continue
+                old = bool(card) and e.get('cardVersion', 1) < card.get('version', 1)
+                if old and not a.all:
+                    earlier += 1
+                    continue
+                count += 1
+                x, y = float(e.get('x') or 0), float(e.get('y') or 0)
+                title = (card or {}).get('title') or e.get('title') or card_id
+                head = f'{count}. {pack}/{deck_id}/{card_id} ({title})'
+                if e.get('part'):
+                    head += f', {"item" if e.get("item") else "part"} {e["part"]} ({e.get("partTitle") or e["part"]})'
+                head += f', pin {e.get("n")}'
+                if old:
+                    head += f' [made on version {e.get("cardVersion", 1)} of this card, which is now version {card.get("version", 1)}]'
+                if not card:
+                    head += ' [the card is no longer in the deck]'
+                lines.append(head)
+                lines.append(f'   note: "{readable(e["note"])}"' if e.get('note') else '   note: none, only the spot')
+                rel = f'packs/{pack}/{e.get("on")}'
+                source = DATA / rel
+                there = source.exists()
+                copy, commit = as_it_was(rel, e.get('at')) if there else (None, None)
+                film = film_entry(card, e) if e.get('film') else None
+                frame = None
+                what = 'film' if e.get('film') else 'picture'
+                where = f'   {what}: {e.get("on")}'
+                if e.get('film'):
+                    times = frame_times(copy or source) if there else []
+                    if times:
+                        frame = max(0, bisect.bisect_right(times, float(e.get('t') or 0) + 1e-4) - 1)
+                        where += f', at {moment(e.get("t"))}, frame {frame + 1} of {len(times)}'
+                        if e.get('frame') and e['frame'] != frame + 1:
+                            where += f' (their phone counted frame {e["frame"]}; the time is what was on screen)'
+                    else:
+                        where += f', at {moment(e.get("t"))}' + (f', frame {e["frame"]} of {e["frames"]} as their phone counted' if e.get('frame') else '')
+                lines.append(where)
+                if not there:
+                    lines.append('   that file is not in the pack any more, so there is no picture of the spot')
+                if commit:
+                    lines.append(f'   the {what} has been replaced since they pinned it: these pictures are from the one they saw (commit {commit[:8]})')
+                size = picture_size(copy or source) if there else None
+                spot = f'   spot: {x * 100:.0f}% across, {y * 100:.0f}% down'
+                if size:
+                    spot += f' (pixel {round(x * size[0])}, {round(y * size[1])} of {size[0]}x{size[1]})'
+                spot += f', {which_side(x, (film or {}).get("sides"))}'
+                lines.append(spot)
+                if out and there and (frame is not None or not e.get('film')):
+                    stem = safe(f'{count:02d}-{deck_id}-{card_id}-{e.get("part") + "-" if e.get("part") else ""}pin{e.get("n")}')
+                    whole, close = out / f'{stem}-frame.jpg', out / f'{stem}-close.jpg'
+                    if pin_pictures(copy or source, whole, close, x, y, frame):
+                        lines.append(f'   {"frame" if e.get("film") else "whole picture"}, ringed: {whole}')
+                        lines.append(f'   close-up: {close}')
+                if copy:
+                    copy.unlink(missing_ok=True)
+                lines.append('')
+    if not count:
+        lines.append(f'No pins on {", ".join(wanted) if wanted else pack}.')
+    if earlier:
+        lines.append(f'{earlier} more {"is" if earlier == 1 else "are"} on an earlier version of {"its card" if earlier == 1 else "their cards"}: --all shows {"it" if earlier == 1 else "them"}.')
+    if count and not out:
+        lines.append('Add --out <folder> for each spot as pictures: the frame with a ring on it, and a close-up.')
+    text = '\n'.join(lines).rstrip() + '\n'
+    print(text, end='')
+    if out and count:
+        (out / 'pins.txt').write_text(text, encoding='utf-8', newline='\n')
+        print(f'Listed in {out / "pins.txt"}')
+
+
 def cmd_redeal(a):
     """What needs a second look: handled cards answered, and cards sent back."""
     sync()
     decks, _, _ = summarise(read_events())
     pack_filter = pack_from(a)
-    groups = {'Handled, and they answered': [], 'Handled, no answer yet': [], 'Sent to workshop': [], 'Need more context': [], 'Comment only, to read': [], 'Parts with a problem or a question': [], 'Deck sent back to replan': []}
+    groups = {'Handled, and they answered': [], 'Handled, no answer yet': [], 'Sent to workshop': [], 'Need more context': [], 'Comment only, to read': [], 'Parts with a problem or a question': [], 'Spots they pinned (riffle pins shows each one)': [], 'Deck sent back to replan': []}
     for pack in packs():
         if pack_filter and pack != pack_filter:
             continue
@@ -1274,6 +1539,9 @@ def cmd_redeal(a):
                 for p in d.get('parts', {}).get(c['id'], {}).values():
                     if p.get('mark') in ('left', 'down') and p.get('cardVersion', 1) >= c.get('version', 1):
                         groups['Parts with a problem or a question'].append(f'{ref} part {p.get("part")}: {part_word(p)}' + (f', "{p["comment"]}"' if p.get('comment') else ''))
+                for p in sorted(d.get('pins', {}).get(c['id'], {}).values(), key=pin_order(c)):
+                    if not p.get('removed') and p.get('cardVersion', 1) >= c.get('version', 1):
+                        groups['Spots they pinned (riffle pins shows each one)'].append(f'{ref} pin {p.get("n")} on {pin_where(p)}' + (f': "{p["note"]}"' if p.get('note') else ''))
     any_shown = False
     for name, lines in groups.items():
         if lines:
@@ -2109,6 +2377,12 @@ def main():
     s.add_argument('--pack'); s.add_argument('--every-pack', action='store_true'); s.add_argument('--all', action='store_true'); s.add_argument('--json', action='store_true')
     s.add_argument('--mark-read', action='store_true', help='also record them as read')
     s.set_defaults(fn=cmd_answers)
+
+    s = sub.add_parser('pins', help='the spots they pinned on pictures and films: in words, and with --out as the frame and a close-up')
+    s.add_argument('--pack'); s.add_argument('--deck', action='append', help='a deck to look in; every deck in the pack without it'); s.add_argument('--card')
+    s.add_argument('--out', help='a folder for the pictures: each spot ringed on its frame, and a close-up, with pins.txt listing them')
+    s.add_argument('--all', action='store_true', help='pins made on an earlier version of a card too')
+    s.set_defaults(fn=cmd_pins)
 
     s = sub.add_parser('redeal', help='handled cards that were answered, and cards sent back')
     s.add_argument('--pack')
