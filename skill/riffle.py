@@ -2257,7 +2257,8 @@ def wait_status(events, pack, decks, topics, on, is_fresh, deck_files, now_s, qu
     """(wake now?, reasons, decks still needed, seconds of quiet left).
 
     Dealing in wakes at once. Anything else waits until every deck asked for is finished, then until
-    their phone has sent nothing, in any pack, for `quiet` seconds: they've put it down."""
+    their phone has sent nothing in this pack for `quiet` seconds: they've put it down. Answering other packs
+    doesn't hold it back."""
     mine = [e for e in events if e.get('pack') == pack and not e.get('demo')]
     fresh = [e for e in mine if is_fresh(e)]
     in_scope = lambda e: (not decks or e.get('deck') in decks) and (not topics or e.get('topic') in topics)
@@ -2279,7 +2280,7 @@ def wait_status(events, pack, decks, topics, on, is_fresh, deck_files, now_s, qu
     reasons += list(extra)
     if not reasons:
         return False, [], needed, None
-    left = quiet - (now_s - last_activity(events))
+    left = quiet - (now_s - last_activity(mine))
     return left <= 0, reasons, needed, max(0, left)
 
 
