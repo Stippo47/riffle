@@ -168,7 +168,7 @@ riffle started --deck <a> --stop          when you've finished that work
 ```
 
 **When it wakes you.** They decide when you start, not you:
-- **Deck's done** (or **Replan this deck**) on every deck you named, then 15 minutes with nothing from their phone, in any pack, so they've put it down. `--quiet <minutes>` changes the 15. A deck counts as finished only if they finished it after its cards last changed.
+- **Deck's done** (or **Replan this deck**) on every deck you named, then 15 minutes with nothing from their phone in that pack, so they've put it down. Answering other packs doesn't hold it back. `--quiet <minutes>` changes the 15. A deck counts as finished only if they finished it after its cards last changed.
 - **Deal in now**, at a deck's end or in its grid, wakes you at once, past the quiet minutes and past any deck you still need. They use it to let you start on part of a deck.
 - With more than one `--deck`, their phone shows each of those decks' ends saying what else you need, so they know why you haven't started.
 - Thoughts and their own decks belong to the whole pack. A wait narrowed with `--deck` or `--topic` leaves them to the pack's other writers, unless you name them with `--on`.

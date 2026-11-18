@@ -691,6 +691,16 @@ code, out = finished(w)
 ok(code == 0 and "deck third: Deck's done" in out, 'then wakes', out)
 clear_woke()
 
+w = start_wait('--deck', 'third', '--quiet', '0.12')
+phone_sends('2026-11-16T09-00-07-500Z-w07b.json', {'eid': 'w7b', 'at': nowz(1), 'type': 'deck', 'verdict': 'done', 'tally': {'right': 1}, 'answered': 1, 'total': 1, 'deck': 'third'})
+t0, k = time.time(), 0
+while w.poll() is None and time.time() - t0 < 20:  # busy in another pack the whole time
+    phone_sends(f'2026-11-16T09-00-07-{600 + k}Z-w07c.json', {'eid': f'w7c{k}', 'at': nowz(), 'type': 'answer', 'pack': 'elsewhere', 'card': 'a', 'cardVersion': 1, 'title': 'A', 'kind': 'question', 'swipe': 'right', 'stamp': 'GO', 'comment': ''})
+    k += 1
+code, out = finished(w)
+ok(code == 0 and "deck third: Deck's done" in out and time.time() - t0 < 20, 'answering another pack does not hold the quiet minutes back', out)
+clear_woke()
+
 w = start_wait('--deck', 'fourth', '--quiet', '30')
 phone_sends('2026-11-16T09-00-08-000Z-w08.json', {'eid': 'w8', 'at': stamp, 'type': 'wake', 'answered': 1, 'total': 4, 'deck': 'fourth'})
 code, out = finished(w)
