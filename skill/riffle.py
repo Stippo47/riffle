@@ -58,6 +58,8 @@ OLD_WORDS = {'HUH?'}  # words a swipe once had, kept on answers given while it h
 HANDLED_WORDS = {'right': 'FINE', 'left': 'WORKSHOP', 'down': 'IDK', 'up': 'COMMENT'}
 LINK = re.compile(r'\[([^\]\n]{1,120})\]\(riffle:([^)\s]{1,400})\)')  # a link to a pack, deck, card or part
 NAMED_DIRECTION = re.compile(r'\b(swip\w*|throw\w*|drag\w*|flick\w*|hold\w*|pull\w*|push\w*)\s+(it\s+|this\s+|this one\s+|the card\s+|that\s+)?(to the\s+)?(right|left|up|down)\b', re.I)
+# A card asking how something looks: on real decks, these were answered "can't see it" when nothing was shown.
+SHOW_ME = re.compile(r'\b(looks?|looked|looking like)\b.*\?|\bwhich (look|style|colou?r|pose|animation)', re.I)
 LOOKS_LIKE_CODE = re.compile(r'\b[a-z]+_[a-z_]+\b|\b[a-z]+[A-Z][a-zA-Z]+\b|\b\w+\.(java|py|js|json|ya?ml|toml|gradle|kts)\b|\w\(\)|`')
 # A card's face is meant to read at a glance. Past these it gets a warning, even where it fits.
 LIMITS = {'title': 26, 'text': 110, 'why': 300, 'pick': 150}
@@ -502,6 +504,8 @@ def check_cards(cards, base=None, pack=None):
         sounds = [*listed(c), *[it.get('audio') for it in items]]
         for pt in (x for x in parts if isinstance(x, dict)):
             sounds.extend(listed(pt))
+        if not handled and not (films or any(wanted) or sounds) and SHOW_ME.search(f'{c.get("title") or ""} {c.get("text") or ""}'):
+            warnings.append(f'{name}: it asks how something looks, and has nothing to look at. Add a picture or a film, or they may only be able to say they can\'t judge it')
         for clip in (str(s['src']) for s in filter(None, map(sound_of, sounds))):
             if clip.startswith('audio/') and not pack and not (base is not None and (base / clip).exists()):
                 continue  # it may well be in the pack, but no pack was named
@@ -537,6 +541,27 @@ def check_deck(d, base, pack):
         if d['topic'] not in topics:
             errors.append(f'no topic called {d["topic"]} in {pack}. These exist: {", ".join(sorted(topics)) or "none"}. Make it with: riffle topic {d["topic"]} --pack {pack} --title "..."')
     return errors, warnings
+
+
+def spread_address(a, fields, needs):
+    """Lets a command take one address, pack/deck/card, where it took the words apart: the phone's links name
+    things that way. The words apart still work."""
+    first = getattr(a, fields[0], None) or ''
+    if '/' in first:
+        bits = [urllib.parse.unquote(b) for b in first.strip('/').split('/')]
+        if any(getattr(a, f, None) for f in fields[1:]):
+            die(f'Give the address alone, like {"/".join(fields_word(f) for f in fields[:needs])}, or the words apart, not both.')
+        if len(bits) > len(fields):
+            die(f'{first} has more in it than this command takes: {"/".join(fields_word(f) for f in fields)}.')
+        for f, v in zip(fields, bits):
+            setattr(a, f, v or None)
+    missing = [fields_word(f) for f in fields[:needs] if not getattr(a, f, None)]
+    if missing:
+        die(f'Name the {" and the ".join(missing)}: like {"/".join(fields_word(f) for f in fields[:needs])}, or the words apart.')
+
+
+def fields_word(f):
+    return 'pack' if f == 'pack_id' else f
 
 
 def resolve(address):
@@ -1031,13 +1056,17 @@ def read_state():
 
 
 def unread(events, state, pack=None):
+    """What a pack's writers haven't read. Read is kept for the pack, and for single decks, so one session can
+    mark its own decks read without hiding the pack's other decks from the sessions working on them."""
     packs_read = state.get('packs', {})
     out = []
     for e in events:
         if pack and e.get('pack') != pack:
             continue
-        if e['_file'] not in packs_read.get(e.get('pack'), {}).get('files', []):
-            out.append(e)
+        mine = packs_read.get(e.get('pack'), {})
+        if e['_file'] in mine.get('files', []) or e['_file'] in mine.get('decks', {}).get(e.get('deck') or '', {}).get('files', []):
+            continue
+        out.append(e)
     return out
 
 
@@ -1229,6 +1258,8 @@ def cmd_answers(a):
     pack_filter = None if a.every_pack else pack_from(a)
     decks, thoughts, thought_drafts = summarise(events)
     shown = [e for e in events if not pack_filter or e.get('pack') == pack_filter] if a.all else unread(events, state, pack_filter)
+    if a.deck:  # only these decks: thoughts and their own decks belong to the whole pack, so they're left out
+        shown = [e for e in shown if e.get('deck') in a.deck]
     if a.json:
         print(json.dumps({'events': shown}, ensure_ascii=False, indent=1))
     else:
@@ -1245,8 +1276,11 @@ def cmd_answers(a):
             if deck_id is None or not d:
                 continue
             tag = ' [Feel test: test answers, but their words]' if pack == 'feel-test' else ''
-            print(f'\n{pack} / {d.get("topic") or "misc"} / {deck_id}{tag}')
-            for card_id in sorted(c for c in cards if c):
+            file = decks_of(pack).get(deck_id) if pack in packs() else None
+            title = f': "{file.get("title")}"' if file and file.get('title') else ''
+            print(f'\n{pack} / {d.get("topic") or "misc"} / {deck_id}{title}{tag}')
+            in_order = [c.get('id') for c in (file or {}).get('cards', [])]
+            for card_id in sorted((c for c in cards if c), key=lambda c: (in_order.index(c) if c in in_order else len(in_order), c)):
                 card = card_in(pack, deck_id, card_id)
                 if card_id in d['answers']:
                     print(answer_line(d['answers'][card_id], card, d['parts'].get(card_id, {})))
@@ -1292,9 +1326,12 @@ def cmd_answers(a):
                 print(f'  DEALT IN: start now on what is answered ({w.get("answered")} of {w.get("total")}), the deck is not finished')
             if d.get('archive') and d['archive'] in shown:
                 print(f'  They {"archived this deck" if d["archive"].get("archived") else "brought this deck back from the archive"}.')
+            owed_now = [c for c in (file or {}).get('cards', []) if not c.get('handled') and not (d['answers'].get(c['id']) and d['answers'][c['id']].get('cardVersion', 1) >= c.get('version', 1))]
+            if owed_now and len(owed_now) < len((file or {}).get('cards', [])):
+                print(f'  Still owed: {", ".join(c["id"] for c in owed_now)}')
             if (pack, deck_id) in pinned:
                 print(f'  Pins point at a spot. To see each one, its frame and a close-up: riffle pins --pack {pack} --deck {deck_id} --out <folder>')
-        for pack, items in sorted(thoughts.items(), key=lambda kv: str(kv[0])):
+        for pack, items in sorted(thoughts.items(), key=lambda kv: str(kv[0])) if not a.deck else []:
             new = [t for t in items if t in shown]
             if new:
                 print(f'\n{pack}: thoughts')
@@ -1302,7 +1339,7 @@ def cmd_answers(a):
                     print(f'  {t["id"]}: "{readable(t["text"])}"')
                     if t.get('images'):
                         print(f'      pictures: {pictures(t)}')
-        for pack in sorted({e.get('pack') for e in shown if e.get('pack')} | ({pack_filter} if pack_filter else set(packs()))):
+        for pack in sorted({e.get('pack') for e in shown if e.get('pack')} | ({pack_filter} if pack_filter else set(packs()))) if not a.deck else []:
             if pack not in packs():
                 continue
             seen = state.get('packs', {}).get(pack, {}).get('mine', {})
@@ -1316,7 +1353,17 @@ def cmd_answers(a):
         for pack, t in thought_drafts.items():
             if t in shown and t.get('text'):
                 print(f'\n{pack}: a thought still being written: "{readable(t["text"])}"')
-    if a.mark_read:
+    if a.mark_read and a.deck:  # only these decks, so the pack's other sessions still see theirs
+        for pack in ([pack_filter] if pack_filter else sorted({e.get('pack') for e in shown if e.get('pack')})):
+            entry = state.setdefault('packs', {}).setdefault(pack, {'files': []})
+            for deck_id in a.deck:
+                which = entry.setdefault('decks', {}).setdefault(deck_id, {'files': []})
+                which['files'] = sorted(set(which['files']) | {e['_file'] for e in shown if e.get('pack') == pack and e.get('deck') == deck_id})
+                which['at'] = now()
+            entry['at'] = now()  # the phone shows when the writer last read
+        save_json(DATA / 'read.json', state)
+        publish(f'Answers read: {", ".join(a.deck)}', DATA / 'read.json')
+    elif a.mark_read:
         for pack in sorted({e.get('pack') for e in shown if e.get('pack')}):
             entry = state.setdefault('packs', {}).setdefault(pack, {'files': []})
             entry['files'] = sorted(set(entry['files']) | {e['_file'] for e in shown if e.get('pack') == pack})
@@ -1862,12 +1909,79 @@ def cmd_status(a):
             said += [TAG_WORDS.get(t, t) for t in m['tags']]
             if archived_now(pack, deck_id, m, ARCHIVES):
                 said.append('ARCHIVED')
+            if d['verdict'] and d['verdict'].get('verdict') == 'done' and owed:
+                verdict = f', done, but {plural(len(owed), "card")} owed again since (an answer taken back, or a second try)'
             print(f'  {deck.get("topic") or "misc"} / {deck_id}: {len(owed)} of {len(cards) - handled} owed' + (f', {handled} handled' if handled else '') + verdict + f' ({", ".join(said)})')
         if thoughts.get(pack):
             print(f'  {len(thoughts[pack])} thoughts')
         mine = [x for x in mine_decks(pack) if not x.get('removed')]
         if mine:
             print(f'  {plural(len(mine), "deck")} of their own: riffle mine --pack {pack} --every')
+
+
+def cmd_tidy(a):
+    """What's left lying around, to clear up at the end of a session. It only lists: archiving is a separate
+    command, and only for decks that are yours."""
+    sync()
+    events = read_events()
+    state = read_state()
+    decks, thoughts, _ = summarise(events)
+    only = None if a.every_pack else pack_from(a)
+    answered = {}
+    for pack in packs():
+        p = DATA / 'packs' / pack / 'thoughts.json'
+        answered[pack] = set(load_json(p)) if p.exists() else set()
+    last_touch = {}
+    for e in events:
+        if e.get('deck'):
+            last_touch[(e.get('pack'), e.get('deck'))] = e.get('at', '')
+    now_s = seconds(now())
+    anything = False
+    for pack in packs():
+        if only and pack != only:
+            continue
+        order = load_order(pack)
+        finished, again, untouched = [], [], []
+        for deck_id, deck in decks_of(pack).items():
+            meta = deck_meta(pack, deck_id, deck, order)
+            if archived_now(pack, deck_id, meta, ARCHIVES):
+                continue
+            d = decks.get((pack, deck_id), {'answers': {}, 'verdict': None})
+            cards = deck.get('cards', [])
+            owed = [c for c in cards if not c.get('handled') and not (d['answers'].get(c['id']) and d['answers'][c['id']].get('cardVersion', 1) >= c.get('version', 1))]
+            done = d['verdict'] and d['verdict'].get('verdict') == 'done'
+            touched = last_touch.get((pack, deck_id))
+            if done and owed:
+                again.append(f'    {deck_id}: marked done {str(d["verdict"].get("at", ""))[:10]}, {plural(len(owed), "card")} owed again: {", ".join(c["id"] for c in owed)}')
+            elif cards and not owed and (touched or any(c.get('handled') for c in cards)):
+                finished.append(f'    {deck_id}: finished{" " + str(touched)[:10] if touched else ""}. riffle archive {pack}/{deck_id}')
+            elif not touched and owed:
+                sent = deck.get('updated') or ''
+                days = (now_s - seconds(sent)) / 86400 if sent and seconds(sent) else None
+                if days is None or days >= a.days:
+                    untouched.append((days or 0, f'    {deck_id}: never touched, {plural(len(owed), "card")}' + (f', sent {days:.0f} days ago' if days is not None else '')))
+        waiting = [t for t in thoughts.get(pack, []) if t.get('id') not in answered.get(pack, set())]
+        read = state.get('packs', {}).get(pack, {})
+        unread_n = len(unread(events, state, pack))
+        lines = []
+        if finished:
+            lines += ['  Finished, not archived (archive your own):', *finished]
+        if again:
+            lines += ['  Marked done, with a card owed again since (look before archiving):', *again]
+        if untouched:
+            lines += [f'  Never touched, {a.days:g} days or more (yours to ask about, or archive):', *[x for _, x in sorted(untouched, reverse=True)]]
+        if waiting:
+            lines += ['  Thoughts with no answer (riffle thought):', *[f'    {t["id"]} ({str(t.get("at", ""))[:10]}): "{readable(t.get("text", ""))[:120]}"' for t in waiting]]
+        if unread_n:
+            when = f'last marked read {str(read.get("at"))[:10]}' if read.get('at') else 'never marked read'
+            lines.append(f'  {plural(unread_n, "event")} not marked read, {when}: riffle answers --deck <yours> --mark-read')
+        if lines:
+            anything = True
+            print(f'\n{pack}:')
+            for line in lines:
+                print(line)
+    if not anything:
+        print('Nothing lying around.')
 
 
 def send_notification(title, body, badge=None, tag='riffle', url=''):
@@ -1940,6 +2054,9 @@ def about(pack, deck_id, what, cards):
             'title': deck.get('title') or deck_id, 'kind': deck_kind(deck), 'owed': owed, 'cardTitles': [titles.get(c, c) for c in cards or []], 'at': now()}
 
 
+KIND_SAID = {'board': 'spread'}  # what the phone calls a deck's kind, where the file format's word differs
+
+
 def item_words(i, whole=False):
     """What a notification says about one thing sent: whole for a notification of its own, short in a list."""
     first = (i.get('cardTitles') or [''])[0]
@@ -1950,7 +2067,7 @@ def item_words(i, whole=False):
         return f'Second try on "{first}", in {i["title"]}' if whole else f'Second try: {first}'
     if i['what'] == 'handled':
         return f'My conclusion on "{first}", in {i["title"]}' if whole else f'Handled: {first}'
-    return f'{i["title"]}: {i["kind"]}, {plural(i["owed"], "card")}' if whole else f'{i["title"]} ({i["owed"]})'
+    return f'{i["title"]}: {KIND_SAID.get(i["kind"], i["kind"])}, {plural(i["owed"], "card")}' if whole else f'{i["title"]} ({i["owed"]})'
 
 
 def notice_words(items):
@@ -2401,8 +2518,13 @@ def main():
 
     s = sub.add_parser('answers', help='what came back since you last read')
     s.add_argument('--pack'); s.add_argument('--every-pack', action='store_true'); s.add_argument('--all', action='store_true'); s.add_argument('--json', action='store_true')
+    s.add_argument('--deck', action='append', help='only this deck: give it once for each. With --mark-read, only these are marked read')
     s.add_argument('--mark-read', action='store_true', help='also record them as read')
     s.set_defaults(fn=cmd_answers)
+
+    s = sub.add_parser('tidy', help='what is left lying around: finished decks not archived, decks never touched, thoughts with no answer. Changes nothing')
+    s.add_argument('--pack'); s.add_argument('--every-pack', action='store_true'); s.add_argument('--days', type=float, default=7, help='a deck untouched this many days is listed')
+    s.set_defaults(fn=cmd_tidy)
 
     s = sub.add_parser('pins', help='the spots they pinned on pictures and films: in words, and with --out as the frame and a close-up')
     s.add_argument('--pack'); s.add_argument('--deck', action='append', help='a deck to look in; every deck in the pack without it'); s.add_argument('--card')
@@ -2415,34 +2537,34 @@ def main():
     s.set_defaults(fn=cmd_redeal)
 
     s = sub.add_parser('handled', help='mark a card handled, with how')
-    s.add_argument('pack_id'); s.add_argument('deck'); s.add_argument('card'); s.add_argument('--how'); s.add_argument('--undo', action='store_true')
+    s.add_argument('pack_id', help='the pack, or the whole address: pack/deck/card'); s.add_argument('deck', nargs='?'); s.add_argument('card', nargs='?'); s.add_argument('--how'); s.add_argument('--undo', action='store_true')
     s.add_argument('--quiet', action='store_true', help='no notification')
-    s.set_defaults(fn=cmd_handled)
+    s.set_defaults(fn=cmd_handled, address=('pack_id', 'deck', 'card'), needs=3)
 
     s = sub.add_parser('second-try', help='deal a card back as a new version')
-    s.add_argument('pack_id'); s.add_argument('deck'); s.add_argument('card'); s.add_argument('--file')
+    s.add_argument('pack_id', help='the pack, or the whole address: pack/deck/card'); s.add_argument('deck', nargs='?'); s.add_argument('card', nargs='?'); s.add_argument('--file')
     s.add_argument('--quiet', action='store_true', help='no notification')
     for field in ('text', 'why', 'pick', 'details'):
         s.add_argument(f'--{field}')
-    s.set_defaults(fn=cmd_second_try)
+    s.set_defaults(fn=cmd_second_try, address=('pack_id', 'deck', 'card'), needs=3)
 
     s = sub.add_parser('thought', help='answer one of their thoughts')
     s.add_argument('pack_id'); s.add_argument('thought_id'); s.add_argument('--how', required=True)
     s.set_defaults(fn=cmd_thought)
 
     s = sub.add_parser('link', help='the text of a link to a deck, card or part, to put in a card')
-    s.add_argument('pack_id'); s.add_argument('deck', nargs='?'); s.add_argument('card', nargs='?'); s.add_argument('part', nargs='?'); s.add_argument('--label')
-    s.set_defaults(fn=cmd_link)
+    s.add_argument('pack_id', help='the pack, or the whole address: pack/deck/card/part'); s.add_argument('deck', nargs='?'); s.add_argument('card', nargs='?'); s.add_argument('part', nargs='?'); s.add_argument('--label')
+    s.set_defaults(fn=cmd_link, address=('pack_id', 'deck', 'card', 'part'), needs=1)
 
     s = sub.add_parser('order', help='the writer\'s say on a deck: its place in Suggested order, tags, kind')
-    s.add_argument('pack_id'); s.add_argument('deck'); s.add_argument('--priority', type=int, help='1 is answered first')
+    s.add_argument('pack_id', help='the pack, or the whole address: pack/deck'); s.add_argument('deck', nargs='?'); s.add_argument('--priority', type=int, help='1 is answered first')
     s.add_argument('--no-priority', action='store_true'); s.add_argument('--tag', action='append', help=f'like {", ".join(TAG_WORDS)}'); s.add_argument('--untag', action='append')
     s.add_argument('--kind', choices=sorted(DECK_KINDS))
-    s.set_defaults(fn=cmd_order)
+    s.set_defaults(fn=cmd_order, address=('pack_id', 'deck'), needs=2)
 
     s = sub.add_parser('archive', help='move a deck to Archived at the end of the pack, or back with --undo')
-    s.add_argument('pack_id'); s.add_argument('deck'); s.add_argument('--undo', action='store_true')
-    s.set_defaults(fn=cmd_archive)
+    s.add_argument('pack_id', help='the pack, or the whole address: pack/deck'); s.add_argument('deck', nargs='?'); s.add_argument('--undo', action='store_true')
+    s.set_defaults(fn=cmd_archive, address=('pack_id', 'deck'), needs=2)
 
     s = sub.add_parser('mine', help='their own decks: ideas, pictures and links they made for you')
     s.add_argument('--pack'); s.add_argument('--every-pack', action='store_true'); s.add_argument('--every', action='store_true', help='every deck, not only changed ones')
@@ -2450,8 +2572,8 @@ def main():
     s.set_defaults(fn=cmd_mine)
 
     s = sub.add_parser('reply', help='reply on one of their own decks, or a card in it')
-    s.add_argument('pack_id'); s.add_argument('deck'); s.add_argument('card', nargs='?'); s.add_argument('--how'); s.add_argument('--undo', action='store_true')
-    s.set_defaults(fn=cmd_reply)
+    s.add_argument('pack_id', help='the pack, or the whole address: pack/deck/card'); s.add_argument('deck', nargs='?'); s.add_argument('card', nargs='?'); s.add_argument('--how'); s.add_argument('--undo', action='store_true')
+    s.set_defaults(fn=cmd_reply, address=('pack_id', 'deck', 'card'), needs=2)
 
     s = sub.add_parser('notify', help='send a notification to the phone by hand')
     s.add_argument('--title', default='Riffle'); s.add_argument('--body', default=''); s.add_argument('--badge', type=int); s.add_argument('--tag', default='riffle')
@@ -2460,7 +2582,7 @@ def main():
 
     s = sub.add_parser('wait', help='wait until they finish your decks or deal you in, or file a thought; run it in the background')
     s.add_argument('--pack'); s.add_argument('--deck', action='append', help='a deck you need; give it once for each, and every one must be finished')
-    s.add_argument('--quiet', type=float, default=15, help='minutes their phone must be quiet after finishing, unless they deal you in')
+    s.add_argument('--quiet-minutes', '--quiet', dest='quiet', type=float, default=15, help='minutes their phone must be quiet after finishing, unless they deal you in (--quiet is the old name)')
     s.add_argument('--topic', action='append', help='only decks in this topic')
     s.add_argument('--on', help=f'what wakes it, of {",".join(WAIT_ON)}; all three by default, only deck with --deck or --topic')
     s.add_argument('--since', help='also count what came after this time (ISO), not only what lands from now')
@@ -2479,6 +2601,8 @@ def main():
     s.set_defaults(fn=cmd_notify_flush)
 
     a = p.parse_args()
+    if getattr(a, 'address', None):
+        spread_address(a, a.address, a.needs)
     if a.fn is not cmd_fit:  # that one needs no repo
         DATA = data_repo()
     a.fn(a)

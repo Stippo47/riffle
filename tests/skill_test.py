@@ -475,6 +475,48 @@ phone_sends('2026-11-02T12-01-30-000Z-pic.json',
 code, out = run('answers', '--pack', 'proj')
 ok('answers/img/nope.jpg (still uploading)' in out, 'pictures are listed, and one not arrived yet says so', out)
 
+print('One way for each thing')
+phone_sends('2026-11-02T12-02-00-000Z-uni.json',
+            {'eid': 'u1', 'at': '2026-11-02T12:02:00.000Z', 'type': 'answer', 'card': 'c', 'cardVersion': 1, 'title': 'A title', 'kind': 'question', 'swipe': 'right', 'stamp': 'GO', 'comment': ''},
+            {'eid': 'u2', 'at': '2026-11-02T12:02:01.000Z', 'type': 'answer', 'card': 'b', 'cardVersion': 1, 'title': 'A title', 'kind': 'question', 'swipe': 'right', 'stamp': 'GO', 'comment': ''},
+            {'eid': 'u3', 'deck': 'beside', 'at': '2026-11-02T12:02:02.000Z', 'type': 'answer', 'card': 'a', 'cardVersion': 1, 'title': 'A title', 'kind': 'question', 'swipe': 'right', 'stamp': 'GO', 'comment': 'In another deck'})
+code, out = run('answers', '--pack', 'proj', '--deck', 'first')
+ok(code == 0 and '  b (A title)' in out and out.index('  b (A title)') < out.index('  c (A title)'), "--deck shows that deck's cards in the deck's own order, not the order they came back in", out)
+ok('In another deck' not in out and 'th1' not in out, 'and only that deck: no other deck, no thoughts', out)
+ok('proj / first / first: "' in out, "the deck's title is in its heading", out)
+ok('Still owed: a' in out, 'it says what is still owed in the deck', out)
+code, out = run('answers', '--pack', 'proj', '--deck', 'first', '--mark-read')
+read_now = json.loads((clone / 'read.json').read_text(encoding='utf-8'))
+ok(code == 0 and read_now['packs']['proj']['decks']['first']['files'] and read_now['packs']['proj'].get('at'), 'with --mark-read, only that deck is marked read, and the time the phone shows moves on', read_now)
+code, out = run('answers', '--pack', 'proj')
+ok('In another deck' in out and '  b (A title)' not in out, "so the pack's other decks are still there for whoever works on them", out)
+code, out = run('link', 'proj/first/a')
+ok(code == 0 and out.startswith('[A title](riffle:proj/first/a)'), 'a command takes one address, pack/deck/card, as the phone names things', out)
+code, out = run('archive', 'proj/beside')
+ok(code == 0 and json.loads((clone / 'packs/proj/order.json').read_text(encoding='utf-8'))['decks']['beside'].get('archived'), 'archive takes one too', out)
+code, out = run('archive', 'proj', 'beside', '--undo')
+ok(code == 0 and not json.loads((clone / 'packs/proj/order.json').read_text(encoding='utf-8'))['decks'].get('beside', {}).get('archived'), 'and the words apart still work', out)
+code, out = run('handled', 'proj/first', '--how', 'x')
+ok(code == 1 and 'Name the card' in out, 'an address that stops short says what is missing', out)
+code, out = run('handled', 'proj/first/a', 'b', '--how', 'x')
+ok(code == 1 and 'not both' in out, 'and an address with words after it is refused', out)
+code, out = run('wait', '--help')
+ok('--quiet-minutes' in out, "wait's quiet minutes are --quiet-minutes, so --quiet means no notification everywhere else (the old name still works)", out)
+code, out = run('tidy', '--pack', 'proj')
+ok(code == 0 and 'Thoughts with no answer' in out and 'th1' in out, 'tidy lists thoughts with no answer, changing nothing', out)
+ok('not marked read' in out or 'Never touched' in out or 'Finished, not archived' in out, 'and what else is lying around', out)
+code, out = run('check', str(write('d/showme.json', deck(good_card('lk', text='Does the new walk look right?')))))
+ok(code == 0 and 'has nothing to look at' in out, 'check warns when a card asks how something looks and shows nothing', out)
+code, out = run('check', str(write('d/noshow.json', deck(good_card('nk', text='Should gates close by themselves?')))))
+ok('has nothing to look at' not in out, 'and not on a card that asks something else', out)
+sys.path.insert(0, str(RIFFLE.parent))
+import riffle as riffle_module  # noqa: E402
+said = riffle_module.item_words({'what': 'deck', 'title': 'Trees', 'kind': 'board', 'owed': 3}, whole=True)
+ok(said == 'Trees: spread, 3 cards', 'a notification calls a board a spread, as the phone does', said)
+phone_sends('2026-11-02T12-02-10-000Z-unu.json',  # back as it was, for the tests after
+            {'eid': 'u4', 'at': '2026-11-02T12:02:10.000Z', 'type': 'undo', 'card': 'c', 'of': 'u1'},
+            {'eid': 'u5', 'at': '2026-11-02T12:02:11.000Z', 'type': 'undo', 'card': 'b', 'of': 'u2'})
+
 print('Pins')
 code, out = run('check', str(write('d/sides.json', deck({**good_card('sd'), 'videos': [{'src': 'walk.mp4', 'sides': ['Before', 'After']}]}))), '--pack', 'proj')
 ok(code == 0 or not have_ffmpeg, 'a film can name its views from left to right', out)

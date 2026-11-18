@@ -313,8 +313,11 @@ Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typ
 The writer's note of what's been read, per pack. The phone shows the latest time in its settings.
 
 ```json
-{ "v": 1, "packs": { "a-project": { "at": "2026-11-02T12:00:00.000Z", "files": ["<answers file>"] } } }
+{ "v": 1, "packs": { "a-project": { "at": "2026-11-02T12:00:00.000Z", "files": ["<answers file>"],
+  "decks": { "a-deck": { "at": "2026-11-03T09:00:00.000Z", "files": ["<answers file>"] } } } } }
 ```
+
+`files` under the pack marks a whole answers file read for that pack. `decks` (from 0.15.0) marks a file read for one deck only: `riffle answers --deck <d> --mark-read` writes it, so a session can mark its own decks read without hiding the pack's other decks from the sessions working on them. An event is read if either says so.
 
 ## A push record
 
