@@ -2,9 +2,13 @@
 // and the X or a drag down to go back. It sits over everything, so its pinch can't reach the card's underneath.
 //
 // Films play here muted and looping. A tap pauses or plays, and the bar under them scrubs and slows them down.
-// With the pen on, one finger draws and two still zoom and pan. Strokes are kept as they're drawn, so a closed
-// app keeps them, and on leaving a picture the drawing over it becomes a photo on the comment it belongs to.
-import { clamp, dragToClose, icon, padBlur, padFocus, padHTML, padReady, padSet } from './ui.js';
+// A second row steps through one frame by frame. With the pen on, one finger draws and two still zoom and pan.
+// Strokes are kept as they're drawn, so a closed app keeps them, and on leaving a picture the drawing over it
+// becomes a photo on the comment it belongs to.
+//
+// A pin is "this spot here": a point on a picture, or on one frame of a film, with a few words. With Pin on,
+// a tap drops one, and one finger still moves around a zoomed picture, so a spot can be zoomed into first.
+import { clamp, dragToClose, esc, icon, padBlur, padFocus, padHTML, padReady, padSet, tick } from './ui.js';
 import * as store from './store.js';
 
 const MAX_ZOOM = 6;
@@ -23,40 +27,64 @@ const STROKE_SECOND_FINGER_MS = 160; // a stroke this young when a second finger
 const INK_LONG_SIDE = 2000;
 const SPEEDS = [1, 0.5, 0.25];
 const SPEED_WORD = { 1: '1×', 0.5: '½×', 0.25: '¼×' };
+// Frame by frame. A film's frame rate comes with it if the deck says it, or is measured here while it plays;
+// until either is known, a step is this long.
+const STEP_UNKNOWN = 1 / 30;
+const JOG_PX = 14;                 // how far a thumb slides along the fine strip for one frame
+const STEP_HOLD_MS = 380;          // a step button held this long starts repeating
+const STEP_REPEAT_MS = 110;
+const RATES = [10, 12, 15, 20, 24, 25, 30, 48, 50, 60]; // a measured rate within a few percent of one of these is that one
+const RATE_GAPS = 8;               // how many frames a measurement watches go by
+const filmRate = new Map();        // rates measured here, per film, while the app is open
+// Pins.
+const PIN_NEAR = 26;               // how near a pin a tap must land to mean that pin, on screen
+const PIN_MAGNET = 7;              // and how near one's mark the film's bar snaps to its moment
+const PIN_REMOVE_MS = 3000;        // how long "Tap again to remove" waits for the second tap
+const stamp = t => `${Math.floor((t || 0) / 60)}:${((t || 0) % 60).toFixed(2).padStart(5, '0')}`;
 export const inkKey = key => `ink:${key}`;
 // Where each film was left, its moment, speed and whether it was playing, so coming back to one carries on
 // from there: the next and back again on a board, or closing it and opening it again. Kept while the app is open.
 const filmLeft = new Map();
 
-// items: { thumb, full, video, label, text, inkKey }, with each of thumb, full and video a function giving
-// a url, or a promise of one. `video` makes it a film, with `full` as its poster frame.
+// items: { thumb, full, video, label, text, inkKey, fps }, with each of thumb, full and video a function giving
+// a url, or a promise of one. `video` makes it a film, with `full` as its poster frame, and `fps` its frame
+// rate if the deck says it.
 // picks: { isOn(i), toggle(i), count() } if the pictures can be selected here.
 // opener: { t, x, y } of the finger lifting, if that's what opened this.
 // ink: { save(i, blob) => promise, done(i) } if drawings can be kept from here.
 // bring(i, { kind, t, blob }) offers to bring what's held down on into the notes: a long press.
 // start: a time to open the first film at, paused there.
 // comments: { text(i), typed(i, text), done(i) } if each one can have a comment of its own, as a board's items.
+// pins: { list(i), add(i, spot), move(i, id, spot), typed(i, id, text), remove(i, id), done(i) } if spots can be
+// pinned from here. A pin is { id, n, x, y, note }, with x and y a share of the width and height, and on a
+// film also t, the middle of the frame it's on.
 const PRESS_MS = 520;
-export function openViewer({ items, at = 0, picks = null, opener = null, onClose = () => {}, ink = null, bring = null, start = null, comments = null }) {
+export function openViewer({ items, at = 0, picks = null, opener = null, onClose = () => {}, ink = null, bring = null, start = null, comments = null, pins = null }) {
   const many = items.length > 1;
   const anyFilm = items.some(it => it.video);
-  const hasFoot = many || picks || ink || comments || anyFilm || items.some(it => it.label);
+  const hasFoot = many || picks || ink || comments || pins || anyFilm || items.some(it => it.label);
   const root = document.createElement('div');
   root.className = 'viewer';
   root.innerHTML = `
-    <div class="viewer-stage"><div class="viewer-media"><img alt="" draggable="false"><video muted loop playsinline preload="auto" hidden></video><svg class="viewer-ink" preserveAspectRatio="none"></svg></div></div>
+    <div class="viewer-stage"><div class="viewer-media"><img alt="" draggable="false"><video muted loop playsinline preload="auto" hidden></video><svg class="viewer-ink" preserveAspectRatio="none"></svg></div><div class="viewer-pins"></div></div>
     <button class="viewer-x" aria-label="Back">${icon('x')}</button>
     <div class="viewer-note" hidden></div>
     ${hasFoot ? `<div class="viewer-foot">
       <div class="viewer-words"><b></b><small></small><span></span></div>
       ${anyFilm ? `<div class="viewer-film" hidden>
         <button class="viewer-play" aria-label="Pause">${icon('pause')}</button>
-        <div class="viewer-scrub" role="slider" tabindex="0" aria-label="Where in the film" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i class="vs-rail"><i class="vs-fill"></i></i><i class="vs-knob"></i></div>
+        <div class="viewer-scrub" role="slider" tabindex="0" aria-label="Where in the film" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i class="vs-rail"><i class="vs-fill"></i></i><i class="vs-pins"></i><i class="vs-knob"></i></div>
         <button class="viewer-speed" aria-label="Speed">1×</button>
+      </div>
+      <div class="viewer-fine" hidden>
+        <button class="viewer-step" data-step="-1" aria-label="Back one frame">${icon('frame-back')}</button>
+        <div class="viewer-jog" aria-label="Slide for frame by frame"><i class="vj-ticks"></i><span class="vj-words"></span></div>
+        <button class="viewer-step" data-step="1" aria-label="On one frame">${icon('frame-forward')}</button>
       </div>` : ''}
-      <div class="viewer-row">
+      <div class="viewer-row${picks && pins ? ' tight' : ''}">
         ${many ? `<button class="viewer-prev" aria-label="Previous">${icon('chevron-left')}</button>` : ''}
         ${ink ? `<button class="viewer-pen" aria-label="Draw on it">${icon('pencil')}<span>Draw</span></button>` : ''}
+        ${pins ? `<button class="viewer-pin" aria-label="Pin a spot">${icon('pin')}<span>Pin</span><b hidden></b></button>` : ''}
         ${comments ? `<button class="viewer-say" aria-label="Comment on this one">${icon('message-square-text')}</button>` : ''}
         ${picks ? `<button class="viewer-tick">${icon('check')}<span></span></button>` : '<i class="viewer-gap"></i>'}
         ${many ? `<button class="viewer-next" aria-label="Next">${icon('chevron-left')}</button>` : ''}
@@ -66,6 +94,18 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
         <button class="pen-undo" aria-label="Undo the last line">${icon('undo-2')}</button>
         <button class="pen-clear" aria-label="Clear the drawing">${icon('trash-2')}</button>
         <button class="pen-done">Done</button>
+      </div>` : ''}
+      ${pins ? `<div class="viewer-pinrow" hidden>
+        <div class="viewer-pinchips"></div>
+        <button class="pin-done">Done</button>
+      </div>
+      <div class="viewer-pinner" hidden>
+        ${padHTML('viewerpin', 'A few words on this spot. Drag down to close.')}
+        <div class="pinner-row">
+          <button class="pin-remove">${icon('trash-2')}<span>Remove</span></button>
+          <small>Tap the picture to move it</small>
+          <button class="pin-close">Done</button>
+        </div>
       </div>` : ''}
       ${comments ? `<div class="viewer-sayer" hidden>
         ${padHTML('viewersay', 'Your comment on this one. Drag down to close.')}
@@ -95,9 +135,11 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
     base = fw / (nw / dpr());
   };
   const origin = () => ({ x: (W - fw * s) / 2 + tx, y: (H - fh * s) / 2 + ty });
+  let drawPins = () => {}; // set further down, where the pins are
   const paint = () => {
     const o = origin();
     media.style.transform = `translate(${o.x}px,${o.y}px) scale(${base * s})`;
+    drawPins();
   };
   const inBounds = () => {
     const mx = Math.max(0, (fw * s - W) / 2), my = Math.max(0, (fh * s - H) / 2);
@@ -162,7 +204,7 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
       $('.viewer-prev').disabled = i === 0;
       $('.viewer-next').disabled = i === items.length - 1;
     }
-    if (anyFilm) $('.viewer-film').hidden = !it.video;
+    if (anyFilm) { $('.viewer-film').hidden = !it.video; $('.viewer-fine').hidden = !it.video; }
     if (comments) $('.viewer-say').classList.toggle('has', !!(comments.text(i) || '').trim());
   };
   // Notes where the film showing now was, before it goes.
@@ -173,9 +215,13 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
   };
   const show = async i => {
     if (saying) closeSay();
+    if (noting) closeNote();
     leaveFilm();
     at = i;
     const mine = ++token;
+    seekTo = null;
+    lastShown = null;
+    gaps = [];
     note.hidden = true;
     nw = 0;
     img.classList.remove('ready');
@@ -190,6 +236,7 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
     pendingScaleFrom = 0;
     drawInk();
     loadInk(i, mine);
+    syncPins();
     const it = items[i];
     const thumb = it.thumb ? await it.thumb() : null;
     if (mine !== token) return;
@@ -240,6 +287,7 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
   };
   const close = () => {
     if (saying) closeSay();
+    if (noting) closeNote();
     leaveFilm();
     keepInk();
     token++;
@@ -252,11 +300,36 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
   addEventListener('resize', resized);
 
   // ---------- films
-  let scrubbing = false;
+  let scrubbing = false, seekTo = null, lastShown = null, gaps = [];
   const showAt = f => {
     const scrub = $('.viewer-scrub');
     scrub.style.setProperty('--at', String(f));
     scrub.setAttribute('aria-valuenow', String(Math.round(f * 100)));
+  };
+  // One seek a frame of the screen, so a phone keeps up with a finger. The last one asked for wins.
+  const seekSoon = t => {
+    if (seekTo === null) {
+      const mine = token;
+      requestAnimationFrame(() => { if (mine === token && seekTo !== null && film.duration) film.currentTime = seekTo; seekTo = null; });
+    }
+    seekTo = t;
+  };
+  const nowT = () => (seekTo !== null ? seekTo : film.currentTime || 0);
+  // Frames, counted from 0 here. A paused film always rests on the middle of one, so which frame is on screen
+  // is never in doubt, here or for whoever reads a pin's time.
+  const rateKey = () => { const it = items[at]; return it && (it.filmKey || it.inkKey); };
+  const fps = () => { const it = items[at]; return (it && +it.fps) || filmRate.get(rateKey()) || 0; };
+  const frames = () => (fps() && film.duration ? Math.max(1, Math.round(film.duration * fps())) : 0);
+  const frameAt = t => clamp(Math.floor(t * fps() + 0.01), 0, Math.max(0, frames() - 1));
+  const timeOf = n => (n + 0.5) / fps();
+  const filmUp = () => isFilm() && !film.hidden && !!film.duration;
+  const rest = () => { if (filmUp() && fps() && film.paused && !scrubbing) seekSoon(timeOf(frameAt(nowT()))); };
+  const step = d => {
+    if (!filmUp()) return;
+    film.pause();
+    if (fps()) seekSoon(timeOf(clamp(frameAt(nowT()) + d, 0, frames() - 1)));
+    else seekSoon(clamp(nowT() + d * STEP_UNKNOWN, 0, film.duration));
+    syncFilm();
   };
   const syncFilm = () => {
     if (!anyFilm || !isFilm()) return;
@@ -264,29 +337,55 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
     const btn = $('.viewer-play');
     btn.innerHTML = icon(playing ? 'pause' : 'play');
     btn.setAttribute('aria-label', playing ? 'Pause' : 'Play');
-    if (!scrubbing && film.duration) showAt(film.currentTime / film.duration);
+    if (!scrubbing && film.duration) showAt(nowT() / film.duration);
     $('.viewer-speed').textContent = SPEED_WORD[film.playbackRate] || `${film.playbackRate}×`;
+    $('.vj-words').textContent = fps() && film.duration ? `Frame ${frameAt(nowT()) + 1} of ${frames()} · ${stamp(nowT())}` : stamp(nowT());
+    drawPins();
   };
   const toggleFilm = () => {
     if (!isFilm() || film.hidden) return;
     if (film.paused) film.play().catch(() => {}); else film.pause();
   };
-  for (const t of ['play', 'pause', 'timeupdate', 'ratechange', 'seeked']) film.addEventListener(t, syncFilm);
+  for (const t of ['play', 'pause', 'timeupdate', 'ratechange', 'seeked', 'durationchange']) film.addEventListener(t, syncFilm);
+  film.addEventListener('pause', rest);
+  film.addEventListener('loadedmetadata', () => syncPins()); // their marks along the bar need the film's length
   if (anyFilm) {
     $('.viewer-play').onclick = toggleFilm;
+    // The frame rate, if the deck didn't say: the shortest gap between frames as the film plays is one frame.
+    if (film.requestVideoFrameCallback) {
+      const onFrame = (now, meta) => {
+        if (!root.isConnected) return;
+        film.requestVideoFrameCallback(onFrame);
+        if (!isFilm() || fps() || film.paused || film.seeking) { lastShown = null; return; }
+        const gap = lastShown === null ? 0 : meta.mediaTime - lastShown;
+        lastShown = meta.mediaTime;
+        if (gap > 0.004 && gap < 0.25) gaps.push(gap);
+        if (gaps.length < RATE_GAPS) return;
+        const raw = 1 / Math.min(...gaps);
+        filmRate.set(rateKey(), RATES.find(r => Math.abs(r - raw) / r < 0.04) || +raw.toFixed(2));
+        syncFilm();
+        syncPins();
+      };
+      film.requestVideoFrameCallback(onFrame);
+    }
     // The whole bar takes the finger, not just the knob: a touch anywhere on it jumps there, and the
     // film follows the finger from then on, wherever it goes. One seek a frame, so a phone keeps up.
+    // Near a pin's mark it goes to that pin's moment.
     const scrub = $('.viewer-scrub');
-    let held = null, seekTo = null;
+    let held = null;
     const fracAt = x => {
       const r = scrub.getBoundingClientRect(), edge = 14; // the knob's middle reaches the ends
-      return clamp((x - r.left - edge) / Math.max(1, r.width - edge * 2), 0, 1);
+      const f = clamp((x - r.left - edge) / Math.max(1, r.width - edge * 2), 0, 1);
+      if (!film.duration) return f;
+      const near = pinList().map(q => q.t / film.duration).find(q => Math.abs(q - f) * (r.width - edge * 2) < PIN_MAGNET);
+      return near === undefined ? f : near;
     };
     const seek = f => {
       showAt(f);
       if (!film.duration) return;
-      if (seekTo === null) requestAnimationFrame(() => { if (seekTo !== null) film.currentTime = seekTo; seekTo = null; });
-      seekTo = f * film.duration;
+      const t = f * film.duration;
+      seekSoon(fps() ? timeOf(frameAt(t)) : t);
+      syncFilm();
     };
     scrub.addEventListener('pointerdown', e => {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -319,6 +418,52 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
       film.playbackRate = SPEEDS[(SPEEDS.indexOf(film.playbackRate) + 1) % SPEEDS.length] || 1;
       syncFilm();
     };
+    // Frame by frame: a button either side steps one, and repeats while it's held. Between them a strip to
+    // slide a thumb along, one frame for every few pixels however long the film is, so it's slow and exact.
+    root.querySelectorAll('.viewer-step').forEach(b => {
+      const d = +b.dataset.step;
+      let timer = 0;
+      const stop = () => { clearTimeout(timer); timer = 0; };
+      b.addEventListener('pointerdown', e => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        e.preventDefault();
+        stop();
+        step(d);
+        tick();
+        const again = () => { step(d); timer = setTimeout(again, STEP_REPEAT_MS); };
+        timer = setTimeout(again, STEP_HOLD_MS);
+      });
+      for (const t of ['pointerup', 'pointercancel', 'pointerleave']) b.addEventListener(t, stop);
+    });
+    const jog = $('.viewer-jog');
+    let slid = null;
+    jog.addEventListener('pointerdown', e => {
+      if ((e.pointerType === 'mouse' && e.button !== 0) || !filmUp()) return;
+      e.preventDefault();
+      try { jog.setPointerCapture(e.pointerId); } catch { /* synthetic pointers in tests */ }
+      film.pause();
+      slid = { id: e.pointerId, x: e.clientX, from: nowT(), by: 0 };
+      jog.classList.add('held');
+    });
+    jog.addEventListener('pointermove', e => {
+      if (!slid || e.pointerId !== slid.id) return;
+      const dx = e.clientX - slid.x, by = Math.trunc(dx / JOG_PX);
+      jog.style.setProperty('--slid', `${dx % JOG_PX}px`);
+      if (by === slid.by) return;
+      slid.by = by;
+      if (fps()) seekSoon(timeOf(clamp(frameAt(slid.from) + by, 0, frames() - 1)));
+      else seekSoon(clamp(slid.from + by * STEP_UNKNOWN, 0, film.duration));
+      tick();
+      syncFilm();
+    });
+    const slideEnd = e => {
+      if (!slid || e.pointerId !== slid.id) return;
+      slid = null;
+      jog.classList.remove('held');
+      jog.style.removeProperty('--slid');
+    };
+    jog.addEventListener('pointerup', slideEnd);
+    jog.addEventListener('pointercancel', slideEnd);
   }
 
   // ---------- the pen. Strokes are in the picture's own pixels, so zooming never moves them.
@@ -454,6 +599,159 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
     $('.say-done').onclick = closeSay;
     dragToClose($('.viewer-sayer'), () => sayPad, dy => { $('.viewer-sayer').style.transform = dy > 0 ? `translateY(${dy * 0.8}px)` : ''; }, closeSay);
   }
+  // ---------- pins: this spot here. A point on the picture, as a share of its width and height, with a few
+  // words. On a film it belongs to the frame it was dropped on, and shows only while the film rests there.
+  let pinOn = false, noting = null, pinDrag = null, removeArmed = 0;
+  const pinPad = pins ? $('#viewerpin') : null;
+  const pinEls = new Map();
+  const pinList = () => (pins ? pins.list(at) || [] : []);
+  const pinShows = q => !isFilm() || (filmUp() && film.paused && (fps() ? frameAt(q.t) === frameAt(nowT()) : Math.abs(q.t - nowT()) < 0.02));
+  const spotOf = q => (pinDrag && pinDrag.id === q.id && pinDrag.spot) || q;
+  const onStage = q => { const o = origin(), at = spotOf(q); return { x: o.x + at.x * fw * s, y: o.y + at.y * fh * s }; };
+  // Pins sit over the picture, the same size on screen at any zoom, and move with it.
+  if (pins) {
+    drawPins = () => {
+      const seen = new Set();
+      for (const q of nw ? pinList().filter(pinShows) : []) {
+        let el = pinEls.get(q.id);
+        if (!el) {
+          el = document.createElement('i');
+          el.className = 'vpin';
+          el.innerHTML = '<b></b>';
+          $('.viewer-pins').append(el);
+          pinEls.set(q.id, el);
+        }
+        const at = onStage(q);
+        el.firstChild.textContent = q.n;
+        el.classList.toggle('on', noting === q.id);
+        el.style.transform = `translate(${at.x.toFixed(1)}px,${at.y.toFixed(1)}px)`;
+        seen.add(q.id);
+      }
+      for (const [id, el] of pinEls) if (!seen.has(id)) { el.remove(); pinEls.delete(id); }
+      $('.viewer-pins').classList.toggle('anim', media.classList.contains('anim'));
+    };
+  }
+  // The pin nearest a point on the stage, if one is near enough to be meant.
+  const pinAt = (x, y) => {
+    let best = null, near = PIN_NEAR;
+    for (const q of nw ? pinList().filter(pinShows) : []) {
+      const at = onStage(q), d = Math.hypot(at.x - x, at.y - y);
+      if (d < near) { near = d; best = q; }
+    }
+    return best;
+  };
+  // The row of pins on this picture, the count on the Pin button, and their marks along the film's bar.
+  function syncPins() {
+    if (!pins) return;
+    const list = pinList();
+    const count = $('.viewer-pin b');
+    count.hidden = !list.length;
+    count.textContent = list.length;
+    const hint = isFilm() ? 'Tap the spot, on the frame it shows on' : 'Tap the spot';
+    $('.viewer-pinchips').innerHTML = list.map(q => `<button class="pinchip${noting === q.id ? ' on' : ''}" data-pin="${esc(q.id)}"><b>${q.n}</b><span>${esc((q.note || '').trim() || (isFilm() ? stamp(q.t) : 'No words yet'))}</span></button>`).join('') || `<span class="pinhint">${hint}</span>`;
+    if (anyFilm) $('.vs-pins').innerHTML = isFilm() && film.duration ? list.map(q => `<i style="left:${((q.t / film.duration) * 100).toFixed(2)}%"></i>`).join('') : '';
+    drawPins();
+  }
+  const setPin = on => {
+    if (!pins) return;
+    if (!on && noting) closeNote();
+    pinOn = on;
+    root.classList.toggle('is-pinning', on);
+    $('.viewer-row').hidden = on;
+    $('.viewer-pinrow').hidden = !on;
+    if (on) {
+      film.pause();
+      lastTap = null;
+      clearTimeout(tapTimer);
+      note.hidden = true;
+    }
+    syncPins();
+  };
+  // A pin's words: a box under the picture. They're kept as they're typed, and go when it closes.
+  const openNote = (q, typing = true) => {
+    if (!q) return;
+    if (noting && noting !== q.id) closeNote();
+    if (!pinOn) setPin(true);
+    noting = q.id;
+    disarmRemove();
+    padSet(pinPad, q.note || '');
+    $('.viewer-pinrow').hidden = true;
+    $('.viewer-pinner').hidden = false;
+    root.classList.add('is-noting');
+    if (typing) padFocus(pinPad);
+    syncPins();
+  };
+  function closeNote() {
+    if (!noting) return;
+    noting = null;
+    padBlur(pinPad);
+    $('.viewer-pinner').hidden = true;
+    $('.viewer-pinrow').hidden = !pinOn;
+    root.classList.remove('is-noting');
+    pins.done(at);
+    syncPins();
+  }
+  function disarmRemove() {
+    clearTimeout(removeArmed);
+    removeArmed = 0;
+    if (pins) $('.pin-remove span').textContent = 'Remove';
+  }
+  // Goes to a pin: its frame, on a film, with its words showing.
+  const goPin = q => {
+    if (!q) return;
+    if (isFilm() && filmUp()) { film.pause(); seekTo = null; film.currentTime = q.t; }
+    openNote(q, false);
+  };
+  // A tap with Pin on. With a pin's words open it moves that pin here; otherwise it drops a new one, on a
+  // film at the frame showing, which the film stops on if it was playing.
+  const tapSpot = (x, y) => {
+    if (!nw) return;
+    const [px, py] = toPicture(x, y);
+    if (px < 0 || py < 0 || px > nw || py > nh) return;
+    const spot = { x: +(px / nw).toFixed(4), y: +(py / nh).toFixed(4) };
+    if (noting) { pins.move(at, noting, spot); tick(); syncPins(); return; }
+    let when = {};
+    if (isFilm()) {
+      if (!filmUp()) return; // only its still so far: there's no frame to point at
+      film.pause();
+      if (fps()) {
+        const n = frameAt(nowT()), t = timeOf(n);
+        seekTo = null;
+        film.currentTime = t;
+        when = { t: +t.toFixed(4), frame: n + 1, fps: fps(), frames: frames() };
+      } else when = { t: +nowT().toFixed(3) };
+    }
+    const made = pins.add(at, { ...spot, ...when, w: nw, h: nh });
+    tick();
+    openNote(made);
+  };
+  if (pins) {
+    $('.viewer-pin').onclick = () => setPin(true);
+    $('.pin-done').onclick = () => setPin(false);
+    $('.pin-close').onclick = closeNote;
+    $('.viewer-pinchips').onclick = e => {
+      const chip = e.target.closest('.pinchip');
+      if (chip) goPin(pinList().find(q => q.id === chip.dataset.pin));
+    };
+    // One with words takes a second tap to remove, so a slip can't lose them.
+    $('.pin-remove').onclick = () => {
+      const id = noting, q = pinList().find(x => x.id === id);
+      if (!q) return;
+      if ((q.note || '').trim() && !removeArmed) {
+        $('.pin-remove span').textContent = 'Tap again to remove';
+        removeArmed = setTimeout(disarmRemove, PIN_REMOVE_MS);
+        return;
+      }
+      disarmRemove();
+      closeNote();
+      pins.remove(at, id);
+      pins.done(at);
+      tick();
+      syncPins();
+    };
+    padReady(pinPad, text => { if (noting) pins.typed(at, noting, text); });
+    dragToClose($('.viewer-pinner'), () => pinPad, dy => { $('.viewer-pinner').style.transform = dy > 0 ? `translateY(${dy * 0.8}px)` : ''; }, closeNote);
+  }
   // The keyboard makes the screen shorter, so the picture fits again in what's left.
   if (typeof ResizeObserver !== 'undefined') new ResizeObserver(() => { if (root.isConnected) resized(); }).observe(stage);
 
@@ -531,7 +829,12 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
       pressed = false;
       const p = pts.get(e.pointerId);
       pressFrom = p;
-      if (bring && nw) pressTimer = setTimeout(firePress, PRESS_MS);
+      pinDrag = null;
+      if (pinOn && nw) { // a finger landing on a pin picks it up, to move it or, with no move, to open it
+        const hit = pinAt(p.x, p.y);
+        if (hit) { pinDrag = { id: hit.id, moved: false, spot: null }; return; }
+      }
+      if (bring && nw && !pinOn) pressTimer = setTimeout(firePress, PRESS_MS);
       if (penOn && nw) {
         stroke = { c: colour, w: +((PEN_WIDTH * dpr()) / (base * s)).toFixed(2), p: [toPicture(p.x, p.y).map(v => +v.toFixed(1))], t: e.timeStamp };
         drawInk();
@@ -540,6 +843,7 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
       startDrag(p.x, p.y, e.timeStamp);
     } else if (pts.size === 2) {
       if (stroke) endStroke(e.timeStamp - stroke.t > STROKE_SECOND_FINGER_MS && stroke.p.length > 5);
+      if (pinDrag) { pinDrag = null; drawPins(); } // a pinch was meant: the pin stays where it was
       const m = two();
       beginPinch(m.x, m.y, m.d);
     }
@@ -552,6 +856,14 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
       if (!pinch) return;
       const m = two();
       movePinch(m.x, m.y, m.d / pinch.d0);
+      return;
+    }
+    if (pinDrag) {
+      if (!pinDrag.moved && Math.hypot(p.x - pressFrom.x, p.y - pressFrom.y) < TAP_MOVE) return;
+      pinDrag.moved = true;
+      const [px, py] = toPicture(p.x, p.y);
+      pinDrag.spot = { x: +clamp(px / nw, 0, 1).toFixed(4), y: +clamp(py / nh, 0, 1).toFixed(4) };
+      drawPins();
       return;
     }
     if (stroke) {
@@ -576,6 +888,7 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
     if (!drag.mode) {
       if (Math.hypot(dx, dy) < TAP_MOVE) return;
       if (s > 1.02) drag.mode = 'pan';
+      else if (pinOn) drag.mode = 'still'; // with Pin on, a slipped tap never leaves the picture or turns to the next
       else if (Math.abs(dx) > Math.abs(dy)) drag.mode = many ? 'turn' : 'still';
       else drag.mode = dy > 0 ? 'back' : 'still';
       lastTap = null;
@@ -610,6 +923,14 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
       return;
     }
     if (stroke) { endStroke(!cancelled); return; }
+    if (pinDrag) {
+      const d = pinDrag;
+      pinDrag = null;
+      if (d.moved && d.spot && !cancelled) { pins.move(at, d.id, d.spot); pins.done(at); tick(); syncPins(); }
+      else if (!cancelled) openNote(pinList().find(q => q.id === d.id), false);
+      else drawPins();
+      return;
+    }
     if (!drag || pts.size) return;
     const d = drag;
     drag = null;
@@ -629,7 +950,11 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
     }
     if (d.mode) { settle(true); return; }
     if (pinched || idle) return;
-    // A tap. Two close together zoom in, or back out. One alone plays or pauses a film.
+    // A tap. With Pin on it drops a pin, or moves the one whose words are open. On a pin it opens that pin.
+    if (pinOn) { tapSpot(d.x0, d.y0); return; }
+    const onPin = pins && pinAt(d.x0, d.y0);
+    if (onPin) { lastTap = null; clearTimeout(tapTimer); openNote(onPin, false); return; }
+    // Otherwise two close together zoom in, or back out. One alone plays or pauses a film.
     const now = e.timeStamp;
     if (lastTap && now - lastTap.t < DOUBLE_TAP_MS && Math.hypot(d.x0 - lastTap.x, d.y0 - lastTap.y) < DOUBLE_TAP_NEAR) {
       clearTimeout(tapTimer);
@@ -692,5 +1017,5 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
   measure();
   const startAt = at;
   show(at);
-  return { close, get drawing() { return penOn; }, setPen, keepInk };
+  return { close, get drawing() { return penOn; }, get pinning() { return pinOn; }, setPen, setPin, keepInk };
 }

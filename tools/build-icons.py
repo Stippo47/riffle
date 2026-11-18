@@ -4,7 +4,8 @@ import json, pathlib, re
 
 root = pathlib.Path(__file__).resolve().parent.parent
 out = {}
-for f in sorted((root / 'vendor/lucide').glob('*.svg')):
+# vendor/own holds the few drawn for Riffle itself, in the same shape as Lucide's.
+for f in sorted([*(root / 'vendor/lucide').glob('*.svg'), *(root / 'vendor/own').glob('*.svg')], key=lambda f: f.name):
     s = re.sub(r'\s+', ' ', f.read_text()).strip()
     s = s.replace(' width="24"', '').replace(' height="24"', '').replace('> <', '><')
     out[f.stem] = s
