@@ -31,6 +31,7 @@ Films and sound need [ffmpeg](https://ffmpeg.org) on the PATH, for `riffle deck`
 
 - Tuning numbers for swipes and the break-through hold: `TUNE` in `js/gesture.js`
 - Swipe words, the default directions and importance labels: `js/ui.js`
+- Frame stepping and pins in the full-screen look, how far a thumb slides for a frame and how near a pin a tap must land: the top of `js/viewer.js`. The ring and close-up `riffle pins` draws: `PIN_` at the top of that part of `skill/riffle.py`
 - Colours and looks: the top of `style.css`; layouts: further down it, under each layout's name
 - The layouts and looks on offer, and the defaults: the top of `js/app.js`
 - Icons: add the SVG to `vendor/`, then run `python tools/build-icons.py`

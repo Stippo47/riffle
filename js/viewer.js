@@ -306,11 +306,17 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
     scrub.style.setProperty('--at', String(f));
     scrub.setAttribute('aria-valuenow', String(Math.round(f * 100)));
   };
-  // One seek a frame of the screen, so a phone keeps up with a finger. The last one asked for wins.
+  // One seek a frame of the screen, so a phone keeps up with a finger. The last one asked for wins. A seek to
+  // where the film already is gets left out: on its last frame, a looping film takes one as reaching its end
+  // and starts over.
   const seekSoon = t => {
     if (seekTo === null) {
       const mine = token;
-      requestAnimationFrame(() => { if (mine === token && seekTo !== null && film.duration) film.currentTime = seekTo; seekTo = null; });
+      requestAnimationFrame(() => {
+        if (mine === token && seekTo !== null && film.duration && Math.abs(film.currentTime - seekTo) > 0.0005) film.currentTime = seekTo;
+        seekTo = null;
+        syncFilm();
+      });
     }
     seekTo = t;
   };
@@ -973,6 +979,9 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
   };
   stage.addEventListener('pointerup', e => lift(e, false));
   stage.addEventListener('pointercancel', e => lift(e, true));
+  // With Pin on, a tap opens a box to type in during the finger's lift. The mouse press a browser makes up
+  // after a touch would land on the picture and take the box's focus, and the keyboard with it.
+  stage.addEventListener('touchend', e => { if (pinOn && e.cancelable) e.preventDefault(); }, { passive: false });
 
   // iPhones also report pinches as gesture events, which is all there is if only one pointer came through.
   let gesture = null;

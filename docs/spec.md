@@ -211,7 +211,9 @@ A row at the top of every pack's page, always there, needing no deck file. It is
 
 A card or a part can carry films beside its pictures, and a board can mix films and pictures. On a card's back they play by themselves, muted, looping and inline, once the card is flipped, and stop when it's flipped back. A tap pauses or plays one. In parts, a film plays while it's on screen. Each has a poster for before it plays and for tiles, and a board marks its films with a small play sign.
 
-The corner button opens a film full screen, like a picture: pinch to zoom, double tap, drag down to go back. Under it is a bar: play or pause, a slider to scrub through it, and a speed button that goes 1×, ½×, ¼×. The slider takes a finger anywhere along it, a full finger tall: a touch jumps the film there and pauses it, and the film follows the finger from then on. A tap on the film plays or pauses it, just after a double tap would have counted.
+The corner button opens a film full screen, like a picture: pinch to zoom, double tap, drag down to go back. It can be drawn on and pinned there: see Pins below. Under it is a bar: play or pause, a slider to scrub through it, and a speed button that goes 1×, ½×, ¼×. The slider takes a finger anywhere along it, a full finger tall: a touch jumps the film there and pauses it, and the film follows the finger from then on. A tap on the film plays or pauses it, just after a double tap would have counted.
+
+**Frame by frame.** Under that bar is a second row: a button at each end that steps one frame back or on, and repeats while it's held, and between them a strip to slide a thumb along. The strip moves one frame for every few pixels, however long the film is, so it's slow and exact where the bar above is quick. It says which frame of how many, and the time to the hundredth of a second: "Frame 27 of 48 · 0:01.10". A film that's paused, by any of these or by a tap, always rests on the middle of a frame, so the frame on screen is never in doubt. The frame rate comes with the film if `riffle deck` wrote it, and is otherwise measured as the film plays, from the gaps between its frames; until it's known, a step is a thirtieth of a second and the row says only the time. Numbers are at the top of `js/viewer.js`.
 
 A film remembers where it was left, its moment, speed and whether it was playing, while the app is open. Going to the next one on a board and back, or closing it and opening it again, carries on from there.
 
@@ -238,6 +240,25 @@ Any picture or film opened full screen can be drawn on: on a card's back, a part
 - Every line is kept on the phone as it ends, so closing the app keeps the drawing, and it's there when the picture opens again.
 - Leaving the picture any way at all (Done, the X, next, or dragging down) turns the drawing into a photo: the picture at full size with the lines on it. It goes on the comment it belongs to: the card's, or the part's. Done also opens that comment, so the words can go with it. It's an ordinary photo from then on, so its little cross takes it off.
 - The answer says what it was drawn over.
+
+## Pins
+
+A pin is "this spot here": a point on a picture, with a few words. It's the same on a still picture and on a film, where it also belongs to one frame. It's for a fault that's easier to point at than to describe. The pen is still there for circling and arrows.
+
+Any picture or film opened full screen has a **Pin** button beside Draw: on a card's back, a part, an option or a board.
+
+- **Dropping one.** Pin turns pinning on, which pauses a film. A tap on the picture drops a numbered ring on that spot, and a box opens under the picture with the keyboard up, for a few words. On a film it's dropped on the frame showing, so the way is to step to the frame first and then tap. Tapping a film that's playing stops it on that frame and pins it.
+- **Its words** are kept as they're typed, like a comment's. Done, or a drag down on the box, closes it. Words aren't needed: a pin alone says "here".
+- **Seeing them.** The ring leaves the spot itself in view, with its number beside it, and is the same size on screen at any zoom. On a film a pin shows only on its own frame. Every pin on the picture is listed in a row under it, by its number and its words; a tap there goes to that pin's frame and shows its words. The film's bar has a mark at each pin, and a finger near one lands on that pin's moment. The Pin button says how many there are.
+- **Moving one.** With its words open, a tap anywhere else on the picture moves it there. With pinning on, it can also be dragged.
+- **Removing one.** Its box has Remove. One with words takes a second tap, so a slip can't lose them.
+- **Zooming first.** With pinning on, two fingers still pinch and one still moves around a zoomed picture, so a small spot can be zoomed into before it's tapped. A drag never leaves the picture or turns to the next one while pinning is on. Done turns it off.
+- **On the card.** A card's back, and each of its parts, says how many pins are on its pictures ("2 pins"); tapping that opens the first, a film at its frame. A part with a pin counts as answered and has its dot on the card's face. A board's tile is marked like one with a comment. The overview marks a card that has pins. None of this is on the card's face where swipes start, so a pin can't get in the way of one.
+- **Numbers** run across the whole card, in the order pins were dropped, so "pin 3" means one spot whichever picture it's on.
+- **They go** like what's said about a part: on their own, a few seconds after the last change and when a pin's box closes, whether or not the card is swiped. With no signal they wait in the queue with the answers. Starting a deck over keeps them with the notes and comments, or clears them with those.
+- In the Feel test a pin with words is sent like anything typed, and one with none stays on the phone.
+
+The writer gets the card, the part, the picture or film, the time and frame, the spot as a share of the width and height, and the words. `riffle pins` turns each into the exact frame with a ring on the spot and a close-up around it.
 
 ## Parts
 
@@ -317,8 +338,8 @@ Nothing floats over the screen, so nothing can cover the buttons or a card's wor
 - **Every write goes into a backup list first.** It's in `localStorage`, which is synchronous, and a write leaves the list only once the database has it. Typing writes straight away, not after a pause, so a killed app keeps what was on screen. On the next start, whatever is left moves back into the database. Reads see the backup first.
 - **A lost database connection** gets reopened, and the write retried once. iPhones can drop the connection while the app is in the background.
 - **If saving still fails,** or there's no database at all (a private window), the title line says "Not saving on this phone", and the first screen and settings say why. The words stay in the backup, and go back as soon as it works. A deck whose saved progress can't be read won't open, rather than start fresh over it.
-- **Hiding or closing the app** runs one handler: it saves the deck, queues notes and drafts, then sends.
-- **Notes** go about 1.5 seconds after typing stops, and **drafts** (comments on a card not thrown yet) about 5 seconds after, each only if changed. At every start, the app goes through every deck's saved state and queues any notes or drafts that haven't gone, including drafts on cards no longer in the deck.
+- **Hiding or closing the app** runs one handler: it saves the deck, queues notes, drafts and pins, then sends.
+- **Notes** go about 1.5 seconds after typing stops, and **drafts** (comments on a card not thrown yet) about 5 seconds after, each only if changed. Words on a part, and pins, go about 3 seconds after. At every start, the app goes through every deck's saved state and queues any notes, drafts, words on parts or pins that haven't gone, including drafts on cards no longer in the deck.
 - **What can still go:** the phone dying in the moment between a keystroke and the backup write, or the browser clearing its own data. Settings says whether the browser has promised to keep it.
 
 On iPhone, the app has to be added to the Home Screen: Safari and the Home Screen app keep separate data, and Safari can clear a site's data when it isn't used for a while. iPhones only send while the app is open, or just as it's hidden. Web pages can't vibrate there, so the tick uses a switch-control trick that works on recent versions, and does nothing otherwise.
@@ -329,4 +350,4 @@ On a local test server only: `?api=` points the app at a stand-in for GitHub, an
 
 ## The writer's side
 
-`skill/` holds a Claude Code skill, installed with `python skill/install.py`. It makes decks from files, with checks first; shrinks pictures, films and sound clips, and makes posters; finds icons; reads answers, parts and drawings; deals cards back; marks cards handled; answers thoughts; lists what needs a second look; and sends notifications that say where they're from. `skill/SKILL.md` has the commands. Its estimate of what fits the smallest iPhone is checked against real rendering in the app's tests, and must never be the optimist.
+`skill/` holds a Claude Code skill, installed with `python skill/install.py`. It makes decks from files, with checks first; shrinks pictures, films and sound clips, and makes posters; finds icons; reads answers, parts, drawings and pins, and turns each pin into a picture of the spot; deals cards back; marks cards handled; answers thoughts; lists what needs a second look; and sends notifications that say where they're from. `skill/SKILL.md` has the commands. Its estimate of what fits the smallest iPhone is checked against real rendering in the app's tests, and must never be the optimist.

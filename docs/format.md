@@ -105,7 +105,7 @@ The writer's replies on their own decks, written by `riffle reply`. A key is a d
   "pick": "The writer's pick. Leave it out on a report.",
   "details": "Longer text for the back.\n\nBlank lines make paragraphs.",
   "images": ["img/rivers.jpg"],
-  "videos": [{ "src": "img/rivers-flow.mp4", "poster": "img/poster/rivers-flow.jpg" }],
+  "videos": [{ "src": "img/rivers-flow.mp4", "poster": "img/poster/rivers-flow.jpg", "fps": 30 }],
   "audio": ["audio/rivers-water.m4a"]
 }
 ```
@@ -128,10 +128,12 @@ What they bring into a comment (a card's or a part's) or a deck's notes is a lin
 
 ### Films
 
-`videos` sits beside `images`, on a card or a part. Each is a path, or `{ "src": ..., "poster": ... }`. They play on the card's back muted, looping and inline, and a tap pauses or plays one. The corner button opens one full screen, where it can be scrubbed, slowed to a half or a quarter, zoomed into and drawn on.
+`videos` sits beside `images`, on a card or a part. Each is a path, or `{ "src": ..., "poster": ... }`. They play on the card's back muted, looping and inline, and a tap pauses or plays one. The corner button opens one full screen, where it can be scrubbed, stepped frame by frame, slowed to a half or a quarter, zoomed into, drawn on and pinned.
 
 - **src** is the film. The phone wants a small H.264 mp4. `riffle deck` keeps one that's already that and under 2 MB, and turns anything else into one, with no sound, using ffmpeg.
 - **poster** is a still for before it plays, and for tiles. `riffle deck` makes one from early in the film, in `img/poster/`, or shrinks one you give like any picture. Without ffmpeg there's no poster, and the phone shows the film's first frame.
+- **fps** is the film's frame rate, which `riffle deck` reads from the film and writes here, so the phone can step it frame by frame from the first tap. You never write it. A film without it, as every deck sent before 0.15.0 has, gets it measured on the phone as it plays. On a board, it sits on the item, beside `video`.
+- **sides** names the views of a film that shows several side by side, from left to right: `"sides": ["Before", "After"]`. It's only for you: `riffle pins` then says which view a pin is in, by name.
 - A card's films come down ahead, like its pictures, after them. A board's come when they're looked at.
 
 ### Sound
@@ -268,6 +270,7 @@ Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typ
 | `thought` | `id`, `text`, with `deck` null | A general thought about the pack |
 | `deck` | `verdict` (`done`, `replan`), `tally`, `answered`, `total` | The deck as a whole. `replan` means rethink it from the base; the answers still stand |
 | `part` | `card`, `cardVersion`, `title`, `kind`, `part`, `partTitle`, `mark`, `stamp`, `comment`, and on a board `item` | What's said about one part of a card. `mark` is a meaning like `swipe` (`right`, `left` or `down`), or null for none. The latest for a part stands, whether or not the card is answered. On a board, `item: true` means it's a comment on one item: `part` is the item's id, `partTitle` its label, and there's no mark |
+| `pin` | `card`, `cardVersion`, `title`, `kind`, `pin`, `n`, `on`, `x`, `y`, `w`, `h`, `note`, and sometimes `part`, `partTitle`, `item`, `film`, `t`, `frame`, `fps`, `frames`, `removed` | A spot they pointed at, on a picture or on one frame of a film, with a few words. The latest for a `pin` stands, whether or not the card is answered. See Pins below |
 | `wake` | `answered`, `total` | They pressed **Deal in now**, at the deck's end or in its grid: start now on what's answered so far. It wakes a `riffle wait` on that deck at once, past the quiet minutes and any other deck it needs. From the grid, the deck isn't finished |
 | `archive` | `archived` | They archived the deck on the phone (`true`), or brought it back (`false`). Whichever of this and the writer's `archived` in order.json is later stands |
 | `deck-reset` | `keptNotes` | They started the deck over. Answers on this deck from before this no longer stand, though anything they typed was still said. If `keptNotes`, comments came back as drafts on their cards, and the notes stayed |
@@ -275,6 +278,29 @@ Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typ
 **Pictures.** An `answer`, `part`, `notes`, `thought` or `draft` event can carry `images`, a list of paths like `answers/img/<id>.jpg`. Pictures upload apart from the words, so one can arrive a little after the event that names it. Only the event that stands counts: a picture named by nothing that stands was taken back.
 
 **Drawings.** A picture they drew on is one of those `images`, with the drawing over the picture. The event then also has `drawings`, which maps its path to what it was drawn over: a picture's path in the pack, or a board item's or option's label with its path.
+
+**Pins.** A pin is "this spot here": a point and a few words. It's its own event, like what's said about a part, so it stands whether or not the card is swiped, and it goes a few seconds after it's dropped, moved or written on.
+
+```json
+{
+  "type": "pin", "card": "walk", "cardVersion": 1, "title": "The walk", "kind": "report",
+  "pin": "mwd4-0-ab12cd", "n": 2,
+  "part": "feet", "partTitle": "Feet",
+  "on": "img/feet.mp4", "film": true, "t": 1.1042, "frame": 27, "fps": 24, "frames": 48,
+  "x": 0.62, "y": 0.71, "w": 1920, "h": 540,
+  "note": "The foot slides here"
+}
+```
+
+- **pin** is its id, the same through every change to it. **n** is the number they see on it. Pins are numbered across a card in the order they were dropped, so "pin 2" means one spot.
+- **on** is the picture or film it's on, as the card names it: a path in the pack. **part** and **partTitle** say which part it's in, if it's in one. On a board's item or an option's picture, `part` is the item's or option's id, `partTitle` its label, and `item` is true, as for a comment on an item.
+- **x** and **y** are where on the picture, as a share of its width and of its height, from the top left: 0.62 is 62% of the way across. So they hold whatever size the picture is shown or kept at. **w** and **h** are the picture's own size in pixels on their phone.
+- **film** is true on a film. **t** is the time in seconds, and it's the middle of the frame that was on their screen, so it can't be mistaken for the frame before or after. **frame** is that frame counted from 1, as their phone showed it, of **frames**, at **fps**. The phone leaves those three out if it didn't know the film's frame rate yet; `t` is then the film's time as it stood. `riffle pins` works the frame out again from `t` and the film itself, and that's the one to trust.
+- **note** is their words, and can be empty: the spot alone was the point.
+- **removed** is true if they took it off again. It then no longer stands.
+- Starting a deck over doesn't take pins back: they were said. A second try of a card leaves them too, so `cardVersion` says which version each was about.
+
+`riffle answers` lists pins under their card. `riffle pins` makes, for each, the frame with a ring on the spot and a close-up.
 
 **`swipe` is the meaning, not the direction.** `right` is go, good, yes or fine. `left` is workshop, problem, rethink or redo. `down` is idk. `up` is a comment on its own. Someone may have swapped which way of swiping does which, and that never shows here.
 

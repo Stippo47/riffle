@@ -92,7 +92,7 @@ The file format is in `format.md`, next to this file. A deck looks like this:
 
 Add `"stack": "some-name"` to decks in a topic that should be dealt one after another, a report first. `order` sets which comes first. Picture paths are relative to the deck file, and `riffle deck` shrinks and copies them, keeping up to 2000 pixels so they can be zoomed into. A path starting `img/` that isn't beside the deck file means a picture already in the pack.
 
-**Films.** `"videos": ["clips/walk.mp4"]` sits beside `images`, on a card or a part, and a board item can have `"video"` instead of `"image"`. They play muted and looping on the phone, and can be scrubbed, slowed down and drawn on. `riffle deck` keeps a small H.264 mp4 as it is, turns anything else into one under 2 MB with no sound, and makes a poster from it, all with ffmpeg. Give `{"src": "...", "poster": "..."}` to choose the poster. Without ffmpeg only mp4s go, with no poster. Use films for motion that a still can't show, and keep them short: a few seconds that loop.
+**Films.** `"videos": ["clips/walk.mp4"]` sits beside `images`, on a card or a part, and a board item can have `"video"` instead of `"image"`. They play muted and looping on the phone, and can be scrubbed, stepped frame by frame, slowed down, drawn on and pinned. For a film of several views side by side, name them from left to right, `{"src": "clips/walk.mp4", "sides": ["Before", "After"]}`, so a pin on it can be read as which view. `riffle deck` keeps a small H.264 mp4 as it is, turns anything else into one under 2 MB with no sound, and makes a poster from it, all with ffmpeg. Give `{"src": "...", "poster": "..."}` to choose the poster. Without ffmpeg only mp4s go, with no poster. Use films for motion that a still can't show, and keep them short: a few seconds that loop.
 
 **Sound.** `"audio": ["clips/voice.wav"]` sits beside `images` and `videos`, on a card or a part, and a board item can have `"audio"` in place of a picture. Nothing plays by itself: they tap a clip to hear it, one at a time, and films stay silent. `riffle deck` keeps a small AAC `.m4a` or MP3 as it is, turns anything else into mono AAC at about 64 kbps with ffmpeg, and says what the clips weigh. Give `{"src": "...", "label": "..."}` to name a clip on a card. Without ffmpeg only m4a and mp3 go. Use sound for what has to be heard, like picking a voice, and keep clips to a few seconds.
 
@@ -147,12 +147,31 @@ If a card is technical with no context, they'll send it back. So:
 - **Links** in their words point at a card, like `[Gates](riffle:proj/paths/gates)`, made with the link button. `riffle answers` writes each out as where it goes: `[Gates → My project › Garden › Paths › Gates]`. "Like this one" with a link means that card.
 - **Things brought in**: a comment (or their notes) can hold references to a picture, a film at a moment, a drawing, or quoted words from a card, like `[Film at 0:12](riffle:...)`. They see each as a small blue chip. `riffle answers` writes out which picture or film and when: look at it there.
 - **Drawings** are pictures they drew on, to circle or arrow what they mean. `riffle answers` lists each with what it was drawn over. Open it: the circle is the point of the comment.
+- **Pins** are spots they pointed at, on a picture or on one frame of a film, each with a few words: `pin 2 on part feet (Feet), film img/feet.mp4 at 0:01.10, frame 27 of 48, 62% across, 71% down: "the foot slides here"`. They show under their card. A pin means "this, exactly here", so never guess at it from the words: look at it. See Pins below.
 - **Parts** show under their card: `part feet (Feet): PROBLEM, "they slide"`. A part can be marked or commented on without the card being swiped. `riffle redeal` lists parts marked problem, decent or huh.
 - **Board items** can have comments of their own, from the full-screen look at one, or for a sound from the strip under the grid: `item f1 (Spinning): "the spin wobbles"`, under their board.
 - **Deck: replan** means the whole deck's premise is off. Rethink it from the base. **Started over** means they want to go through it again.
 - **Feel test** lines are test answers, but they're still their words. See them with `riffle answers --pack feel-test`.
 
 Log what comes back the way your project logs what they say.
+
+### Pins: look at the spot they pointed at
+
+On any picture or film they can drop a pin: a tap on the spot, on the very frame, with a few words. It's how they say what "it's just wrong" can't.
+
+```
+riffle pins --deck <deck>                 every pin on the deck, in words
+riffle pins --deck <deck> --out <folder>  and each as two pictures, with pins.txt listing them
+riffle pins --deck <deck> --card <card>   one card's
+riffle pins --all                         ones made on an earlier version of a card too
+```
+
+- For each pin, `--out` writes the whole picture, or the exact frame of the film that was on their screen, with a red ring on the spot (`…-frame.jpg`), and a close-up around it (`…-close.jpg`). **Open both** before you change anything: the ring is the point, and the words are only a hint at it.
+- The list says the frame ("frame 27 of 48"), the spot in pixels, and which half of the picture it's in. On a side-by-side film that tells you which view. Give such a film `"sides": ["Before", "After"]` in its deck, and the list names the view instead.
+- If you've replaced a film since they pinned it, the pictures still come from the one they saw, and the list says so.
+- A second try of a card leaves its old pins behind: they were about the version before. `--all` shows them.
+- When you deal a fix back, say which pins it answers, by number: "Pin 2: the foot stays planted now."
+- Needs ffmpeg for the pictures. Without `--out` it only lists.
 
 ## Waiting for them, then carrying on
 
