@@ -133,11 +133,18 @@ def git(*args, check=True):
     return r
 
 
+SYNCED = False
+
+
 def sync():
-    """Brings the clone up to date. No signal only earns a warning: what's here can still be read."""
+    """Brings the clone up to date, once a run. No signal only earns a warning: what's here can still be read."""
+    global SYNCED
+    if SYNCED:
+        return
+    SYNCED = True
     r = git('pull', '-q', '--ff-only', check=False)
     if r.returncode:
-        print(f'  warning: could not update from GitHub, so this is what the clone already has. {r.stderr.strip()[:200]}')
+        print(f'  warning: could not update from GitHub, so this is what the clone already has. {r.stderr.strip().splitlines()[0][:200] if r.stderr.strip() else ""}')
 
 
 def in_batches(names, limit=6000):
@@ -1178,8 +1185,23 @@ def pin_order(card):
     return lambda e: (order.index(e.get('part')) + 1 if e.get('part') in order else 0, e.get('n') or 0, str(e.get('at')))
 
 
-def answer_line(a, card):
+def parts_sum(card, said):
+    """What stands on a card's parts, in a few words: "3 good, 1 problem, 1 decent, 1 not marked". On a card
+    in parts this is the answer: the swipe on the card itself mostly means they were done with it."""
+    ids = [p.get('id') for p in (card or {}).get('parts') or []]
+    if not ids:
+        return ''
+    counts = {}
+    for pid in ids:
+        e = said.get(pid)
+        word = (part_word(e).lower() if e and e.get('mark') else 'words only' if e and (e.get('comment') or e.get('images')) else 'not marked')
+        counts[word] = counts.get(word, 0) + 1
+    return ', '.join(f'{n} {w}' for w, n in counts.items())
+
+
+def answer_line(a, card, parts=None):
     title = a.get('title') or (card or {}).get('title') or a['card']
+    parts_said = parts_sum(card, parts or {})
     parts = [word_for(a, card)]
     if a.get('selected') is not None:
         chosen = names_of(card, a['selected'])
@@ -1188,7 +1210,11 @@ def answer_line(a, card):
             parts.append('(your pick, nothing tapped)')
     if a.get('handledAt'):
         parts.append('on your handled conclusion')
+    if card and a.get('cardVersion', 1) < card.get('version', 1):
+        parts.append(f'on version {a.get("cardVersion", 1)}, before your second try: version {card.get("version", 1)} is still owed')
     line = f'  {a["card"]} ({title}): ' + ', '.join(str(p) for p in parts)
+    if parts_said:
+        line += f' on the card. Its parts: {parts_said}'
     if a.get('comment'):
         line += f'\n      "{readable(a["comment"])}"'
     if a.get('images'):
@@ -1223,7 +1249,7 @@ def cmd_answers(a):
             for card_id in sorted(c for c in cards if c):
                 card = card_in(pack, deck_id, card_id)
                 if card_id in d['answers']:
-                    print(answer_line(d['answers'][card_id], card))
+                    print(answer_line(d['answers'][card_id], card, d['parts'].get(card_id, {})))
                 elif card_id in d['drafts']:
                     dr = d['drafts'][card_id]
                     if dr.get('text'):
