@@ -260,8 +260,8 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
           else if (left) { // back where it was left
             film.currentTime = Math.min(left.t, film.duration || left.t);
             film.playbackRate = left.rate || 1;
-            if (!left.paused && !penOn) film.play().catch(() => {});
-          } else if (!penOn) film.play().catch(() => {});
+            if (!left.paused && !penOn && !pinOn) film.play().catch(() => {});
+          } else if (!penOn && !pinOn) film.play().catch(() => {}); // opened to pin, it waits on its first frame
           syncFilm();
         };
         film.src = url;

@@ -3884,6 +3884,7 @@ ok(backPins.pic && backPins.film, 'every picture and film on a card has a pin bu
 await shot('128-back-pin-buttons');
 const mPicPath = await ev(`document.querySelector('.card[data-pos="0"] .back .mpicw img').dataset.path`);
 const mediaEvents = async card => (await everyEvent()).filter(e => e.type === 'media' && e.card === card);
+const draftBefore = await ev(`__riffle.current.s.drafts.clip||''`);
 await tap('.card[data-pos="0"] .back .mpicw img');
 await sleep(500);
 ok(await seenBox('.viewer-say') && await seenBox('.viewer-pin'), 'a picture on a card opens full screen with a speech bubble beside Pin, as a spread item does');
@@ -3897,7 +3898,7 @@ await tap('.say-done');
 await sleep(500);
 let me = (await mediaEvents('clip')).pop();
 ok(me && me.on === mPicPath && me.media === 'picture' && me.comment === 'The colours are off here' && !me.part && me.cardVersion === 1 && me.kind === 'report', 'Done sends it, kept with that picture: the card, the picture and the words', JSON.stringify(me));
-ok(!(await ev(`(__riffle.current.s.drafts.clip||'')`)) && !(await ev(`!!document.querySelector('.composer:not([hidden])')`)), "and nothing goes into the card's own comment box");
+ok((await ev(`__riffle.current.s.drafts.clip||''`)) === draftBefore && !(await ev(`!!document.querySelector('.composer:not([hidden])')`)), "and nothing goes into the card's own comment box", JSON.stringify(draftBefore));
 await tap('.viewer-x');
 await sleep(300);
 const mMarked = await ev(`(()=>{const b=document.querySelector('.card[data-pos="0"] .back');const c=b.querySelector('.back-scroll > .pins-chip');return {said:b.querySelector('.mpicw').classList.contains('said'),chip:c&&!c.hidden?c.textContent:''}})()`);
@@ -3905,6 +3906,9 @@ ok(mMarked.said && /1 comment/.test(mMarked.chip), "the picture is marked, and t
 await tap('.card[data-pos="0"] .back .clip .m-pin');
 await sleep(700);
 ok(await ev(`document.querySelector('.viewer').classList.contains('is-pinning')`) && await seenBox('.viewer-pinrow'), "the film's pin button opens it full screen with Pin already on");
+for (let i = 0; i < 40 && !(await ev(`(document.querySelector('.viewer video')||{}).videoWidth>0`)); i++) await sleep(100);
+await sleep(300);
+ok(await ev(`document.querySelector('.viewer video').paused`), 'and the film waits, paused, for the spot to be tapped');
 await shot('130-film-pin-on');
 await tap('.pin-done');
 await sleep(150);

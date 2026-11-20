@@ -1510,6 +1510,8 @@ export class DeckView {
       const words = saidOnMedia(this.s, cardId, chip.dataset.part || null);
       chip.hidden = !words;
       chip.querySelector('span').textContent = words;
+      const icon_ = /pin/.test(words) ? 'pin' : 'message-square-text'; // only comments: a speech bubble, not a pin
+      if (chip.dataset.icon !== icon_) { chip.dataset.icon = icon_; chip.querySelector('svg').outerHTML = icon(icon_); }
     });
   }
 
