@@ -225,7 +225,7 @@ So: `riffle started` when you begin, `riffle wait` (or `--stop`) when you're don
 **If your session restarted while waiting**, the wait may have fired with nobody listening. It leaves a note until a writer runs `riffle started`: `riffle status` shows it as A WAIT FIRED, and `riffle wait` on that pack returns at once with what fired. Check `riffle status` at the start of every session.
 
 - **Exit 0** prints what woke it. **Exit 2** means nothing came within `--hours` (12 by default): run it again if you still need it.
-- The wait only reads from GitHub, and never touches the clone's working folder, so you can send other decks while it runs. It writes once at the start, to mark decks needed together.
+- The wait only reads from GitHub, into a ref of its own, and never touches the clone's working folder or what a pull reads, so you, and other sessions sharing the clone, can pull and send decks while it runs. It writes once at the start: Done, and the decks needed together.
 - This needs the session left open and the PC awake.
 
 ## Dealing a card back, and marking it handled

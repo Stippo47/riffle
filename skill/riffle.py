@@ -4,6 +4,7 @@
 Everything goes through a local clone of the private data repo, with plain git. See SKILL.md.
 """
 import argparse
+import atexit
 import bisect
 import getpass
 import hashlib
@@ -129,8 +130,17 @@ def data_repo():
 DATA = None
 
 
+# What git says when another command in the same clone holds a lock, or rewrote FETCH_HEAD mid-pull, at that
+# moment. Every session on this machine shares the clone, so these are tried again rather than given up on.
+GIT_CLASHES = ('.lock', 'cannot lock ref', 'Unable to create', 'no candidates for merging', 'another git process', 'unable to update local ref')
+
+
 def git(*args, check=True):
-    r = subprocess.run(['git', *args], cwd=DATA, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    for tries in range(6):
+        r = subprocess.run(['git', *args], cwd=DATA, capture_output=True, text=True, encoding='utf-8', errors='replace')
+        if r.returncode == 0 or not any(c in (r.stderr or '') for c in GIT_CLASHES):
+            break
+        time.sleep(0.4 * (tries + 1))
     if check and r.returncode:
         die(f'git {" ".join(args)} failed:\n{r.stderr.strip() or r.stdout.strip()}')
     return r
@@ -2305,9 +2315,16 @@ def remote_head():
     return r.stdout.split()[0] if r.returncode == 0 and r.stdout.strip() else None
 
 
+# The clone is shared: every session on this machine uses it, and a wait polls it every minute while others
+# send decks. So a wait fetches into a ref of its own, one per process, and never writes FETCH_HEAD or
+# origin/main: a `git pull` running beside it (riffle's own, or a writer's) reads FETCH_HEAD between its fetch
+# and its merge, and a wait rewriting it in that moment made the pull fail with "no candidates for merging".
+WAIT_REF = f'refs/riffle/wait-{os.getpid()}'
+
+
 def fetch_main():
-    """Updates origin/main without touching the working folder, so an agent writing a deck in this clone at the same time is safe."""
-    return git('fetch', '-q', 'origin', 'main', check=False).returncode == 0
+    """Updates this wait's own copy of GitHub's main, touching nothing another command in this clone reads."""
+    return git('fetch', '-q', '--no-write-fetch-head', 'origin', f'+refs/heads/main:{WAIT_REF}', check=False).returncode == 0
 
 
 def tree_names(ref, folder):
@@ -2486,8 +2503,9 @@ def cmd_wait(a):
     give_up = start + a.hours * 3600
     mark_with(pack, decks, True)
 
+    atexit.register(lambda: git('update-ref', '-d', WAIT_REF, check=False))  # its own ref goes with it
     fetch_main()
-    base = git('rev-parse', 'origin/main', check=False).stdout.strip()
+    base = git('rev-parse', WAIT_REF, check=False).stdout.strip()
     # New means a file that lands after the wait starts, not a time on their phone's clock, so words
     # queued offline and sent later still count.
     there = tree_names(base, 'answers')
@@ -2499,7 +2517,7 @@ def cmd_wait(a):
         head = remote_head()
         if head and head != last_head and fetch_main():
             last_head = head
-            ref = 'origin/main'
+            ref = WAIT_REF
             events = events_at(ref)
             for e in events:
                 e['_seen'] = first_seen.setdefault(e.get('_file'), time.time())

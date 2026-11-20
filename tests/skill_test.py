@@ -29,7 +29,10 @@ def ok(cond, what, extra=''):
 
 
 def git(where, *args):
-    return subprocess.run(['git', *args], cwd=where, capture_output=True, text=True, check=True)
+    r = subprocess.run(['git', *args], cwd=where, capture_output=True, text=True)
+    if r.returncode:  # say what git said, not just that it failed
+        raise RuntimeError(f'git {" ".join(args)} in {where.name} failed ({r.returncode}): {(r.stderr or r.stdout).strip()}')
+    return r
 
 
 def run(*args, cwd=None):
@@ -896,6 +899,17 @@ code, out = run('deck', str(work / 'd/heard.json'), '--pack', 'proj', '--id', 'h
 beat = order_file()['work'][key]
 ok(code == 0 and beat['at'] > '2026-11-01' and beat['since'] == me['since'] and beat['state'] == 'working', 'anything a Working writer sends to the pack says it was heard from, keeping when it began', beat)
 w = start_wait('--deck', 'fifth', '--quiet', '30')
+# A wait polls the shared clone while other commands pull and push in it. Its fetches used to rewrite
+# FETCH_HEAD under a pull, which then failed with "no candidates for merging".
+clashes = []
+for i in range(20):  # GitHub moves on, and a pull follows at once, as the wait fetches the same change
+    (other / 'race.txt').write_text(str(i)); git(other, 'add', '-A'); git(other, 'commit', '-q', '-m', f'race {i}'); git(other, 'pull', '-q', '--rebase', 'origin', 'main'); git(other, 'push', '-q', 'origin', 'HEAD:main')
+    for _ in range(3):
+        r = subprocess.run(['git', 'pull', '-q', 'origin', 'main'], cwd=clone, capture_output=True, text=True)
+        if r.returncode:
+            clashes.append(r.stderr.strip()[:160])
+ok(not clashes and w.poll() is None, 'a wait running in the clone never breaks a pull beside it', clashes)
+ok(f'refs/riffle/wait-{w.pid}' in git(clone, 'for-each-ref', '--format=%(refname)', 'refs/riffle').stdout, 'it fetches into a ref of its own instead', git(clone, 'for-each-ref', 'refs/riffle').stdout)
 done = order_file()['work'][key]
 ok(done['state'] == 'done', 'a writer that waits again shows Done: it has nothing left but to wait for them', done)
 run('started', '--pack', 'proj', '--deck', 'second', '--quiet')
@@ -906,6 +920,7 @@ ok('working' not in order_file()['decks'].get('second', {}).get('tags', []) and 
 phone_sends('2026-11-16T09-00-11-000Z-s01.json', {'eid': 's1', 'at': nowz(1), 'type': 'wake', 'deck': None, 'topic': None, 'answered': 6, 'total': 6})
 code, out = finished(w)
 ok(code == 0 and 'Send: they answered everything in the pack and sent it (6 cards)' in out, 'Send on the whole pack wakes a wait on any of its decks, at once', out)
+ok(f'refs/riffle/wait-{w.pid}' not in git(clone, 'for-each-ref', '--format=%(refname)', 'refs/riffle').stdout, 'and that ref goes when the wait ends')
 ok('the pack shows Working' in out and 'the pack shows Done' in out, 'and the wake says how to show Working, and Done', out)
 clear_woke()
 code, out = run('answers', '--pack', 'proj', '--all')
