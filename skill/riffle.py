@@ -2418,7 +2418,19 @@ def mark_with(pack, decks, together):
     A writer that waits has nothing left but to wait, so the pack also shows Done for it (see set_work)."""
     sync()
     o = load_order(pack)
-    changed = set_work(o, 'done') if together else False
+    # The decks it said it was working on stop saying Being worked on, as the pack stops saying Working.
+    before = (o.get('work') or {}).get(writer_key()) or {}
+    changed = False
+    for d in before.get('decks') or [] if before.get('state') == 'working' and together else []:
+        entry = o['decks'].get(d) or {}
+        if 'working' in (entry.get('tags') or []):
+            entry['tags'] = [t for t in entry['tags'] if t != 'working']
+            if not entry['tags']:
+                entry.pop('tags')
+            if not entry:
+                o['decks'].pop(d, None)
+            changed = True
+    changed = (set_work(o, 'done') if together else False) or changed
     for d in decks if len(decks) > 1 else []:
         entry = o['decks'].setdefault(d, {})
         want = sorted(x for x in decks if x != d) if together else None

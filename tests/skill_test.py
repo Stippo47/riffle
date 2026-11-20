@@ -898,6 +898,11 @@ ok(code == 0 and beat['at'] > '2026-11-01' and beat['since'] == me['since'] and 
 w = start_wait('--deck', 'fifth', '--quiet', '30')
 done = order_file()['work'][key]
 ok(done['state'] == 'done', 'a writer that waits again shows Done: it has nothing left but to wait for them', done)
+run('started', '--pack', 'proj', '--deck', 'second', '--quiet')
+ok('working' in order_file()['decks'].get('second', {}).get('tags', []), 'started on a deck tags it Being worked on')
+w.kill(); w.communicate()
+w = start_wait('--deck', 'fifth', '--quiet', '30')
+ok('working' not in order_file()['decks'].get('second', {}).get('tags', []) and order_file()['work'][key]['state'] == 'done', 'and waiting again takes that tag off as it shows Done', order_file())
 phone_sends('2026-11-16T09-00-11-000Z-s01.json', {'eid': 's1', 'at': nowz(1), 'type': 'wake', 'deck': None, 'topic': None, 'answered': 6, 'total': 6})
 code, out = finished(w)
 ok(code == 0 and 'Send: they answered everything in the pack and sent it (6 cards)' in out, 'Send on the whole pack wakes a wait on any of its decks, at once', out)

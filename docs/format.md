@@ -75,7 +75,7 @@ The writer's say on decks, written by `riffle order` and `riffle archive`, so se
 | They press Send | | **Sent**, and a `wake` with no deck goes up, which wakes every `riffle wait` on the pack at once |
 | `riffle started` | `state: working`, `since` and `at` now | **Working**, since then, with the note on the pack's page |
 | The writer sends anything to the pack (a deck, a card handled, an order) while working | `at` now | Still Working |
-| `riffle wait`, or `riffle started --stop` | `state: done`, `at` now | **Done** |
+| `riffle wait`, or `riffle started --stop` | `state: done`, `at` now, and the decks it named lose their `working` tag | **Done** |
 | Three hours with nothing from a Working writer | unchanged | **Last heard** and when, never Working for ever |
 | New cards come | unchanged | What's left, with Working under it while a writer works |
 
