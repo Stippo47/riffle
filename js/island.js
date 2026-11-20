@@ -9,11 +9,14 @@ import * as store from './store.js';
 
 const KEY = 'island';
 const CORNER_KEY = 'island-corner';
+const SPOT_KEY = 'island-spot'; // where it was let go, as shares of the screen, from 0.16.0
+const EDGE = 6;     // how near the screen's edges it can go, inside the safe areas
 const TAP_MOVE = 8;
 const CORNERS = ['tl', 'tr', 'bl', 'br'];
 
 let state = null;   // { pack, deck, card, part, composing, partComposing, show: { deckTitle, text, title, rarity, kind } }
 let corner = 'br';
+let spotAt = null;  // { fx, fy }: the middle of the mini player, as shares of the screen's width and height
 let layer = null, el = null;
 let onTap = () => {};
 
@@ -23,6 +26,7 @@ export async function initIsland(tap) {
   onTap = tap;
   state = (await store.get(KEY).catch(() => null)) || null;
   corner = (await store.get(CORNER_KEY).catch(() => null)) || 'br';
+  spotAt = (await store.get(SPOT_KEY).catch(() => null)) || null;
   draw();
 }
 
@@ -44,12 +48,16 @@ function insets() {
   const cs = getComputedStyle(probe);
   return { sat: parseFloat(cs.height) || 0, sab: parseFloat(cs.borderBottomWidth) || 0 };
 }
+// Once it's been dragged, it stays where it was let go, anywhere, right into the corners, a little in from
+// the edges. Before that it starts in a corner, clear of the title rows and the buttons.
 function spot(c) {
   const { sat, sab } = insets();
   const W = layer.clientWidth, H = layer.clientHeight, w = el.offsetWidth, h = el.offsetHeight;
   const kb = document.documentElement.classList.contains('kb');
-  const x = c[1] === 'l' ? 10 : W - w - 10;
-  const y = kb ? sat + 10 : c[0] === 't' ? sat + 104 : H - h - (sab + 80);
+  const fit = (v, lo, hi) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+  const x = spotAt ? fit(spotAt.fx * W - w / 2, EDGE, W - w - EDGE) : c[1] === 'l' ? 10 : W - w - 10;
+  if (kb) return { x, y: sat + 10 };
+  const y = spotAt ? fit(spotAt.fy * H - h / 2, sat + EDGE, H - h - sab - EDGE) : c[0] === 't' ? sat + 104 : H - h - (sab + 80);
   return { x, y };
 }
 function place(x, y) {
@@ -71,7 +79,7 @@ function build() {
   if (window.visualViewport) window.visualViewport.addEventListener('resize', settle);
   new MutationObserver(settle).observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
 
-  // Dragged anywhere, it glides to the nearest corner when let go. A tap that barely moves brings it back.
+  // Dragged anywhere, it stays where it's let go, kept on the screen. A tap that barely moves brings it back.
   // An iPhone can cancel a touch it takes for its own (a scroll or a swipe home): the drag still counts.
   let drag = null;
   el.addEventListener('pointerdown', e => {
@@ -99,7 +107,9 @@ function build() {
     const w = el.offsetWidth, h = el.offsetHeight;
     const cx = d.at.x + (last.x - d.x0) + w / 2, cy = d.at.y + (last.y - d.y0) + h / 2;
     corner = `${cy < layer.clientHeight / 2 ? 't' : 'b'}${cx < layer.clientWidth / 2 ? 'l' : 'r'}`;
+    spotAt = { fx: +(cx / layer.clientWidth).toFixed(4), fy: +(cy / layer.clientHeight).toFixed(4) };
     store.set(CORNER_KEY, corner);
+    store.set(SPOT_KEY, spotAt);
     el.dataset.corner = corner;
     settle();
   };

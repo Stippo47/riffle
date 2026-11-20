@@ -1,6 +1,6 @@
 # One way for each thing
 
-A proposal, from 0.15.0. Riffle grew one feature at a time, and some things now work two ways, or mean different things in different places. Each item below says what that is, the one plain rule that would replace it, and what changes for whoever answers on the phone and for writers. They're ranked by how much they'd save the person answering, judged from how the app is really used.
+A proposal, from 0.15.0, with what was decided since. Riffle grew one feature at a time, and some things now work two ways, or mean different things in different places. Each item below says what that is, the one plain rule that would replace it, and what changes for whoever answers on the phone and for writers. They're ranked by how much they'd save the person answering, judged from how the app is really used.
 
 **Built** means it's in 0.15.0. **Question** means it would change what a swipe means, remove or hide something, or change a rule the person answering set, so it's theirs to decide; each has a suggested answer.
 
@@ -38,7 +38,7 @@ Comments on films describe a moment and a place in words, and almost never give 
 - **Rule.** A fault in a picture or film is pinned, not described.
 - **Phone.** Pins on every picture and film opened full screen (built in 0.15.0).
 - **Writers.** Built: SKILL.md says to invite pins in a film card's `why`, and to answer them by number.
-- **Question.** Offer pins where comments are written: a small pin button on each film and picture on a card's back and in each part, opening it full screen with pinning on. Suggested: yes.
+- **Question.** Offer pins where comments are written: a small pin button on each film and picture on a card's back and in each part, opening it full screen with pinning on. Suggested: yes. **Answered yes; built in 0.16.0.**
 
 ## 5. A deck's life: one rule for done, and writers clear up
 
@@ -47,7 +47,7 @@ Many decks are never touched, and many finished ones stay on the page. "Done" co
 - **Rule.** A deck is done when Deck's done was pressed and nothing is owed. "Left" is what's owed; "waiting" is only what hasn't been sent. A writer archives its own finished decks at the end of its session.
 - **Phone.** Built: a deck with a card owed again shows "1 left", not Done, and doesn't count as finished. The first screen says "cards left", and the grid's unanswered tile says "Not answered". "Waiting on you" stays, as the writer's tag.
 - **Writers.** Built: `riffle tidy` lists, changing nothing, decks finished and not archived, decks done with cards owed again, decks untouched for a week, thoughts with no answer, and how long since answers were marked read. `riffle status` names a deck done with cards owed again.
-- **Questions.** Should a deck done for 3 days archive itself? Suggested: yes, as if Archive had been pressed, so it can be brought back. Should writers archive decks untouched for two weeks, after asking once? Suggested: yes.
+- **Questions.** Should a deck done for 3 days archive itself? Suggested: yes, as if Archive had been pressed, so it can be brought back. Should writers archive decks untouched for two weeks, after asking once? Suggested: yes. **Answered:** the first yes, built in 0.16.0 (the phone tidies a deck away three days after Deck's done); the second no: an untouched deck is one not got to yet, and is never archived.
 
 ## 6. Read marks per deck
 
@@ -64,6 +64,7 @@ There are four ways: draw on it, bring it to the comment with a long press, the 
 - **Rule.** To say something about one picture or film, pin it.
 - **Phone.** Nothing removed.
 - **Question.** Should a board item's bubble become a pin? Suggested: no, a whole-item comment isn't a spot. Keep the pen and Bring to comment, but stop teaching them.
+- **0.16.0.** The other way round: the bubble is now on every picture and film opened full screen, and beside every sound, for a comment kept with that one picture. Each picture carries one comment and any number of pins.
 
 ## 8. Same words for the same thing
 
@@ -76,7 +77,7 @@ There are four ways: draw on it, bring it to the comment with a long press, the 
 Six boxes (card, part, item, pin, notes, thoughts) differ: some take photos and links, some don't, and the strip of buttons takes room.
 
 - **Rule.** Every box: the words, one small corner button for photo and link, then Done.
-- **Question.** Suggested: yes; the card's box keeps the swipe as its Done.
+- **Question.** Suggested: yes; the card's box keeps the swipe as its Done. **Answered:** not sure yet; left as it is.
 
 ## 10. Undo: what you just did
 
@@ -84,7 +85,7 @@ Undo took back a deck's last answer however long ago it was, which once took bac
 
 - **Rule.** Undo takes back what you did in this visit to the deck.
 - **Phone.** Built: in a deck opened by following a link, Undo reaches only what was done since. Built switched off: the same everywhere.
-- **Question.** Switch it on everywhere? Suggested: yes.
+- **Question.** Switch it on everywhere? Suggested: yes. **Answered:** Undo is used to take back a verdict, like a "previous" beside Skip, so it stays as it is.
 
 ## 11. Writers' commands: one way to name things
 
@@ -99,7 +100,7 @@ Undo took back a deck's last answer however long ago it was, which once took bac
 | Links typed into words | Writers link; the strip takes room | One corner button (item 9) |
 | Bring to comment | Behind a long press, and pins do the film moment better | Keep, stop teaching it |
 | Your own decks | Comments and Thoughts cover it | Keep |
-| Thoughts | Out of reach from inside a deck, where notes about the app get written | Question: an "About the app" line in the Notes sheet. Suggested: yes |
+| Thoughts | Out of reach from inside a deck, where notes about the app get written | Question: an "About the app" line in the Notes sheet. Suggested: yes. Not clear as asked; left |
 | Replan, Start over | Not needed | Keep |
 | A comment alone as an answer | Up is only the way into the box | Leave |
 | Archive from the phone | Not needed if writers tidy | Keep |

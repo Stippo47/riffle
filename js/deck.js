@@ -699,8 +699,11 @@ export class DeckView {
         return;
       }
       const b = e.target.closest('[data-act]');
-      if (!b || b.disabled) return;
-      this.act(b.dataset.act, b);
+      if (b && !b.disabled) { this.act(b.dataset.act, b); return; }
+      // A tap anywhere on a card's back that does nothing else turns it back to its face. Words being
+      // selected, a box, a part's buttons and anything with a job of its own keep the tap.
+      const sel = getSelection();
+      if (!b && this.flipped && !this.composing && !this.openPart && !this.soundSay && e.target.closest('.card[data-pos="0"] .back-scroll') && !e.target.closest('button, a, input, .pad, .part-pad, .part-acts, .sound-sayer, .photostrip, .sndline') && (!sel || sel.isCollapsed)) this.flip(false);
     };
     // The top row answers as the finger lifts, not on the click after it. A browser can swallow
     // that click when it follows a throw, and Undo is exactly what you tap straight after one.
@@ -746,15 +749,19 @@ export class DeckView {
     dragToClose(this.notesSheet, t => (t.closest && t.closest('.pad')) || null, follow(this.notesSheet), () => this.toggleNotes(false));
 
     this.untrack = track(this.table, {
-      blocked: e => this.flipped || !this.topId() || (e.target && e.target.closest && e.target.closest('button')),
+      // On a card's back, a sideways drag is a swipe too, so a card can be answered while it's being read.
+      // Up and down there scroll it, and a box being typed in takes its own touches.
+      blocked: e => !this.topId() || (e.target && e.target.closest && e.target.closest(this.flipped ? 'button, .pad, .part-pad, .sound-sayer, .rlink, .weblink' : 'button')),
+      sideways: () => this.flipped,
       start: e => { this.dragFrom = e.target; this.scrolling = null; },
       move: d => this.onMove(d),
       release: d => this.onRelease(d),
       cancel: () => { if (this.broke) this.broke = false; else this.spring(); },
       tap: e => this.onTap(e),
-      pinchStart: () => { this.spring(); this.pinchFired = false; },
-      pinch: s => this.onPinch(s),
-      pinchEnd: () => this.onPinchEnd(),
+      // A pinch on a card's back does nothing: it's for reading, and a picture there opens to zoom.
+      pinchStart: () => { if (this.flipped) return; this.spring(); this.pinchFired = false; },
+      pinch: s => { if (!this.flipped) this.onPinch(s); },
+      pinchEnd: () => { if (!this.flipped) this.onPinchEnd(); },
     });
     // At the end of a deck there's no card to pinch, so the end itself takes the pinch.
     watchPinch(this.endBox, () => { if (!this.topId() && this.nav.shrink) this.nav.shrink(); });
@@ -2133,6 +2140,7 @@ export class DeckView {
   }
 
   onTap(e) {
+    if (this.flipped) return; // a tap on the back is a click on what's there: see the host's click
     this.lift = { t: performance.now(), x: e.clientX, y: e.clientY };
     const t = this.dragFrom || e.target; // the lift's own target is the table, which holds the finger
     const link = t && t.closest && t.closest('.rlink');

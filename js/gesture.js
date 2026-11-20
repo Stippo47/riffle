@@ -76,10 +76,13 @@ export function track(el, h) {
     if (h.blocked && h.blocked(e)) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    try { el.setPointerCapture(e.pointerId); } catch { /* synthetic pointers in tests */ }
+    // `sideways(e)`: only a sideways drag is a swipe here, as on a card's back, which scrolls up and down. The
+    // finger is only held once it goes sideways, so a tap still lands on what it's on, and an upright drag scrolls.
+    const lazy = !!(h.sideways && h.sideways(e));
+    if (!lazy) try { el.setPointerCapture(e.pointerId); } catch { /* synthetic pointers in tests */ }
     if (pts.size === 1) {
       ignore = false;
-      drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: e.timeStamp, moved: false };
+      drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, t0: e.timeStamp, moved: false, lazy };
       h.start && h.start(e);
       samples = [{ x: e.clientX, y: e.clientY, t: e.timeStamp }];
     } else if (pts.size === 2) {
@@ -96,8 +99,14 @@ export function track(el, h) {
     samples.push({ x: e.clientX, y: e.clientY, t: e.timeStamp });
     while (samples.length > 2 && e.timeStamp - samples[0].t > 90) samples.shift();
     const dx = e.clientX - drag.x0, dy = e.clientY - drag.y0;
-    if (!drag.moved && Math.hypot(dx, dy) > TUNE.tapMove) drag.moved = true;
-    if (drag.moved) h.move && h.move({ dx, dy });
+    if (!drag.moved && Math.hypot(dx, dy) > TUNE.tapMove) {
+      drag.moved = true;
+      if (drag.lazy) {
+        if (Math.abs(dy) >= Math.abs(dx)) { pts.delete(e.pointerId); drag = null; return; } // scrolling: not a swipe
+        try { el.setPointerCapture(e.pointerId); } catch { /* synthetic pointers in tests */ }
+      }
+    }
+    if (drag.moved) h.move && h.move(drag.lazy ? { dx, dy: 0 } : { dx, dy });
   };
   const onUp = e => {
     if (!pts.has(e.pointerId)) return;
@@ -109,10 +118,10 @@ export function track(el, h) {
     const dt = e.timeStamp - drag.t0;
     const first = samples[0], span = Math.max(1, e.timeStamp - first.t);
     const vx = (e.clientX - first.x) / span, vy = (e.clientY - first.y) / span;
-    const moved = drag.moved;
+    const moved = drag.moved, lazy = drag.lazy;
     drag = null;
     if (!moved) { if (dt < TUNE.tapMs) h.tap && h.tap(e); return; }
-    h.release && h.release({ dx, dy, vx, vy });
+    h.release && h.release(lazy ? { dx, dy: 0, vx, vy: 0 } : { dx, dy, vx, vy });
   };
   const onCancel = e => {
     if (!pts.has(e.pointerId)) return;
