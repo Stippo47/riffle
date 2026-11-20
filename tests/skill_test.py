@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Runs the writer's commands against a throwaway git repo. It never touches the real data repo, and
 sends no real notifications, because the home folder is swapped for an empty one too."""
+import atexit
 import getpass
 import json
 import os
@@ -753,9 +754,14 @@ def nowz(ahead=0):
     return _dt.fromtimestamp(time.time() + ahead, _tz.utc).strftime('%Y-%m-%dT%H:%M:%S.000Z')
 
 
+WAITS = []  # every wait this starts is stopped when the tests end, however they end: none is left polling for hours
+atexit.register(lambda: [x.kill() for x in WAITS if x.poll() is None])
+
+
 def start_wait(*args):
     env = {**os.environ, 'RIFFLE_DATA': str(clone), 'HOME': str(home), 'USERPROFILE': str(home), 'PYTHONIOENCODING': 'utf-8'}
     w = subprocess.Popen([sys.executable, str(RIFFLE), 'wait', '--pack', 'proj', '--every', '0.3', *args], cwd=work, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', env=env)
+    WAITS.append(w)
     time.sleep(3)  # its first look sets what counts as already there
     return w
 

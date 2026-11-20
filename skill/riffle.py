@@ -2324,7 +2324,8 @@ WAIT_REF = f'refs/riffle/wait-{os.getpid()}'
 
 def fetch_main():
     """Updates this wait's own copy of GitHub's main, touching nothing another command in this clone reads."""
-    return git('fetch', '-q', '--no-write-fetch-head', 'origin', f'+refs/heads/main:{WAIT_REF}', check=False).returncode == 0
+    # --refmap= stops git also moving origin/main as it goes, which a pull beside it holds a lock on.
+    return git('fetch', '-q', '--no-write-fetch-head', '--refmap=', 'origin', f'+refs/heads/main:{WAIT_REF}', check=False).returncode == 0
 
 
 def tree_names(ref, folder):
