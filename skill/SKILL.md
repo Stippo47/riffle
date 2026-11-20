@@ -45,7 +45,7 @@ riffle archive <pack> <deck>                    out of the way, at the end of th
 - Give the deck that unblocks your work priority 1, and tag what you're waiting on them for `waiting`. Tag a deck you're still adding to `working`.
 - `kind` (report, questions, board) is worked out from the cards; set it when that's wrong.
 - **Archive** decks that are fully answered or handled, once a session is over and they've left the app for a while. They have said they don't mind. Nothing is deleted, an archived deck's cards stop counting as owed, and they can bring it back. They can archive one themselves too, which `riffle answers` reports.
-- **Clear up after yourself.** At the end of a session, run `riffle tidy --pack <pack>` and archive your own decks it lists as finished. Leave other sessions' decks to them. A deck it lists as done with a card owed again had an answer taken back on the phone: look before archiving it.
+- **Clear up after yourself.** At the end of a session, run `riffle tidy --pack <pack>` and archive your own decks it lists as finished. Leave other sessions' decks to them. A deck it lists as done with a card owed again had an answer taken back on the phone: look before archiving it. **Never archive a deck they haven't opened yet**: they just haven't got to it. Their phone also tidies a deck away by itself three days after Deck's done (`riffle answers` says "tidied away").
 - These live in `packs/<pack>/order.json`, so sending a deck again doesn't undo them. A deck file can also carry `priority`, `tags` and `kind`.
 
 ## Their own decks
@@ -70,7 +70,7 @@ riffle fit my-deck.json     how each card should fit the smallest iPhone
 riffle deck my-deck.json    checks, shrinks pictures, sends, and notifies the phone
 riffle misc my-card.json    one-offs join the Misc deck instead of making a deck of one
 riffle topic garden --title "Garden" --icon flowers --color "#2fa56f"
-riffle pack my-project --title "My project" --icon chest
+riffle pack my-project --title "My project" --icon chest   every pack shows an icon: without --icon it gets one by its title
 riffle icons potion         search the game-icons library by word
 ```
 
@@ -159,6 +159,7 @@ If a card is technical with no context, they'll send it back. So:
 - **Links** in their words point at a card, like `[Gates](riffle:proj/paths/gates)`, made with the link button. `riffle answers` writes each out as where it goes: `[Gates → My project › Garden › Paths › Gates]`. "Like this one" with a link means that card.
 - **Things brought in**: a comment (or their notes) can hold references to a picture, a film at a moment, a drawing, or quoted words from a card, like `[Film at 0:12](riffle:...)`. They see each as a small blue chip. `riffle answers` writes out which picture or film and when: look at it there.
 - **Drawings** are pictures they drew on, to circle or arrow what they mean. `riffle answers` lists each with what it was drawn over. Open it: the circle is the point of the comment.
+- **Comments on one picture, film or sound** are kept with it, not in the card's comment: `comment on film img/walk.mp4 in part feet (Feet): "the feet slide"`. They show under their card. Open that picture, film or sound before you answer it.
 - **Pins** are spots they pointed at, on a picture or on one frame of a film, each with a few words: `pin 2 on part feet (Feet), film img/feet.mp4 at 0:01.10, frame 27 of 48, 62% across, 71% down: "the foot slides here"`. They show under their card. A pin means "this, exactly here", so never guess at it from the words: look at it. See Pins below.
 - **Parts** show under their card: `part feet (Feet): PROBLEM, "they slide"`. A part can be marked or commented on without the card being swiped. `riffle redeal` lists parts marked problem, decent or huh.
 - **Board items** can have comments of their own, from the full-screen look at one, or for a sound from the strip under the grid: `item f1 (Spinning): "the spin wobbles"`, under their board.
@@ -205,6 +206,19 @@ riffle started --deck <a> --stop          when you've finished that work
 - With more than one `--deck`, their phone shows each of those decks' ends saying what else you need, so they know why you haven't started.
 - Thoughts and their own decks belong to the whole pack. A wait narrowed with `--deck` or `--topic` leaves them to the pack's other writers, unless you name them with `--on`.
 - A plain swipe never wakes you. Neither does the Feel test. Only what reaches GitHub after the wait starts counts as new; `--since <time>` counts earlier things too.
+
+- **Send**, on a pack they've answered all of, wakes every wait on the pack at once, whichever decks it names. `riffle answers` says SENT.
+
+**Working and Done, on their phone.** Each pack's row shows what its writers are doing, so they can see you picked up without asking:
+
+| You run | Their phone shows |
+|---|---|
+| `riffle started` (with or without `--deck`) | **Working**, since then, and your `--note` on the pack's page |
+| anything that sends to the pack while working (a deck, handled, order) | still Working: it counts as being heard from |
+| `riffle wait`, or `riffle started --stop` | **Done**: you've nothing left but to wait for them |
+| nothing for three hours while Working | **Last heard** and when |
+
+So: `riffle started` when you begin, `riffle wait` (or `--stop`) when you're done. On a job longer than three hours that sends nothing, run `riffle started` again now and then. `riffle status` shows each writer's line. You are named by your project folder, hashed, so two sessions in two folders show as two writers.
 
 **When you wake, you're not obliged to work.** Read what came back with `riffle answers`. If it settles your direction, run `riffle started` with the decks and a few words: their phone gets "Started on …", and the decks show Being worked on. That notification is how they know you picked up, so always send it. If a card that decides the direction is still open, don't guess: deal it back or ask, wait again, and say why with `riffle notify`. When the work is done, `riffle started --stop` takes Being worked on off.
 

@@ -31,7 +31,7 @@ read.json
 }
 ```
 
-`icon` is SVG text; only its paths are used, and they take the colour around them. A name from `js/icons.js` also works.
+`icon` is SVG text; only its paths are used, and they take the colour around them. A name from `js/icons.js` also works. `riffle pack` gives a pack made without `--icon` one from the icon library named after a word of its title, if the library is on that machine, or else `card-random`. They can pick another on their phone, from the icons the packs and topics already use; that stays on the phone and never changes this file.
 
 ## A deck
 
@@ -62,6 +62,24 @@ The writer's say on decks, written by `riffle order` and `riffle archive`, so se
 ```
 
 `with` is written by `riffle wait` when a writer needs several decks finished together, and taken off by `riffle started`. The deck's end then says what else the writer needs.
+
+**work** (from 0.16.0) is what each writer says about the pack, which their phone shows on its row as Working or Done. It's written by the skill, never by hand, one entry per writer. A writer is named by a short hash of the project folder it runs in (`w-` and eight letters), so two sessions in two folders are two writers and no folder name goes into the repo.
+
+```json
+{ "work": { "w-3fa2c1d0": { "state": "working", "since": "2026-11-20T14:05:00.000Z", "at": "2026-11-20T15:30:00.000Z", "note": "the walk", "decks": ["moves"] } } }
+```
+
+| What happens | The writer's entry | Their phone shows |
+|---|---|---|
+| They answer everything in the pack | | **Send** on the pack's row |
+| They press Send | | **Sent**, and a `wake` with no deck goes up, which wakes every `riffle wait` on the pack at once |
+| `riffle started` | `state: working`, `since` and `at` now | **Working**, since then, with the note on the pack's page |
+| The writer sends anything to the pack (a deck, a card handled, an order) while working | `at` now | Still Working |
+| `riffle wait`, or `riffle started --stop` | `state: done`, `at` now | **Done** |
+| Three hours with nothing from a Working writer | unchanged | **Last heard** and when, never Working for ever |
+| New cards come | unchanged | What's left, with Working under it while a writer works |
+
+Working shows whenever a writer is working. Send, Sent and Done show only once everything in the pack is answered: Done when a writer said it after their last answer and after their last Send. An entry a week old is dropped the next time the file is written.
 
 ## Their own decks: mine/<deck-id>.json
 
@@ -269,10 +287,12 @@ Every event has `v`, `eid` (unique), `at`, `pack`, `topic` and `deck`. Words typ
 | `draft` with `thought: true` | `text`, with `deck` and `card` null | A thought being typed, not filed yet. The latest wins, and filing replaces it |
 | `thought` | `id`, `text`, with `deck` null | A general thought about the pack |
 | `deck` | `verdict` (`done`, `replan`), `tally`, `answered`, `total` | The deck as a whole. `replan` means rethink it from the base; the answers still stand |
-| `part` | `card`, `cardVersion`, `title`, `kind`, `part`, `partTitle`, `mark`, `stamp`, `comment`, and on a board `item` | What's said about one part of a card. `mark` is a meaning like `swipe` (`right`, `left` or `down`), or null for none. The latest for a part stands, whether or not the card is answered. On a board, `item: true` means it's a comment on one item: `part` is the item's id, `partTitle` its label, and there's no mark |
+| `part` | `card`, `cardVersion`, `title`, `kind`, `part`, `partTitle`, `mark`, `stamp`, `comment`, and on a board `item` | What's said about one part of a card. `mark` is a meaning like `swipe` (`right`, `left` or `down`), or null for none. The latest for a part stands, whether or not the card is answered. On a board or an option card, `item: true` means it's a comment on one item or option: `part` is its id, `partTitle` its label, and there's no mark |
 | `pin` | `card`, `cardVersion`, `title`, `kind`, `pin`, `n`, `on`, `x`, `y`, `w`, `h`, `note`, and sometimes `part`, `partTitle`, `item`, `film`, `t`, `frame`, `fps`, `frames`, `removed` | A spot they pointed at, on a picture or on one frame of a film, with a few words. The latest for a `pin` stands, whether or not the card is answered. See Pins below |
 | `wake` | `answered`, `total` | They pressed **Deal in now**, at the deck's end or in its grid: start now on what's answered so far. It wakes a `riffle wait` on that deck at once, past the quiet minutes and any other deck it needs. From the grid, the deck isn't finished |
-| `archive` | `archived` | They archived the deck on the phone (`true`), or brought it back (`false`). Whichever of this and the writer's `archived` in order.json is later stands |
+| `wake` with `deck` null | `answered`, `total` | They answered everything in the pack and pressed **Send** (from 0.16.0). It wakes every `riffle wait` on the pack at once, whichever decks it names. See `work` under order.json |
+| `media` | `card`, `cardVersion`, `title`, `kind`, `on`, `media`, `comment`, and sometimes `part`, `partTitle` | A comment on one picture, film or sound of a card or a part (from 0.16.0), kept with it rather than in the card's comment. `on` is its path as the card names it; `media` is `picture`, `film` or `sound`. The latest for each card, part and `on` stands; an empty `comment` means they took it back |
+| `archive` | `archived`, and sometimes `auto` | They archived the deck on the phone (`true`), or brought it back (`false`). `auto: true` means it tidied itself away, three days after Deck's done. Whichever of this and the writer's `archived` in order.json is later stands |
 | `deck-reset` | `keptNotes` | They started the deck over. Answers on this deck from before this no longer stand, though anything they typed was still said. If `keptNotes`, comments came back as drafts on their cards, and the notes stayed |
 
 **Pictures.** An `answer`, `part`, `notes`, `thought` or `draft` event can carry `images`, a list of paths like `answers/img/<id>.jpg`. Pictures upload apart from the words, so one can arrive a little after the event that names it. Only the event that stands counts: a picture named by nothing that stands was taken back.

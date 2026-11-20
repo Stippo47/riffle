@@ -81,7 +81,7 @@ export function openViewer({ items, at = 0, picks = null, opener = null, onClose
         <div class="viewer-jog" aria-label="Slide for frame by frame"><i class="vj-ticks"></i><span class="vj-words"></span></div>
         <button class="viewer-step" data-step="1" aria-label="On one frame">${icon('frame-forward')}</button>
       </div>` : ''}
-      <div class="viewer-row${picks && pins ? ' tight' : ''}">
+      <div class="viewer-row${pins && (picks || (comments && many)) ? ' tight' : ''}">
         ${many ? `<button class="viewer-prev" aria-label="Previous">${icon('chevron-left')}</button>` : ''}
         ${ink ? `<button class="viewer-pen" aria-label="Draw on it">${icon('pencil')}<span>Draw</span></button>` : ''}
         ${pins ? `<button class="viewer-pin" aria-label="Pin a spot">${icon('pin')}<span>Pin</span><b hidden></b></button>` : ''}

@@ -86,6 +86,7 @@ let conflicts = 0; // the next writes refused as GitHub does when two land at on
 let failImg = 0;
 let slowImg = 0;
 let slowBlob = 0;
+let slowTree = 0; // a slow check for new decks, to see the reload button at work
 let served = [];
 let writes = 0;
 
@@ -111,6 +112,7 @@ createServer(async (req, res) => {
   if (url.pathname === '/__writes') { send(200, { writes }); return; }
   if (url.pathname === '/__down') { down = url.searchParams.get('on') === '1'; send(200, { down }); return; }
   if (url.pathname === '/__served') { const out = served; if (url.searchParams.get('clear')) served = []; send(200, out); return; }
+  if (url.pathname === '/__slowtree') { slowTree = +url.searchParams.get('ms'); send(200, { slowTree }); return; }
   if (url.pathname === '/__slowblob') { slowBlob = +url.searchParams.get('ms'); send(200, { slowBlob }); return; }
   if (url.pathname === '/__failimg') { failImg = +url.searchParams.get('code'); send(200, { failImg }); return; }
   if (url.pathname === '/__slowimg') { slowImg = +url.searchParams.get('ms'); send(200, { slowImg }); return; }
@@ -124,7 +126,7 @@ createServer(async (req, res) => {
   if (url.pathname === '/__reset') { // back to how it started
     files.clear();
     for (const [k, v] of startFiles) files.set(k, v);
-    down = false; fail = null; conflicts = 0; writes = 0; failImg = 0; slowImg = 0; slowBlob = 0; served = [];
+    down = false; fail = null; conflicts = 0; writes = 0; failImg = 0; slowImg = 0; slowBlob = 0; slowTree = 0; served = [];
     send(200, { files: files.size });
     return;
   }
@@ -200,6 +202,7 @@ createServer(async (req, res) => {
     return;
   }
   if (url.pathname === `${REPO}/git/trees/main`) {
+    if (slowTree) await new Promise(r => setTimeout(r, slowTree));
     send(200, { tree: [...files.keys()].map(path => ({ path, type: 'blob', sha: shaOf(path) })) });
     return;
   }

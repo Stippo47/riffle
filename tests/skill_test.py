@@ -878,6 +878,65 @@ ok('DEALT IN: start now on what is answered (1 of 4)' in out, 'answers shows a d
 code, out = run('wait', '--pack', 'proj', '--on', 'cards')
 ok(code == 1 and '--on takes' in out, 'a wrong --on is refused', out)
 
+print('Send, Working and Done')
+code, out = run('started', '--pack', 'proj', '--note', 'the river banks', '--quiet')
+work_now = order_file().get('work', {})
+key = next(iter(work_now), '')
+me = work_now.get(key, {})
+ok(code == 0 and me.get('state') == 'working' and me.get('note') == 'the river banks' and me.get('since') and me.get('at') and 'shows proj as Working' in out, 'started puts Working on the pack, with when and what', [out, work_now])
+ok(len(work_now) == 1 and key.startswith('w-') and len(key) == 10 and getpass.getuser().lower() not in json.dumps(work_now).lower(), 'one entry per writer, named by a short hash of its folder, never the folder itself', work_now)
+code, out = run('started', '--pack', 'proj', '--quiet', cwd=clone)
+ok(len(order_file().get('work', {})) == 2, 'a writer in another folder is another writer', order_file().get('work'))
+o = order_file()
+o['work'][key]['at'] = '2026-01-01T00:00:00.000Z'
+(clone / 'packs/proj/order.json').write_text(json.dumps(o), encoding='utf-8')
+git(clone, 'commit', '-q', '-am', 'an old heartbeat'); git(clone, 'push', '-q', 'origin', 'HEAD:main')
+write('d/heard.json', deck(good_card('h')))
+code, out = run('deck', str(work / 'd/heard.json'), '--pack', 'proj', '--id', 'heard', '--quiet')
+beat = order_file()['work'][key]
+ok(code == 0 and beat['at'] > '2026-11-01' and beat['since'] == me['since'] and beat['state'] == 'working', 'anything a Working writer sends to the pack says it was heard from, keeping when it began', beat)
+w = start_wait('--deck', 'fifth', '--quiet', '30')
+done = order_file()['work'][key]
+ok(done['state'] == 'done', 'a writer that waits again shows Done: it has nothing left but to wait for them', done)
+phone_sends('2026-11-16T09-00-11-000Z-s01.json', {'eid': 's1', 'at': nowz(1), 'type': 'wake', 'deck': None, 'topic': None, 'answered': 6, 'total': 6})
+code, out = finished(w)
+ok(code == 0 and 'Send: they answered everything in the pack and sent it (6 cards)' in out, 'Send on the whole pack wakes a wait on any of its decks, at once', out)
+ok('the pack shows Working' in out and 'the pack shows Done' in out, 'and the wake says how to show Working, and Done', out)
+clear_woke()
+code, out = run('answers', '--pack', 'proj', '--all')
+ok('proj: SENT at' in out and 'riffle started --pack proj' in out, 'answers says they pressed Send, and what to run first', out)
+code, out = run('status', '--pack', 'proj')
+ok('You: Working since' in out and 'A writer: Working since' in out and 'They pressed Send on the whole pack' in out, "status shows each writer's Working or Done, and the Send", out)
+code, out = run('started', '--pack', 'proj', '--stop', '--quiet')
+ok(order_file()['work'][key]['state'] == 'done' and 'shows proj as Done' in out, '--stop shows Done too', out)
+
+print('A comment on one picture, film or sound')
+phone_sends('2026-11-16T09-00-12-000Z-m01.json',
+            {'eid': 'm1', 'at': nowz(), 'type': 'media', 'card': 'a', 'cardVersion': 1, 'title': 'A title', 'kind': 'question', 'on': 'img/river.jpg', 'media': 'picture', 'comment': 'Too dark here'},
+            {'eid': 'm2', 'at': nowz(), 'type': 'media', 'card': 'a', 'cardVersion': 1, 'title': 'A title', 'kind': 'question', 'on': 'audio/hum.m4a', 'media': 'sound', 'part': 'p1', 'partTitle': 'The hum', 'comment': 'Too loud'},
+            {'eid': 'm3', 'at': nowz(), 'type': 'media', 'card': 'a', 'cardVersion': 1, 'title': 'A title', 'kind': 'question', 'on': 'img/walk.mp4', 'media': 'film', 'comment': 'Starts late'},
+            {'eid': 'm4', 'at': nowz(1), 'type': 'media', 'card': 'a', 'cardVersion': 1, 'title': 'A title', 'kind': 'question', 'on': 'img/walk.mp4', 'media': 'film', 'comment': 'Starts late, and the feet slide'})
+code, out = run('answers', '--pack', 'proj', '--deck', 'first')
+ok('comment on picture img/river.jpg: "Too dark here"' in out and 'comment on sound audio/hum.m4a in part p1 (The hum): "Too loud"' in out, 'answers lists a comment with the picture or sound it is on, and its part', out)
+ok('comment on film img/walk.mp4: "Starts late, and the feet slide"' in out and '"Starts late"' not in out, 'and only the latest on each stands', out)
+
+phone_sends('2026-11-16T09-00-13-000Z-t01.json', {'eid': 't1', 'at': nowz(2), 'type': 'archive', 'archived': True, 'auto': True})
+code, out = run('answers', '--pack', 'proj', '--deck', 'first')
+ok('tidied this deck away' in out, 'answers says when their phone tidied a done deck away by itself', out)
+
+print('An icon for each pack')
+code, out = run('pack', 'fresh-pack', '--title', 'A fresh project')
+made = json.loads((clone / 'packs/fresh-pack/pack.json').read_text(encoding='utf-8'))
+ok(code == 0 and made.get('icon') == 'card-random' and 'icon: card-random' in out, 'a new pack with no icon gets one, without fetching anything', [out, made])
+lib = home / '.riffle' / 'icons' / 'delapouite'
+lib.mkdir(parents=True, exist_ok=True)
+(lib / 'river.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><path d="M0 0h512v512H0z"/><path d="M1 1h2"/></svg>', encoding='utf-8')
+code, out = run('pack', 'rivers', '--title', 'Rivers and lakes')
+made = json.loads((clone / 'packs/rivers/pack.json').read_text(encoding='utf-8'))
+ok(made.get('icon', '').startswith('<svg') and 'M1 1h2' in made['icon'] and 'icon: river' in out, 'with the library there, one named after a word of its title', [out, made])
+code, out = run('pack', 'rivers', '--title', 'Rivers and lakes again')
+ok(json.loads((clone / 'packs/rivers/pack.json').read_text(encoding='utf-8')).get('icon') == made['icon'] and 'icon:' not in out, 'and a pack that has one keeps it', out)
+
 shutil.rmtree(work, ignore_errors=True)
 print(f'{failed} failed' if failed else 'all passed')
 sys.exit(1 if failed else 0)

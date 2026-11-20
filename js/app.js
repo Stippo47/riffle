@@ -12,7 +12,7 @@ import { addressOf, linkify, linkText, plainLinks, splitAddress } from './links.
 import { initIsland, islandFrom, islandNow, islandRect, setIsland } from './island.js';
 import { MineView, deckFromFile, fileOf, liveCards, liveDecks, mergeDecks, mineKey, mineOf } from './mine.js';
 
-const VERSION = '0.15.0';
+const VERSION = '0.16.0';
 const app = document.getElementById('app');
 
 // Layout and look are two separate choices. To change what a new install starts with, change these.
@@ -289,7 +289,12 @@ async function library() {
   }
   const list = [...packs.values()].sort((a, b) => (a.order ?? 50) - (b.order ?? 50) || a.title.localeCompare(b.title));
   list.push(DEMO_PACK);
-  return list;
+  // Their own order of packs and their own icons, chosen on this phone. A pack with no place yet goes first,
+  // so a new project is seen. See wirePackDrag and showIcons.
+  const order = (await store.get('pack-order').catch(() => null)) || [];
+  const icons = (await store.get('pack-icons').catch(() => null)) || {};
+  const place = id => order.indexOf(id);
+  return list.map(p => (icons[p.id] ? { ...p, icon: icons[p.id], writerIcon: p.icon || '' } : p)).sort((a, b) => place(a.id) - place(b.id));
 }
 
 async function summaries(pack) {
@@ -298,13 +303,73 @@ async function summaries(pack) {
   for (const d of pack.decks) {
     const s = deckSummary(d, await store.get(deckKey(pack, d)).catch(() => null));
     s.archived = isArchived(metaOf(pack, d), mine[d.id]);
+    // Done for three days, it tidies itself away, as if Archive had been pressed: Bring back undoes it, and a
+    // deck brought back, or archived and brought back by anyone, is never tidied away again.
+    if (!pack.demo && s.doneAt && !s.archived && !mine[d.id] && !metaOf(pack, d).archivedAt && Date.now() - s.doneAt > TIDY_AFTER_MS && !tidying.has(`${pack.id}/${d.id}`)) {
+      tidying.add(`${pack.id}/${d.id}`);
+      await setArchived(pack, d, true, { auto: true });
+      s.archived = true;
+    }
     out.set(d.id, s);
   }
   return out;
 }
+const TIDY_AFTER_MS = 3 * 24 * 3600 * 1000;
+const tidying = new Set();
 
 // What's owed leaves out archived decks: they're handled, as far as the writer or the reader is concerned.
 const packLeft = sums => [...sums.values()].reduce((n, s) => n + (s.archived ? 0 : s.left), 0);
+
+// ---------- Send, Working and Done: a pack they've answered all of, and what the writers say about it
+
+// A writer says Working with `riffle started`, and Done when it waits again or stops: order.json's `work`,
+// one entry per writer, `since` when it began and `at` when it was last heard from. A Working not heard from
+// for this long shows when it was last heard, so a writer that died never leaves a pack saying Working.
+const WORK_QUIET_MS = 3 * 3600 * 1000;
+const sentKey = 'pack-sent'; // when Send was last pressed on each pack, on this phone
+const clockAt = t => {
+  const d = new Date(t), today = new Date().toDateString() === d.toDateString();
+  return d.toLocaleString([], today ? { hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+};
+
+// What the pack says: `working` (a writer has it), `quiet` (one said Working and hasn't been heard from since),
+// `done` (the writer has done what it could and waits on them), `sent`, `send` (all answered, not sent yet), or
+// nothing. Send only once everything is answered; Working shows whatever is left.
+function packWork(p, sums, sentAt = 0) {
+  const live = [...sums.values()].filter(s => !s.archived);
+  const left = live.reduce((n, s) => n + s.left, 0);
+  const lastAt = live.reduce((m, s) => Math.max(m, s.lastAt || 0), 0);
+  const work = Object.values((p.orderFile || {}).work || {}).filter(w => w && w.state).map(w => ({ ...w, at: Date.parse(w.at) || 0, since: Date.parse(w.since) || Date.parse(w.at) || 0 }));
+  const now = Date.now();
+  const working = work.filter(w => w.state === 'working' && now - w.at < WORK_QUIET_MS).sort((a, b) => a.since - b.since);
+  if (working.length) return { kind: 'working', at: working[0].since, note: working[0].note || '', left };
+  if (p.demo || left || !lastAt) return { kind: null, left };
+  const latest = work.filter(w => w.at > lastAt && w.at > sentAt).sort((a, b) => b.at - a.at)[0];
+  if (latest) return { kind: latest.state === 'working' ? 'quiet' : 'done', at: latest.at, left };
+  if (sentAt >= lastAt) return { kind: 'sent', at: sentAt, left };
+  return { kind: 'send', left };
+}
+
+const WORK_WORDS = {
+  working: w => `Working since ${clockAt(w.at)}${w.note ? `: ${w.note}` : ''}`,
+  quiet: w => `Said Working, last heard ${clockAt(w.at)}`,
+  done: w => `Done at ${clockAt(w.at)}, waiting on you`,
+  sent: w => `Sent at ${clockAt(w.at)}. Claude starts when it picks this up`,
+  send: () => 'Everything here is answered',
+};
+
+// Wakes the pack's writers at once, as Deal in now does for one deck.
+async function sendPack(p, sums) {
+  const total = [...sums.values()].filter(s => !s.archived).reduce((n, s) => n + s.total, 0);
+  await sync.enqueue({ pack: p.id, topic: null, deck: null, type: 'wake', answered: total, total });
+  const sent = (await store.get(sentKey).catch(() => null)) || {};
+  sent[p.id] = Date.now();
+  await store.set(sentKey, sent);
+  setTimeout(() => sync.flush().catch(() => {}), 300);
+  tick();
+}
+
+const sendButton = p => `<button class="packsend" data-send="${esc(p.id)}">${icon('bell')}Send</button>`;
 
 // Their own decks, with any copy written from another phone merged in. Nothing either holds is lost.
 async function mergeMine(pack) {
@@ -362,7 +427,9 @@ function statusLine(st, left) {
   if (st.photoProblem) return st.photoProblem;
   if (st.waiting) return `${st.waiting} waiting to send${st.noSignal ? ', when there is signal' : ''}.`;
   if (st.photosWaiting) return `${countWords(st.photosWaiting)} waiting to send.`;
-  return left ? `Everything sent. ${left} card${left === 1 ? '' : 's'} left.` : 'Everything sent. Nothing left to answer.';
+  if (reloading) return 'Checking every pack for new decks…';
+  const checked = st.pullProblem ? ` ${st.pullProblem}` : st.pulledAt ? ` Packs checked ${clockAt(st.pulledAt)}`.replace(/([^.])$/, '$1.') : '';
+  return (left ? `Everything sent. ${left} card${left === 1 ? '' : 's'} left.` : 'Everything sent. Nothing left to answer.') + checked;
 }
 
 async function refreshStatusLine() {
@@ -386,6 +453,7 @@ async function showHome() {
   trail = [];
   const packs = await library();
   const rows = [];
+  const sent = (await store.get(sentKey).catch(() => null)) || {};
   let owed = 0;
   for (const p of packs) {
     const sums = await summaries(p);
@@ -393,15 +461,17 @@ async function showHome() {
     if (!p.demo) owed += packLeft(sums);
     const kept = all.filter(s => !s.archived);
     rows.push({
-      p, left: packLeft(sums),
+      p, sums, left: packLeft(sums),
       count: kept.reduce((n, s) => n + s.total, 0),
       big: kept.reduce((n, s) => n + s.big, 0),
+      work: packWork(p, sums, sent[p.id] || 0),
     });
   }
   app.innerHTML = `
     <div class="home screen scroll">
       <div class="home-head">
         <div class="apptitle">Riffle</div>
+        <button class="iconbtn${reloading ? ' turning' : ''}" data-go="reload" aria-label="Reload every pack">${icon('refresh-cw')}</button>
         <button class="iconbtn" data-go="search" aria-label="Search">${icon('search')}</button>
         <button class="iconbtn" data-go="settings" aria-label="Settings">${icon('settings')}</button>
       </div>
@@ -417,25 +487,139 @@ async function showHome() {
           <span>Safari and the Home Screen app keep separate data, so connect from the icon. You can try the Feel test here first.</span>
         </div>` : ''}
       <div class="packs">
-        ${rows.map(({ p, left, count, big }) => packTile(p, left, count, big)).join('')}
+        ${rows.map(({ p, left, count, big, work }) => packTile(p, left, count, big, work)).join('')}
       </div>
     </div>`;
   app.querySelectorAll('[data-pack]').forEach(b => { b.onclick = () => showPack(b.dataset.pack); });
+  app.querySelectorAll('[data-send]').forEach(b => {
+    b.onclick = async () => {
+      const row = rows.find(r => r.p.id === b.dataset.send);
+      b.disabled = true;
+      await sendPack(row.p, row.sums);
+      showHome();
+    };
+  });
   app.querySelector('[data-go=settings]').onclick = showSettings;
   app.querySelector('[data-go=search]').onclick = () => showSearch();
+  app.querySelector('[data-go=reload]').onclick = reloadAll;
+  wirePackDrag(app.querySelector('.packs'), app.querySelector('.home'));
   push.setBadge(owed).catch(() => {});
   await refreshStatusLine();
 }
 
-function packTile(p, left, count, big = 0) {
+// The pack's line on the first screen: what's left, or once it's all answered, Send, then what the writers say.
+function packTile(p, left, count, big = 0, work = { kind: null }) {
   const donePart = count ? (count - left) / count : 0;
-  return `<button class="pack ${left ? '' : 'cleared'}" data-pack="${esc(p.id)}" style="--pc:${esc(p.color || '#7b8294')}">
+  const said = {
+    working: w => `${left ? `${left} left` : 'Working'}<small class="worklabel">${left ? 'Working' : `since ${esc(clockAt(w.at))}`}</small>`,
+    quiet: w => `Last heard<small class="worklabel">${esc(clockAt(w.at))}</small>`,
+    done: () => 'Done',
+    sent: () => 'Sent',
+    send: () => '',
+  }[work.kind];
+  return `<div class="packwrap${work.kind ? ` work-${work.kind}` : ''}" data-id="${esc(p.id)}"><button class="pack ${left ? '' : 'cleared'}" data-pack="${esc(p.id)}" style="--pc:${esc(p.color || '#7b8294')}">
     <div class="art">${safeIcon(p.icon) || icon('card-random')}</div>
     <div class="name">${esc(p.title)}</div>
     ${big ? `<div class="big">${big} big</div>` : ''}
-    <div class="left">${left ? `${left} left` : 'Cleared'}${big ? `<span class="bigcount"> · ${big} big</span>` : ''}</div>
+    <div class="left">${said ? said(work) : left ? `${left} left` : 'Cleared'}${big ? `<span class="bigcount"> · ${big} big</span>` : ''}</div>
     <div class="bar"><b style="width:${Math.round(donePart * 100)}%"></b></div>
-  </button>`;
+  </button>${work.kind === 'send' ? sendButton(p) : ''}</div>`;
+}
+
+// ---------- reloading every pack, from the first screen
+
+let reloading = false;
+async function reloadAll() {
+  if (reloading) return;
+  reloading = true;
+  const btn = app.querySelector('[data-go=reload]');
+  if (btn) btn.classList.add('turning');
+  refreshStatusLine();
+  try { await pullNow(); } finally {
+    reloading = false;
+    if (screen.kind === 'home' && !current) showHome();
+  }
+}
+
+// ---------- their own order of packs: a long press lifts one, and it's dragged into place
+
+const LIFT_MS = 380;      // held this long without moving, a pack lifts
+const LIFT_SLOP = 8;      // a finger that moves this far first is scrolling
+const EDGE_SCROLL = 70;   // near the top or bottom, the list scrolls along
+function wirePackDrag(box, scroller) {
+  if (!box) return;
+  let hold = 0, from = null, lifted = null, rolling = 0;
+  const tiles = () => [...box.querySelectorAll('.packwrap')];
+  const follow = () => {
+    const l = lifted;
+    const dy = l.y - l.y0 + (scroller.scrollTop - l.scroll0);
+    l.el.style.transform = `translateY(${dy}px) scale(1.03)`;
+    const mid = l.mids[l.i] + dy;
+    let to = l.i;
+    while (to < l.mids.length - 1 && mid > l.mids[to + 1]) to++;
+    while (to > 0 && mid < l.mids[to - 1]) to--;
+    l.to = to;
+    l.list.forEach((t, j) => {
+      if (j === l.i) return;
+      const shift = j > l.i && j <= to ? -l.step : j < l.i && j >= to ? l.step : 0;
+      t.style.transform = shift ? `translateY(${shift}px)` : '';
+    });
+  };
+  const roll = () => {
+    cancelAnimationFrame(rolling);
+    if (!lifted) return;
+    const by = lifted.y < EDGE_SCROLL ? -8 : lifted.y > innerHeight - EDGE_SCROLL ? 8 : 0;
+    if (by) { scroller.scrollTop += by; follow(); }
+    rolling = requestAnimationFrame(roll);
+  };
+  const lift = () => {
+    if (!from) return;
+    const list = tiles(), i = list.indexOf(from.el);
+    if (i < 0) return;
+    const rects = list.map(t => t.getBoundingClientRect());
+    const gap = rects[1] ? rects[1].top - rects[0].bottom : 0;
+    lifted = { el: from.el, i, to: i, list, y0: from.y, y: from.y, scroll0: scroller.scrollTop, mids: rects.map(r => r.top + r.height / 2), step: rects[i].height + gap };
+    box.classList.add('sorting');
+    from.el.classList.add('lifted');
+    tick();
+    roll();
+  };
+  box.addEventListener('touchstart', e => {
+    clearTimeout(hold);
+    const el = e.touches.length === 1 && e.target.closest('.packwrap');
+    if (!el || e.target.closest('.packsend') || lifted) { from = null; return; }
+    from = { el, x: e.touches[0].clientX, y: e.touches[0].clientY };
+    hold = setTimeout(lift, LIFT_MS);
+  }, { passive: true });
+  box.addEventListener('touchmove', e => {
+    const t = e.touches[0];
+    if (!lifted) {
+      if (from && Math.hypot(t.clientX - from.x, t.clientY - from.y) > LIFT_SLOP) { clearTimeout(hold); from = null; }
+      return;
+    }
+    if (e.cancelable) e.preventDefault(); // the list mustn't scroll under a lifted pack
+    lifted.y = t.clientY;
+    follow();
+  }, { passive: false });
+  const drop = async e => {
+    clearTimeout(hold);
+    from = null;
+    if (!lifted) return;
+    if (e.cancelable) e.preventDefault(); // no click: the pack isn't opened by being moved
+    cancelAnimationFrame(rolling);
+    const l = lifted;
+    lifted = null;
+    const ids = l.list.map(t => t.dataset.id);
+    const [moved] = ids.splice(l.i, 1);
+    ids.splice(l.to, 0, moved);
+    await store.set('pack-order', ids);
+    if (l.to !== l.i) tick();
+    showHome();
+  };
+  box.addEventListener('touchend', drop, { passive: false });
+  box.addEventListener('touchcancel', drop, { passive: false });
+  // A long press on a pack is for moving it, not for the phone's own menu.
+  box.addEventListener('contextmenu', e => { if (e.target.closest('.packwrap')) e.preventDefault(); });
 }
 
 // ---------- a pack's page
@@ -475,13 +659,13 @@ function isArchived(meta, mine) {
   return !!meta.archivedAt;
 }
 
-async function setArchived(pack, deck, archived) {
+async function setArchived(pack, deck, archived, { auto = false } = {}) {
   const k = archiveKey(pack.id);
   const a = (await store.get(k).catch(() => null)) || {};
-  a[deck.id] = { archived, at: new Date().toISOString() };
+  a[deck.id] = { archived, at: new Date().toISOString(), ...(auto ? { auto: true } : {}) };
   await store.set(k, a);
-  if (!pack.demo) sync.enqueue({ pack: pack.id, topic: deck.topic || null, deck: deck.id, type: 'archive', archived });
-  tick();
+  if (!pack.demo) sync.enqueue({ pack: pack.id, topic: deck.topic || null, deck: deck.id, type: 'archive', archived, ...(auto ? { auto: true } : {}) });
+  if (!auto) tick();
 }
 
 const ago = t => {
@@ -575,15 +759,18 @@ async function showPack(id, message = '', { topic = null, keepTrail = false } = 
   const replies = pack.mineReplies || {};
   const thoughts = await thoughtCount(pack);
   const open = archivedOpen.has(pack.id);
+  const work = packWork(pack, sums, ((await store.get(sentKey).catch(() => null)) || {})[pack.id] || 0);
   app.innerHTML = `
     <div class="packpage screen scroll">
       <div class="deckbar">
         <button class="iconbtn" data-go="home" aria-label="Back">${icon('chevron-left')}</button>
+        <button class="iconbtn packicon" data-go="icon" aria-label="Change this pack's icon" style="--pc:${esc(pack.color || '#7b8294')}">${safeIcon(pack.icon) || icon('card-random')}</button>
         <div class="t">${esc(pack.title)}</div>
         <div class="n" data-slot="notice" data-plain="${packLeft(sums)} left"></div>
         <button class="iconbtn" data-go="search" aria-label="Search">${icon('search')}</button>
       </div>
       ${message ? `<div class="set-text problem">${esc(message)}</div>` : ''}
+      ${work.kind ? `<div class="workrow work-${work.kind}"><span>${esc(WORK_WORDS[work.kind](work))}</span>${work.kind === 'send' ? sendButton(pack) : ''}</div>` : ''}
       <button class="thoughtsrow" data-go="thoughts">${icon('lightbulb')}<span><strong>Thoughts</strong><small>${thoughts ? `${thoughts} filed` : 'Anything on your mind about this project'}</small></span></button>
       ${`<section class="mine-block">
         ${mine.map(d => {
@@ -609,6 +796,9 @@ async function showPack(id, message = '', { topic = null, keepTrail = false } = 
   app.querySelector('[data-go=home]').onclick = showHome;
   app.querySelector('[data-go=thoughts]').onclick = () => openThoughts(pack);
   app.querySelector('.packpage [data-go=search]').onclick = () => showSearch({ packId: pack.id });
+  app.querySelector('[data-go=icon]').onclick = () => showIcons(pack);
+  const sendBtn = app.querySelector('.workrow [data-send]');
+  if (sendBtn) sendBtn.onclick = async () => { sendBtn.disabled = true; await sendPack(pack, sums); showPack(id); };
   if (pack.demo) await drawFeelWords(pack);
   app.querySelectorAll('[data-deck]').forEach(b => { b.onclick = () => openDeck(pack, b.dataset.deck); });
   app.querySelectorAll('[data-sort]').forEach(b => { b.onclick = async () => { await store.set('pack-sort', b.dataset.sort); showPack(id); }; });
@@ -624,6 +814,47 @@ async function showPack(id, message = '', { topic = null, keepTrail = false } = 
     const section = app.querySelector(`[data-topic="${CSS.escape(topic)}"]`);
     if (section) section.scrollIntoView({ block: 'start' });
   }
+}
+
+// ---------- a pack's icon, picked on this phone from every icon the packs and topics already use
+
+async function showIcons(pack) {
+  current = null;
+  render = () => showIcons(pack);
+  const packs = await library();
+  const seen = new Map();
+  const add = text => { const svg = safeIcon(text); if (svg && !seen.has(svg)) seen.set(svg, text); };
+  for (const name of ['card-random', 'card-pickup', 'poker-hand']) add(name);
+  for (const p of packs) {
+    add(p.writerIcon !== undefined ? p.writerIcon : p.icon);
+    for (const t of p.topics || []) add(t.icon);
+  }
+  const mine = ((await store.get('pack-icons').catch(() => null)) || {})[pack.id];
+  const now = safeIcon(pack.icon);
+  app.innerHTML = `
+    <div class="settings screen scroll">
+      <div class="deckbar">
+        <button class="iconbtn" data-go="back" aria-label="Back">${icon('chevron-left')}</button>
+        <div class="t">Icon for ${esc(pack.title)}</div>
+      </div>
+      <div class="set-text small">Kept on this phone. The writer can set one too, with riffle pack.</div>
+      ${mine ? `<button class="ghostbtn" data-go="writers">${icon('rotate-ccw')}Use the writer's icon</button>` : ''}
+      <div class="icongrid" style="--pc:${esc(pack.color || '#7b8294')}">
+        ${[...seen.keys()].map((svg, i) => `<button class="iconpick${svg === now ? ' on' : ''}" data-i="${i}" aria-label="Icon ${i + 1}">${svg}</button>`).join('')}
+      </div>
+    </div>`;
+  const texts = [...seen.values()];
+  const keep = async text => {
+    const all = (await store.get('pack-icons').catch(() => null)) || {};
+    if (text === null) delete all[pack.id]; else all[pack.id] = text;
+    await store.set('pack-icons', all);
+    tick();
+    showPack(pack.id);
+  };
+  app.querySelector('[data-go=back]').onclick = () => showPack(pack.id);
+  const w = app.querySelector('[data-go=writers]');
+  if (w) w.onclick = () => keep(null);
+  app.querySelectorAll('.iconpick').forEach(b => { b.onclick = () => keep(texts[+b.dataset.i]); });
 }
 
 // ---------- what's written in the Feel test
@@ -1044,14 +1275,14 @@ async function afterVerdict(pack, deck, which) {
   const allDecks = [...topics.flatMap(t => t.decks), ...misc];
   const packDone = allDecks.every(d => sums.get(d.id).finished);
   const topicDone = topic && topic.decks.every(d => sums.get(d.id).finished);
-  if (packDone) reward('pack', pack, pack.title, pack.icon, pack.color, allDecks, sums);
+  if (packDone) reward('pack', pack, pack.title, pack.icon, pack.color, allDecks, sums, packWork(pack, sums, ((await store.get(sentKey).catch(() => null)) || {})[pack.id] || 0));
   else if (topicDone) reward('topic', pack, topic.title, topic.icon, topic.color || pack.color, topic.decks, sums);
   else showPack(pack.id);
 }
 
 // The payoffs: a small pop for a topic, because a busy pack may rarely be empty, and one short
 // modest burst for a pack. Gone within a second, with quiet words.
-function reward(level, pack, title, iconText, color, decks, sums) {
+function reward(level, pack, title, iconText, color, decks, sums, work = { kind: null }) {
   const cards = decks.reduce((n, d) => n + sums.get(d.id).total, 0);
   const isPack = level === 'pack';
   const pc = color || '#9a5be0';
@@ -1060,9 +1291,12 @@ function reward(level, pack, title, iconText, color, decks, sums) {
       <div class="reward-art">${safeIcon(iconText) || icon('card-random')}</div>
       <div class="reward-word">${esc(title)} cleared</div>
       <div class="reward-sub">${decks.length} deck${decks.length === 1 ? '' : 's'}, ${cards} card${cards === 1 ? '' : 's'}.</div>
-      <button class="primary" data-go="pack">${isPack ? 'Back to the packs' : 'Back to the pack'}</button>
+      ${work.kind === 'send' ? `${sendButton(pack).replace('class="packsend"', 'class="primary packsend"')}<div class="reward-sub small">Send: Claude starts on your answers now, without waiting 15 minutes.</div>` : ''}
+      <button class="${work.kind === 'send' ? 'secondary' : 'primary'}" data-go="pack">${isPack ? 'Back to the packs' : 'Back to the pack'}</button>
       <button class="ghostbtn" data-go="newmine">${icon('plus')}New deck of your own</button>
     </div>`;
+  const send = app.querySelector('[data-send]');
+  if (send) send.onclick = async () => { send.disabled = true; await sendPack(pack, sums); send.innerHTML = `${icon('check')}Sent`; };
   app.querySelector('[data-go=pack]').onclick = () => (isPack ? showHome() : showPack(pack.id));
   app.querySelector('[data-go=newmine]').onclick = () => openMine(pack, null);
   confetti(app, isPack ? { count: 56, force: 0.95, colors: [pc, '#ffffff', '#ffd76a'] } : { count: 20, force: 0.6, colors: [pc, '#ffffff'] });
@@ -1283,5 +1517,5 @@ start();
 
 // For the tests in tests/, on a local test server only.
 if (isLocalHost) {
-  window.__riffle = { openMine, mergeMine, setArchived, get current() { return current; }, get trail() { return trail; }, showHome, showPack, showConnect, showSettings, showStyle, showDirections, setStyle, setDirs, getDirs, setNotice, onHide, openThoughts, openAddress, follow, goBack, shrink, tapIsland, islandNow, setIsland, library, sync, store, sound };
+  window.__riffle = { openMine, mergeMine, setArchived, reloadAll, showIcons, packWork, get current() { return current; }, get trail() { return trail; }, showHome, showPack, showConnect, showSettings, showStyle, showDirections, setStyle, setDirs, getDirs, setNotice, onHide, openThoughts, openAddress, follow, goBack, shrink, tapIsland, islandNow, setIsland, library, sync, store, sound };
 }

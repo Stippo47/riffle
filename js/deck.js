@@ -50,25 +50,29 @@ const PARTS_ON_FACE = 4;
 // so a drawing knows what it was drawn on, and a film or a sound not down yet can be fetched when it's wanted.
 export function mediaHTML(holder, images = () => null) {
   const pics = (holder.images || []).map(p => [p, images(p)]).filter(([, src]) => src);
+  // Every picture and film has a pin button in its corner, which opens it full screen with Pin on.
+  const pinBtn = `<button class="m-pin" data-act="mediapin" aria-label="Pin a spot on it">${icon('pin')}</button>`;
   const clips = videosOf(holder).map(v => {
     const src = images(v.src), poster = v.poster ? images(v.poster) : null;
     return `<div class="clip paused" data-path="${esc(v.src)}"${v.poster ? ` data-poster="${esc(v.poster)}"` : ''}${+v.fps ? ` data-fps="${+v.fps}"` : ''}>
       <video${src ? ` src="${esc(src)}${poster ? '' : '#t=0.01'}"` : ''}${poster ? ` poster="${esc(poster)}"` : ''} muted loop playsinline preload="metadata" disablepictureinpicture></video>
       <i class="clip-play">${icon('play')}</i>
+      ${pinBtn}
       <button class="clip-big" data-act="clipbig" aria-label="Watch it full screen">${icon('maximize-2')}</button>
     </div>`;
   });
-  // A sound is a button: nothing plays until it's tapped. See sound.js.
+  // A sound is a button: nothing plays until it's tapped. See sound.js. Beside it, a speech bubble for a
+  // comment on that sound alone, as a sound on a spread has.
   const sounds = soundsOf(holder);
   const rows = sounds.map((a, n) => {
     const src = images(a.src), name = a.label || (sounds.length > 1 ? `Sound ${n + 1}` : 'Sound');
-    return `<button class="snd snd-row" data-act="sound" data-path="${esc(a.src)}"${src ? ` data-src="${esc(src)}"` : ''} aria-label="Play ${esc(name)}" aria-pressed="false">
+    return `<div class="sndline" data-path="${esc(a.src)}"><button class="snd snd-row" data-act="sound" data-path="${esc(a.src)}"${src ? ` data-src="${esc(src)}"` : ''} aria-label="Play ${esc(name)}" aria-pressed="false">
       <i class="snd-btn">${icon('play')}${icon('pause')}</i>
       <span class="snd-body"><b class="snd-name">${esc(name)}</b><i class="snd-bar"><i></i></i><em class="snd-note" hidden></em></span>
       <small class="snd-time"></small>
-    </button>`;
+    </button><button class="snd-say" data-act="soundsay" data-path="${esc(a.src)}" aria-label="Comment on this sound">${icon('message-square-text')}</button></div>`;
   });
-  return pics.map(([p, src]) => `<img class="mpic" src="${esc(src)}" data-path="${esc(p)}" alt="" draggable="false">`).join('') + clips.join('') + rows.join('');
+  return pics.map(([p, src]) => `<span class="mpicw" data-path="${esc(p)}"><img class="mpic" src="${esc(src)}" data-path="${esc(p)}" alt="" draggable="false">${pinBtn}</span>`).join('') + clips.join('') + rows.join('');
 }
 
 const countOf = (n, one) => `${n} ${one}${n === 1 ? '' : 's'}`;
@@ -96,6 +100,25 @@ function pinEvent(card, p) {
     note: p.note || '', ...(p.removed ? { removed: true } : {}),
   };
 }
+
+// A comment on one picture, film or sound of a card or a part: kept with it, not in the card's words. Kept per
+// card under `part|path`, as `{ part, on, media, text, sent, v }`, and sent as a `media` event, the latest standing.
+const sayKey = (part, on) => `${part || ''}|${on}`;
+const liveSays = (s, cardId) => Object.values(((s && s.says) || {})[cardId] || {}).filter(x => (x.text || '').trim());
+function mediaEvent(card, x) {
+  const part = x.part ? (card.parts || []).find(p => p.id === x.part) : null;
+  return {
+    type: 'media', card: card.id, cardVersion: x.v || card.version || 1, title: card.title || '', kind: card.kind || 'question',
+    on: x.on, media: x.media || 'picture', ...(x.part ? { part: x.part, partTitle: (part && part.title) || '' } : {}),
+    comment: x.text || '',
+  };
+}
+// How many pins and comments sit on a card's pictures, or one part's, in words: "2 pins · 1 comment".
+const saidOnMedia = (s, cardId, part) => {
+  const pins = livePins(s, cardId).filter(p => (p.part || null) === part && !p.item).length;
+  const says = liveSays(s, cardId).filter(x => (x.part || null) === part).length;
+  return [pins ? countOf(pins, 'pin') : '', says ? countOf(says, 'comment') : ''].filter(Boolean).join(' · ');
+};
 
 // "Bring to comment": a small button at the bottom of the screen, well away from the menu iPhones show over
 // selected text, which pages can't add to. It goes by itself after a few seconds. `where` names the box it
@@ -197,7 +220,10 @@ export function deckSummary(deck, s) {
   // row says Done while the pack says 1 left. Replan stands as said.
   const finished = nothingOwed || !!(s && s.verdict && s.verdictSig === deckSig(deck) && (s.verdict === 'replan' || !due.length));
   const RANK = { common: 1, uncommon: 2, rare: 3, epic: 4, legendary: 5 };
+  // When it was last answered, and when Deck's done was pressed (a deck finished before 0.16.0 has only the first).
+  const lastAt = Object.values(answers).reduce((m, a) => Math.max(m, a.at || 0), 0);
   return {
+    lastAt, doneAt: finished && s && s.verdict === 'done' ? s.verdictAt || lastAt : 0,
     total: deck.cards.length - handled, left: due.length, handled, finished,
     big: due.filter(c => c.rarity === 'epic' || c.rarity === 'legendary').length,
     top: due.reduce((m, c) => Math.max(m, RANK[c.rarity] || 1), 0), // the most important card still owed
@@ -208,7 +234,7 @@ export function deckSummary(deck, s) {
 const undoReachesVisit = () => { try { return localStorage.getItem('riffle-undo-reach') === 'visit'; } catch { return false; } };
 
 function fresh(deck) {
-  return { order: deck.cards.map(c => c.id), answers: {}, log: [], notes: '', drafts: {}, draftsSent: {}, wordsSent: {}, draftPhotos: {}, notesPhotos: [], notesPhotosSent: [], selections: {}, picksDirty: {}, handledSkipped: {}, parts: {}, partsV: {}, drawnOn: {}, pins: {}, reviewing: null, verdict: null, startedAt: Date.now() };
+  return { order: deck.cards.map(c => c.id), answers: {}, log: [], notes: '', drafts: {}, draftsSent: {}, wordsSent: {}, draftPhotos: {}, notesPhotos: [], notesPhotosSent: [], selections: {}, picksDirty: {}, handledSkipped: {}, parts: {}, partsV: {}, drawnOn: {}, pins: {}, says: {}, reviewing: null, verdict: null, startedAt: Date.now() };
 }
 
 // Owed cards first, handled ones after, each keeping its order. A card being looked at stays on top.
@@ -228,6 +254,7 @@ function reconcile(s, deck) {
   s.partsV = s.partsV || {};
   s.drawnOn = s.drawnOn || {};
   s.pins = s.pins || {};
+  s.says = s.says || {};
   // A second try of a card asks again: marks on its parts no longer stand. Words stay, and aren't sent twice.
   for (const [id, parts] of Object.entries(s.parts)) {
     const c = cards.get(id);
@@ -315,12 +342,23 @@ export async function queueUnsentWords(topicOf = () => null, cardOf = () => null
       }
       s.pins[card] = list.filter(p => !p.removed);
     }
+    // Comments on one picture, film or sound, written since they last went.
+    for (const [card, all] of Object.entries(s.says || {})) {
+      const c = cardOf(pack, deck, card) || { id: card };
+      for (const [k, x] of Object.entries(all)) {
+        if ((x.text || '') === (x.sent || '')) continue;
+        if (x.text || pack !== DEMO_ID) enqueue({ ...base, ...mediaEvent(c, x) });
+        x.sent = x.text || '';
+        s.wordsSent[`m:${card}/${k}`] = x.sent;
+        changed = true;
+      }
+    }
     if (changed) store.set(key, s);
   }
 }
 
 // What's said about one part of a card, or one item on a board. The latest one for each stands.
-const itemOf = (card, id) => (card.kind === 'board' ? (card.items || []).find(x => x.id === id) : null);
+const itemOf = (card, id) => (isPicking(card) ? picksFrom(card).find(x => x.id === id) : null);
 function partEvent(card, partId, st, pics, drawnOn) {
   const item = itemOf(card, partId);
   const part = item || (card.parts || []).find(x => x.id === partId) || {};
@@ -363,6 +401,12 @@ export function wordsIn(deck, s) {
       out.push({ kind: 'pin', key: `pin:${card}/${p.id}`, card, where: `${deck.title}: ${titleOf(card)}, pin ${p.n}`, text: p.note, pics: [], sent: sent[`pin:${card}/${p.id}`] === p.note, pin: p });
     }
   }
+  for (const [card, all] of Object.entries(s.says || {})) {
+    for (const [k, x] of Object.entries(all)) {
+      if (!(x.text || '').trim()) continue;
+      out.push({ kind: 'media', key: `m:${card}/${k}`, card, where: `${deck.title}: ${titleOf(card)}, the ${x.media || 'picture'} ${x.on}`, text: x.text, pics: [], sent: sent[`m:${card}/${k}`] === x.text, say: x });
+    }
+  }
   const notePics = s.notesPhotos || [];
   if (s.notes || notePics.length) out.push({ kind: 'notes', key: 'n', where: `${deck.title}: notes`, text: s.notes || '', pics: notePics, sent: sent.n === mark(s.notes, notePics) });
   return out;
@@ -391,6 +435,10 @@ export function sendWords(pack, deck, s, words) {
       const c = deck.cards.find(x => x.id === w.card) || { id: w.card };
       enqueue({ ...base, ...pinEvent(c, w.pin) });
       w.pin.sent = pinSig(w.pin);
+    } else if (w.kind === 'media') {
+      const c = deck.cards.find(x => x.id === w.card) || { id: w.card };
+      enqueue({ ...base, ...mediaEvent(c, w.say) });
+      w.say.sent = w.say.text || '';
     } else {
       const c = deck.cards.find(x => x.id === w.card) || { id: w.card };
       enqueue({ ...base, type: 'answer', card: w.card, cardVersion: c.version || 1, title: c.title || '', kind: c.kind || 'question', swipe: w.answer.swipe, stamp: stampWord(c, w.answer.swipe), comment: w.text, ...withPictures(w.pics, s.drawnOn) });
@@ -442,7 +490,11 @@ export function cardHTML(card, images = () => null, fill = t => t) {
   const parts = !board && card.kind !== 'options' ? (card.parts || []) : [];
   const hasMore = !board && (card.details || pics.length || films.length || sounds.length || parts.length);
   const bits = [card.details ? 'details' : '', pics.length ? countOf(pics.length, 'picture') : '', films.length ? countOf(films.length, 'video') : '', sounds.length ? countOf(sounds.length, 'sound') : ''].filter(Boolean);
-  const moreText = parts.length ? `Tap to read the ${countOf(parts.length, 'part')}` : `Tap for ${bits.length > 1 ? `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}` : bits[0] || ''}`;
+  const andJoin = list => (list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}` : list[0] || '');
+  // A card in parts says what its parts hold too, so pictures kept only in parts are never missed.
+  const inParts = of => parts.reduce((n, pt) => n + of(pt).length, 0);
+  const partBits = [[pics.length + inParts(pt => pt.images || []), 'picture'], [films.length + inParts(videosOf), 'video'], [sounds.length + inParts(soundsOf), 'sound']].filter(([n]) => n).map(([n, w]) => countOf(n, w));
+  const moreText = parts.length ? `Tap to read the ${countOf(parts.length, 'part')}${partBits.length ? `, with ${andJoin(partBits)}` : ''}` : `Tap for ${andJoin(bits)}`;
   const text = fill(card.text || ''), why = fill(card.why || ''), pick = board ? '' : fill(card.pick || '');
   const long = plainLinks(text).length > 70;
   const options = card.kind === 'options' ? (card.options || []) : null;
@@ -525,6 +577,7 @@ export class DeckView {
     this.s.partsV = this.s.partsV || {};
     this.s.drawnOn = this.s.drawnOn || {};
     this.s.pins = this.s.pins || {};
+    this.s.says = this.s.says || {};
     reconcile(this.s, this.deck);
     // How far back Undo reaches. Reached by a link, only to what's done here from now: the deck's log is kept
     // for good, so Undo could take back an answer days old, on a card not on screen.
@@ -542,6 +595,7 @@ export class DeckView {
     stopSound();
     if (this.partsObserver) this.partsObserver.disconnect();
     if (this.openPart) this.closePartPad();
+    this.closeSoundSay();
     this.sendNotes(true);
     this.secure();
   }
@@ -553,6 +607,7 @@ export class DeckView {
     this.sendDrafts();
     this.sendParts(true);
     this.sendPins();
+    this.sendSays();
     return this.saveNow();
   }
 
@@ -637,7 +692,7 @@ export class DeckView {
       const link = e.target.closest('.rlink');
       if (link) { e.preventDefault(); this.follow(link.dataset.addr); return; }
       if (e.target.closest('.weblink')) return; // a web address opens as any link does
-      const shown = !e.target.closest('.clip-big') && e.target.closest('.back-scroll img, .back-scroll .clip, .partsview img.mpic, .partsview .clip');
+      const shown = !e.target.closest('.clip-big, .m-pin') && e.target.closest('.back-scroll img, .back-scroll .clip, .partsview img.mpic, .partsview .clip');
       if (shown) {
         if (shown.classList.contains('clip')) this.toggleClip(shown);
         else this.viewMedia(shown);
@@ -735,7 +790,10 @@ export class DeckView {
       rmphoto: () => this.dropPhoto(btn.dataset.photoId, btn.dataset.where, btn),
       keepgoing: () => this.deal(),
       clipbig: () => this.viewMedia(btn.closest('.clip')),
+      mediapin: () => this.viewMedia(btn.closest('.clip') || btn.closest('.mpicw').querySelector('img'), null, { pin: true }),
       sound: () => toggleSound(btn, () => pictureUrl(this.pack.id, btn.dataset.path)),
+      soundsay: () => this.openSoundSay(btn.closest('.sndline')),
+      soundsaydone: () => this.closeSoundSay(),
       boardsound: () => this.playItem(btn.dataset.id),
       boardsay: () => this.openBoardSay(),
       boardsaydone: () => this.closeBoardSay(),
@@ -886,7 +944,7 @@ export class DeckView {
         ...videosOf(holder).map(v => ({ path: v.src, fps: v.fps, full: () => (v.poster ? pictureUrl(this.pack.id, v.poster) : null), video: () => pictureUrl(this.pack.id, v.src) })),
       ].map(it => ({ ...it, inkKey: this.inkKeyOf(cardId, partId, it.path), on: it.path, pin: { on: it.path } }));
       this.viewing = items;
-      openViewer({ items, at: Math.max(0, items.findIndex(it => it.path === (pic || film))), start: film ? +q.get('t') || 0 : null, ink: this.inkFor(cardId, partId), pins: this.pinsFor(cardId, partId) });
+      openViewer({ items, at: Math.max(0, items.findIndex(it => it.path === (pic || film))), start: film ? +q.get('t') || 0 : null, ink: this.inkFor(cardId, partId), pins: this.pinsFor(cardId, partId), comments: this.saysFor(cardId, partId), onClose: () => this.saysChanged(cardId) });
       return;
     }
     this.jump(cardId, partId);
@@ -999,11 +1057,13 @@ export class DeckView {
     n.innerHTML = cardHTML(card, this.images, this.pack.demo ? fillDirs : t => t);
     if (this.hasParts(card)) this.wireParts(n, card);
     this.syncPinChips(card.id, n);
+    this.markSays(card.id, n);
     return n;
   }
 
   // Lays out the top three cards. A card moving up a place keeps its node, so it slides up.
   deal() {
+    this.closeSoundSay();
     stopSound(); // a clip belongs to the card it was on
     const ids = this.s.order.slice(0, 3);
     for (const [id, node] of this.nodes) {
@@ -1439,12 +1499,10 @@ export class DeckView {
   // A card's back, and each of its parts, says how many pins are on its pictures. Tapping that opens the first.
   syncPinChips(cardId, node = this.nodes.get(cardId)) {
     if (!node) return;
-    const pins = livePins(this.s, cardId);
     node.querySelectorAll('.pins-chip').forEach(chip => {
-      const part = chip.dataset.part || null;
-      const n = pins.filter(p => (p.part || null) === part && !p.item).length;
-      chip.hidden = !n;
-      chip.querySelector('span').textContent = countOf(n, 'pin');
+      const words = saidOnMedia(this.s, cardId, chip.dataset.part || null);
+      chip.hidden = !words;
+      chip.querySelector('span').textContent = words;
     });
   }
 
@@ -1462,15 +1520,20 @@ export class DeckView {
     const box = card && (partId ? this.partSection(card.id, partId) : this.topNode().querySelector('.back-scroll'));
     if (!box) return;
     const pins = livePins(this.s, card.id).filter(p => (p.part || null) === partId && !p.item);
+    const says = liveSays(this.s, card.id).filter(x => (x.part || null) === partId);
     for (const el of [...box.querySelectorAll('img.mpic, .clip')].filter(x => partId || !x.closest('.part'))) {
       const here = pins.filter(p => p.on === el.dataset.path).sort((a, b) => (a.t || 0) - (b.t || 0));
-      if (here.length) { this.viewMedia(el, here[0]); return; }
+      if (here.length || says.some(x => x.on === el.dataset.path)) { this.viewMedia(el, here[0] || null); return; }
     }
+    const sound = says.find(x => x.media === 'sound');
+    const line = sound && [...box.querySelectorAll('.sndline')].find(x => (partId || !x.closest('.part')) && x.dataset.path === sound.on);
+    if (line) { line.scrollIntoView({ block: 'nearest' }); this.openSoundSay(line); }
   }
 
   // Everything in the same place as what was tapped: a card's back, or one part. `toPin` opens a film at
   // that pin's frame.
-  viewMedia(el, toPin = null) {
+  viewMedia(el, toPin = null, { pin = false } = {}) {
+    if (!el) return;
     const section = el.closest('.part');
     const box = section || el.closest('.back-scroll');
     if (!box) return;
@@ -1491,16 +1554,110 @@ export class DeckView {
         inkKey, on: path, pin: { on: path }, fps: +x.dataset.fps || 0,
       };
     });
-    this.openViewerKeepingWords({
+    const view = this.openViewerKeepingWords({
       items: this.viewing,
       at: Math.max(0, all.indexOf(el)),
       start: toPin && toPin.film ? toPin.t : null,
       pins: this.pinsFor(card.id, partId),
+      // A comment on this one picture or film, kept with it, as a spread's item has.
+      comments: this.saysFor(card.id, partId),
       // A drawing on the card's own picture, above its parts, goes on the card's comment.
       ink: this.inkFor(card.id, partId),
       bring: (i, info) => this.offerBring({ ...info, card: card.id, part: partId, path: this.viewing[i] && this.viewing[i].on }),
-      onClose: () => { if (this.partsCard) this.watchPartClips(); else this.playClips(this.topNode(), this.flipped); },
+      onClose: () => { this.saysChanged(card.id); if (this.partsCard) this.watchPartClips(); else this.playClips(this.topNode(), this.flipped); },
     });
+    if (pin && view) view.setPin(true);
+  }
+
+  // ---------- a comment on one picture, film or sound: kept with it, under its path, and sent on its own
+
+  // What the full-screen look needs to keep a comment on each picture or film it shows.
+  saysFor(cardId, partId = null) {
+    const items = this.viewing;
+    const at = i => (items[i] && items[i].on) || '';
+    return {
+      text: i => (((this.s.says[cardId] || {})[sayKey(partId, at(i))]) || {}).text || '',
+      typed: (i, text) => this.sayTyped(cardId, partId, at(i), items[i] && items[i].video ? 'film' : 'picture', text),
+      done: () => { this.sendSays(); this.saysChanged(cardId); },
+    };
+  }
+
+  // Kept at once, like any words, and sent a few seconds after typing stops, and when the box closes.
+  sayTyped(cardId, partId, on, media, text) {
+    const card = this.cards.get(cardId);
+    if (!card || !on) return;
+    const all = this.s.says[cardId] = this.s.says[cardId] || {};
+    const k = sayKey(partId, on);
+    const x = all[k] = all[k] || { part: partId || null, on, media, text: '', sent: '' };
+    x.text = text;
+    x.media = media;
+    x.v = card.version || 1;
+    this.saveNow();
+    clearTimeout(this.sayTimer);
+    this.sayTimer = setTimeout(() => this.sendSays(), PART_SEND_AFTER);
+  }
+
+  sendSays() {
+    clearTimeout(this.sayTimer);
+    let changed = false;
+    for (const [cardId, all] of Object.entries(this.s.says)) {
+      const card = this.cards.get(cardId) || { id: cardId };
+      for (const [k, x] of Object.entries(all)) {
+        if ((x.text || '') === (x.sent || '')) continue;
+        this.send(mediaEvent(card, x), !!(x.text || '').trim());
+        x.sent = x.text || '';
+        this.s.wordsSent[`m:${cardId}/${k}`] = x.sent;
+        changed = true;
+      }
+    }
+    if (changed) this.saveNow();
+  }
+
+  // Each picture, film and sound with a comment is marked on the card's back, and counted beside its pins.
+  saysChanged(cardId) {
+    this.markSays(cardId);
+    this.pinsChanged(cardId);
+  }
+
+  markSays(cardId, node = this.nodes.get(cardId)) {
+    if (!node) return;
+    const all = this.s.says[cardId] || {};
+    node.querySelectorAll('.back .mpicw, .back .clip, .back .sndline').forEach(el => {
+      const part = el.closest('.part');
+      el.classList.toggle('said', !!((all[sayKey(part && part.dataset.part, el.dataset.path)] || {}).text || '').trim());
+    });
+  }
+
+  // A sound has no full-screen look, so its bubble opens a small box under its row, as on a spread.
+  openSoundSay(line) {
+    const card = this.topCard();
+    if (!card || !line) return;
+    this.closeSoundSay();
+    const part = line.closest('.part');
+    const partId = part ? part.dataset.part : null;
+    const box = document.createElement('div');
+    box.className = 'sound-sayer';
+    box.innerHTML = `${padHTML('soundsay', 'Your comment on this sound. Drag down to close.')}<button class="ghostbtn" data-act="soundsaydone">Done</button>`;
+    line.after(box);
+    const pad = box.querySelector('.pad');
+    const on = line.dataset.path;
+    padSet(pad, (((this.s.says[card.id] || {})[sayKey(partId, on)]) || {}).text || '');
+    padReady(pad, text => { this.sayTyped(card.id, partId, on, 'sound', text); line.classList.toggle('said', !!text.trim()); });
+    dragToClose(box, () => pad, dy => { box.style.transform = dy > 0 ? `translateY(${dy * 0.8}px)` : ''; }, () => this.closeSoundSay());
+    this.soundSay = { box, cardId: card.id };
+    line.classList.add('saying');
+    padFocus(pad);
+  }
+
+  closeSoundSay() {
+    const open = this.soundSay;
+    if (!open) return;
+    this.soundSay = null;
+    padBlur(open.box.querySelector('.pad'));
+    if (open.box.previousElementSibling) open.box.previousElementSibling.classList.remove('saying');
+    open.box.remove();
+    this.sendSays();
+    this.saysChanged(open.cardId);
   }
 
   viewOptionPictures(optionId) {
@@ -1512,6 +1669,12 @@ export class DeckView {
       at: Math.max(0, withPics.findIndex(o => o.id === optionId)),
       opener: this.lift,
       pins: this.pinsFor(card.id),
+      // A comment on one option's picture, kept and sent like a spread's item's.
+      comments: {
+        text: i => ((this.s.parts[card.id] || {})[withPics[i].id] || {}).text || '',
+        typed: (i, text) => this.partTyped(card.id, withPics[i].id, text),
+        done: () => this.sendParts(true),
+      },
       picks: {
         isOn: i => this.chosen().includes(withPics[i].id),
         toggle: i => { this.togglePick(this.topId(), withPics[i].id); this.syncOptions(); },
@@ -1526,7 +1689,7 @@ export class DeckView {
     const typing = this.composing;
     if (typing) padBlur(this.comment);
     const after = options.onClose || (() => {});
-    openViewer({ ...options, onClose: () => { if (typing && this.composing) padFocus(this.comment); after(); } });
+    return openViewer({ ...options, onClose: () => { if (typing && this.composing) padFocus(this.comment); after(); } });
   }
 
   // Films on a card's back play while it shows, muted and looping. A tap pauses or plays one.
@@ -1578,7 +1741,7 @@ export class DeckView {
     const card = this.topCard();
     if (!top || !card || !(card.parts || []).length) return;
     const states = this.s.parts[card.id] || {};
-    const pinned = new Set(livePins(this.s, card.id).map(p => p.part));
+    const pinned = new Set([...livePins(this.s, card.id).map(p => p.part), ...liveSays(this.s, card.id).map(x => x.part)]);
     top.querySelectorAll('.pp[data-part]').forEach(row => {
       const st = states[row.dataset.part];
       row.dataset.mark = (st && st.mark) || '';
@@ -1655,7 +1818,7 @@ export class DeckView {
     const el = node && node.querySelector('.parts-count');
     if (!card || !el) return;
     const states = this.s.parts[card.id] || {};
-    const pinned = new Set(livePins(this.s, card.id).map(p => p.part));
+    const pinned = new Set([...livePins(this.s, card.id).map(p => p.part), ...liveSays(this.s, card.id).map(x => x.part)]);
     const said = card.parts.filter(pt => pinned.has(pt.id) || (states[pt.id] && (states[pt.id].mark || (states[pt.id].text || '').trim() || (states[pt.id].photos || []).length))).length;
     el.textContent = said ? `${said} of ${card.parts.length} parts answered` : `${card.parts.length} parts`;
   }
@@ -2013,6 +2176,7 @@ export class DeckView {
     const top = this.topNode();
     if (!top) return;
     if (!on && this.openPart) this.closePartPad();
+    if (!on) this.closeSoundSay();
     // Sounds are on the back. Turning to it finds any not yet found, so a tap can start one at once.
     if (on) readySounds(top, el => pictureUrl(this.pack.id, el.dataset.path));
     else stopSound();
@@ -2392,7 +2556,7 @@ export class DeckView {
       const cls = [c.rarity || 'common', c.id === cur ? 'current' : '', fresher ? 'answered' : '', c.handled ? 'handled' : ''].join(' ');
       return `<button class="tile ${cls}" data-act="jump" data-id="${esc(c.id)}">
         <span class="tile-title">${c.handled ? `<i class="tile-tick">${icon('check')}</i>` : ''}${esc(c.title || c.text)}</span>
-        <span class="tile-state ${fresher ? 'dir-' + a.swipe : ''}">${esc(stamp) || (c.handled ? 'Handled' : 'Not answered')}${a && a.comment ? `<i>${icon('message-square-text')}</i>` : ''}${livePins(this.s, c.id).length ? `<i class="tile-pins">${icon('pin')}</i>` : ''}</span>
+        <span class="tile-state ${fresher ? 'dir-' + a.swipe : ''}">${esc(stamp) || (c.handled ? 'Handled' : 'Not answered')}${(a && a.comment) || liveSays(this.s, c.id).length ? `<i>${icon('message-square-text')}</i>` : ''}${livePins(this.s, c.id).length ? `<i class="tile-pins">${icon('pin')}</i>` : ''}</span>
       </button>`;
     }).join('');
     const sum = deckSummary(this.deck, this.s);
@@ -2532,6 +2696,7 @@ export class DeckView {
       next.notesPhotosSent = this.s.notesPhotosSent;
       next.drawnOn = this.s.drawnOn;
       next.pins = this.s.pins; // a pin is a point and words, not a swipe, so it stays as it was said
+      next.says = this.s.says; // and so does a comment on one picture
       // Words on parts stay, as they were said. Their marks were answers, so they go with the swipes.
       for (const [cardId, parts] of Object.entries(this.s.parts)) {
         for (const [partId, st] of Object.entries(parts)) {
@@ -2594,6 +2759,7 @@ export class DeckView {
     const sum = deckSummary(this.deck, this.s);
     this.s.verdict = which;
     this.s.verdictSig = deckSig(this.deck);
+    this.s.verdictAt = Date.now();
     this.send({ type: 'deck', verdict: which, tally, answered: sum.total - sum.left, total: sum.total }, false);
     Promise.resolve(this.saveNow()).then(() => this.onVerdict(which));
   }

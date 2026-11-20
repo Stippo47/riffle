@@ -10,6 +10,18 @@ Riffle is a phone web app for answering questions and reading reports one card a
 - **Deck:** a run of cards.
 - **Card:** one question, report or design, seen one at a time.
 
+## The first screen
+
+Every pack is a row with its icon, its name and what's left. The order is theirs: a pack held still for a moment lifts, follows the finger, and the others make room; let go, it stays there. A quick drag still scrolls the list, and a plain tap still opens the pack. The order is kept on the phone. A pack with no place yet, a new project, goes first.
+
+**Icons.** A pack's icon is the writer's (`riffle pack --icon`, or one picked by its name when the pack is made). Tapping the icon on the pack's page offers every icon the packs and topics already use, and the one picked stays on this phone. "Use the writer's icon" puts theirs back.
+
+**Reload.** The round arrows beside Search check every pack for new and changed decks now, as opening the app does. The arrows turn while it checks, the line under the title says so, and afterwards it says when the packs were last checked.
+
+**Send, Working and Done.** Once everything in a pack is answered, its row has a **Send** button, and so do its page and the "cleared" screen. Send wakes the pack's writers at once, as Deal in now does for one deck, and the row says **Sent**. When a writer picks it up (`riffle started`), the row says **Working**, since when, and the pack's page says on what. When the writer has done what it can and is waiting on them again (`riffle wait`, or `riffle started --stop`), it says **Done**. A writer that says Working and isn't heard from for three hours, from any send to the pack, shows **Last heard** and when, so a writer that stopped never leaves a pack saying Working. Working shows with what's left too, while they answer. The writers' side of this is in format.md, under order.json.
+
+**Done decks tidy away.** A deck finished with Deck's done three days ago moves to Archived by itself, as if Archive had been pressed, and the writer hears so. Bring back undoes it, and a deck that was ever archived or brought back is never tidied away again. Decks never opened are never archived.
+
 ## A pack's page
 
 **The order.** A row of four: Suggested, Importance, Newest and Topics. The choice is kept.
@@ -247,7 +259,7 @@ Any picture or film opened full screen can be drawn on: on a card's back, a part
 
 A pin is "this spot here": a point on a picture, with a few words. It's the same on a still picture and on a film, where it also belongs to one frame. It's for a fault that's easier to point at than to describe. The pen is still there for circling and arrows.
 
-Any picture or film opened full screen has a **Pin** button beside Draw: on a card's back, a part, an option or a board.
+Any picture or film opened full screen has a **Pin** button beside Draw: on a card's back, a part, an option or a board. On a card's back and in each part, every picture and film also has a small pin button in its corner, which opens it full screen with Pin already on.
 
 - **Dropping one.** Pin turns pinning on, which pauses a film. A tap on the picture drops a numbered ring on that spot, and a box opens under the picture with the keyboard up, for a few words. On a film it's dropped on the frame showing, so the way is to step to the frame first and then tap. Tapping a film that's playing stops it on that frame and pins it.
 - **Its words** are kept as they're typed, like a comment's. Done, or a drag down on the box, closes it. Words aren't needed: a pin alone says "here".
@@ -262,9 +274,15 @@ Any picture or film opened full screen has a **Pin** button beside Draw: on a ca
 
 The writer gets the card, the part, the picture or film, the time and frame, the spot as a share of the width and height, and the words. `riffle pins` turns each into the exact frame with a ring on the spot and a close-up around it.
 
+## A comment on one picture, film or sound
+
+Anywhere a picture or film is opened full screen (from a card's back, a part, an option, a board, or a chip in a comment), a speech bubble sits beside Pin, as it does on a board's item. It opens the same small box under the picture, with the keyboard up. The words are kept with that picture or film, not put in the card's comment: they're kept as they're typed, and go a few seconds after typing stops and when the box closes. A sound on a card's back or a part has the same bubble beside its play button, which opens the box under it; a sound on a board has it in the strip under the grid, as before.
+
+A picture or film with a comment has a blue edge on the card's back, and a sound's bubble a blue dot. The card's back, and each part, counts them beside its pins ("2 pins · 1 comment"), and tapping that opens the first. A part with one counts as answered. The writer gets the card, the part, which picture, film or sound, and the words, as a `media` event. Pins are spots on the same picture, so each picture or film carries one comment and any number of pins. Bring to comment still puts a link in the card's comment, for when the words belong there.
+
 ## Parts
 
-A card in parts shows the titles of its first four parts on its face, each with its mark once it has one, and a dot if it has words. "Tap to read the 3 parts" says how many. A tap turns it over, like any card with more on its back, even mid-comment, and its back holds everything: the card's own words, details, pictures, films and sounds on top, then how many parts have been answered, then each part as a section with its title, words, pictures, films and sounds. While a card in parts is turned over, its back takes the room the buttons had. A tap on a part's title on the face turns it over at that part.
+A card in parts shows the titles of its first four parts on its face, each with its mark once it has one, and a dot if it has words. "Tap to read the 3 parts, with 4 pictures and 2 videos" says how many, and what pictures, films and sounds the card and its parts hold, so none are missed. A tap turns it over, like any card with more on its back, even mid-comment, and its back holds everything: the card's own words, details, pictures, films and sounds on top, then how many parts have been answered, then each part as a section with its title, words, pictures, films and sounds. While a card in parts is turned over, its back takes the room the buttons had. A tap on a part's title on the face turns it over at that part.
 
 Under each part are three marks in the card's own words (Good, Problem, Decent on a report), and a speech bubble. A mark goes as soon as it's tapped, and tapping it again takes it back. The bubble opens a comment box under that part only, with its own photo button. Its words go a few seconds after typing stops, and its new pictures when it closes, with Done or a drag down. A part's words keep the same protection as a comment. The card's own swipe and comment are separate from all of this. A second try of the card clears its parts' marks, and keeps their words.
 

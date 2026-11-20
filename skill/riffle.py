@@ -6,6 +6,7 @@ Everything goes through a local clone of the private data repo, with plain git. 
 import argparse
 import bisect
 import getpass
+import hashlib
 import json
 import os
 import pathlib
@@ -165,6 +166,8 @@ def in_batches(names, limit=6000):
 
 def publish(message, *paths):
     """Commits only these paths and pushes. Answers can land at any moment, so a rejected push pulls and tries once more."""
+    paths = list(paths)
+    paths += [p for p in keep_working(paths) if p not in paths]  # a writer marked Working is heard from
     names = [os.path.relpath(p, DATA) for p in paths]  # relative, as a big board can list a lot of them
     for b in in_batches(names):
         git('add', '--', *b)
@@ -285,6 +288,8 @@ def face_height(c, st):
         h += st['line'] * 1.3 + st['linem']
     if c.get('details') or c.get('images') or c.get('videos') or c.get('audio') or parts:
         h += st['line'] * 1.3 + st['linem']
+    if parts and kind not in ('options', 'board') and any(x.get('images') or x.get('videos') or x.get('audio') for x in [c, *parts]):
+        h += st['line'] * 1.3  # "Tap to read the 3 parts, with 4 pictures and 2 videos" can take two lines
     return h
 
 
@@ -905,6 +910,21 @@ def icon_text(name):
     return hits[0].read_text(encoding='utf-8').replace('<path d="M0 0h512v512H0z"/>', '').strip()
 
 
+def icon_for(words):
+    """A sensible icon for a pack that has none: the library's icon named after a word of its title, or one
+    whose name holds it, or else a card. Never fetches the library just for this, and never stops a command for
+    want of one. Returns (icon, its name)."""
+    if not ICON_LIBRARY.exists():
+        return 'card-random', 'card-random'
+    found = sorted(ICON_LIBRARY.glob('*/*.svg'))
+    for w in re.findall(r'[a-z]{3,}', words.lower()):
+        for stem in dict.fromkeys((w, w[:-1] if w.endswith('s') else w)):
+            hits = [p for p in found if p.stem == stem] or [p for p in found if stem in p.stem.split('-')]
+            if hits:
+                return icon_text(hits[0].stem), hits[0].stem
+    return 'card-random', 'card-random'
+
+
 # ---------- commands: making things
 
 def cmd_pack(a):
@@ -914,6 +934,9 @@ def cmd_pack(a):
     pack['title'] = a.title or pack.get('title') or a.id
     if a.color: pack['color'] = a.color
     if a.icon: pack['icon'] = icon_text(a.icon)
+    elif not pack.get('icon'):  # every pack shows an icon on their first screen
+        pack['icon'], name = icon_for(f'{pack["title"]} {a.id}')
+        print(f'  icon: {name} (change it with --icon, and see riffle icons <word>)')
     if a.order is not None: pack['order'] = a.order
     save_json(path, pack)
     publish(f'Pack: {pack["title"]}', path)
@@ -1076,7 +1099,7 @@ def summarise(events):
     decks, thoughts, thought_drafts = {}, {}, {}
 
     def deck(e):
-        return decks.setdefault((e.get('pack'), e.get('deck')), {'answers': {}, 'drafts': {}, 'parts': {}, 'pins': {}, 'notes': None, 'verdict': None, 'earlier': [], 'resets': [], 'topic': e.get('topic')})
+        return decks.setdefault((e.get('pack'), e.get('deck')), {'answers': {}, 'drafts': {}, 'parts': {}, 'pins': {}, 'media': {}, 'notes': None, 'verdict': None, 'earlier': [], 'resets': [], 'topic': e.get('topic')})
     for e in events:
         t = e.get('type')
         if t == 'answer' and e.get('eid') not in undone:
@@ -1099,8 +1122,12 @@ def summarise(events):
             deck(e)['notes'] = e
         elif t == 'deck':
             deck(e)['verdict'] = e
+        elif t == 'wake' and not e.get('deck'):
+            SENDS[e.get('pack')] = e  # Send on a whole pack they had answered all of
         elif t == 'wake':
             deck(e)['wake'] = e
+        elif t == 'media':  # what's said about one picture, film or sound: the latest for each stands
+            deck(e)['media'].setdefault(e.get('card'), {})[(e.get('part') or '', e.get('on'))] = e
         elif t == 'deck-reset':
             d = deck(e)
             d['earlier'].extend(a for a in d['answers'].values() if a.get('comment'))
@@ -1119,6 +1146,7 @@ def summarise(events):
 
 
 ARCHIVES = {}  # the latest archive or bring-back from the phone, per deck, filled in by summarise
+SENDS = {}  # the latest Send on a whole pack, per pack, filled in by summarise
 
 
 def card_in(pack, deck_id, card_id):
@@ -1205,6 +1233,18 @@ def pin_line(e):
         return f'      pin {e.get("n")}: taken off again ({pin_where(e)})'
     said = f'"{readable(e["note"])}"' if e.get('note') else 'no words'
     return f'      pin {e.get("n")} on {pin_where(e)}: {said}'
+
+
+MEDIA_WORD = {'film': 'film', 'sound': 'sound'}
+
+
+def media_line(e):
+    """A comment on one picture, film or sound of a card or a part, kept with it rather than in the card's words."""
+    where = f'{MEDIA_WORD.get(e.get("media"), "picture")} {e.get("on")}'
+    if e.get('part'):
+        where += f' in part {e["part"]} ({e.get("partTitle") or e["part"]})'
+    said = f'"{readable(e["comment"])}"' if e.get('comment') else 'their comment taken back'
+    return f'      comment on {where}: {said}'
 
 
 def pin_order(card):
@@ -1295,14 +1335,17 @@ def cmd_answers(a):
                 parts_here = [p for p in d['parts'].get(card_id, {}).values() if p in shown]
                 # One they took off again is only worth a line if you had already read it.
                 pins_here = [p for p in d['pins'].get(card_id, {}).values() if p in shown and (not p.get('removed') or (pack, deck_id, p.get('pin')) in pins_read)]
-                if parts_here or pins_here:
+                media_here = [m for m in d['media'].get(card_id, {}).values() if m in shown]
+                if parts_here or pins_here or media_here:
                     if card_id not in d['answers'] and card_id not in d['drafts']:
-                        which = 'pins' if not parts_here else 'items' if (card or {}).get('kind') == 'board' or parts_here[0].get('item') else 'parts'
-                        first = (parts_here or pins_here)[0]
+                        which = ('pictures' if media_here and not pins_here else 'pins') if not parts_here else 'items' if (card or {}).get('kind') == 'board' or parts_here[0].get('item') else 'parts'
+                        first = (parts_here or pins_here or media_here)[0]
                         print(f'  {card_id} ({(card or {}).get("title") or first.get("title") or card_id}): not swiped yet. On its {which}:')
                     order = [p.get('id') for p in [*((card or {}).get('parts') or []), *((card or {}).get('items') or [])]]
                     for p in sorted(parts_here, key=lambda e: order.index(e.get('part')) if e.get('part') in order else 99):
                         print(part_line(p, card))
+                    for m in sorted(media_here, key=pin_order(card)):
+                        print(media_line(m))
                     for p in sorted(pins_here, key=pin_order(card)):
                         print(pin_line(p))
                         if not p.get('removed'):
@@ -1325,12 +1368,19 @@ def cmd_answers(a):
                 w = d['wake']
                 print(f'  DEALT IN: start now on what is answered ({w.get("answered")} of {w.get("total")}), the deck is not finished')
             if d.get('archive') and d['archive'] in shown:
-                print(f'  They {"archived this deck" if d["archive"].get("archived") else "brought this deck back from the archive"}.')
+                if d['archive'].get('auto'):
+                    print("  Their phone tidied this deck away into Archived, three days after Deck's done.")
+                else:
+                    print(f'  They {"archived this deck" if d["archive"].get("archived") else "brought this deck back from the archive"}.')
             owed_now = [c for c in (file or {}).get('cards', []) if not c.get('handled') and not (d['answers'].get(c['id']) and d['answers'][c['id']].get('cardVersion', 1) >= c.get('version', 1))]
             if owed_now and len(owed_now) < len((file or {}).get('cards', [])):
                 print(f'  Still owed: {", ".join(c["id"] for c in owed_now)}')
             if (pack, deck_id) in pinned:
                 print(f'  Pins point at a spot. To see each one, its frame and a close-up: riffle pins --pack {pack} --deck {deck_id} --out <folder>')
+        for pack, e in sorted(SENDS.items(), key=lambda kv: str(kv[0])) if not a.deck else []:
+            if e in shown:
+                print(f'\n{pack}: SENT at {str(e.get("at"))[:16]}: they answered everything in the pack and pressed Send ({e.get("answered", "?")} cards).')
+                print(f'  Start on it now. Run riffle started --pack {pack} --note "what you start on" first: their pack shows Working. When you have nothing left but to wait, riffle wait shows it Done.')
         for pack, items in sorted(thoughts.items(), key=lambda kv: str(kv[0])) if not a.deck else []:
             new = [t for t in items if t in shown]
             if new:
@@ -1689,6 +1739,77 @@ def load_order(pack):
     return o
 
 
+# ---------- Working and Done: what their phone shows on a pack while a writer has it
+
+WORK_STALE = 3 * 3600  # a Working with nothing from that writer for this long shows "Last heard" instead
+WORK_KEEP_DAYS = 7     # an entry this old is dropped the next time the file is written
+WORK_WORDS = {'working': 'Working', 'done': 'Done'}
+
+
+def writer_key():
+    """Which writer this is: the project folder it runs in, as a short hash, so two sessions in two worktrees
+    are two writers, and no folder name goes into the repo. RIFFLE_WRITER names one by hand."""
+    if os.environ.get('RIFFLE_WRITER'):
+        return os.environ['RIFFLE_WRITER']
+    here = pathlib.Path.cwd()
+    r = subprocess.run(['git', 'rev-parse', '--show-toplevel'], cwd=here, capture_output=True, text=True)
+    top = r.stdout.strip() if r.returncode == 0 and r.stdout.strip() else str(here)
+    return 'w-' + hashlib.sha1(os.path.normcase(os.path.abspath(top)).encode('utf-8')).hexdigest()[:8]
+
+
+def set_work(o, state, note=None, decks=None):
+    """Puts this writer's Working or Done into a pack's order.json (`o`, loaded). Says whether it changed.
+    `since` is when the work began; `at` is when the writer was last heard from, which any send refreshes."""
+    work = o.setdefault('work', {})
+    now_s = seconds(now())
+    for k in [k for k, v in work.items() if now_s - seconds((v or {}).get('at')) > WORK_KEEP_DAYS * 86400]:
+        work.pop(k)
+    key = writer_key()
+    old = work.get(key) or {}
+    if state == 'done' and old.get('state') == 'done' and not note:
+        return False
+    entry = {'state': state, 'since': old.get('since') if state == old.get('state') and not note and old.get('since') else now(), 'at': now()}
+    if note:
+        entry['note'] = note
+    elif state == old.get('state') and old.get('note'):
+        entry['note'] = old['note']
+    if decks:
+        entry['decks'] = sorted(decks)
+    work[key] = entry
+    return True
+
+
+def keep_working(paths):
+    """A writer marked Working is heard from whenever it sends anything to the pack, so a long job doesn't
+    read as gone quiet. Returns order.json paths to send along, already written."""
+    out, packs_here = [], set()
+    for p in paths:
+        bits = pathlib.Path(os.path.relpath(p, DATA)).parts
+        if len(bits) > 2 and bits[0] == 'packs':
+            packs_here.add(bits[1])
+    for pack in sorted(packs_here):
+        if not (DATA / 'packs' / pack / 'pack.json').exists():
+            continue
+        o = load_order(pack)
+        mine = (o.get('work') or {}).get(writer_key())
+        if not mine or mine.get('state') != 'working' or seconds(now()) - seconds(mine.get('at')) < 300:
+            continue
+        mine['at'] = now()
+        save_json(order_path(pack), o)
+        out.append(order_path(pack))
+    return out
+
+
+def work_words(entry, now_s=None):
+    """One writer's line for status: Working since …, Done at …, or gone quiet."""
+    now_s = now_s or seconds(now())
+    if entry.get('state') == 'working' and now_s - seconds(entry.get('at')) > WORK_STALE:
+        return f'said Working at {str(entry.get("since"))[:16]}, last heard {str(entry.get("at"))[:16]}: shows as gone quiet'
+    if entry.get('state') == 'working':
+        return f'Working since {str(entry.get("since"))[:16]}' + (f': {entry["note"]}' if entry.get('note') else '')
+    return f'Done at {str(entry.get("at"))[:16]}, waiting on them'
+
+
 def deck_meta(pack, deck_id, deck=None, order=None):
     """What stands for a deck: order.json first, then the deck's own file."""
     deck = deck if deck is not None else (decks_of(pack).get(deck_id) or {})
@@ -1896,6 +2017,11 @@ def cmd_status(a):
             print(f'  A WAIT FIRED at {w.get("at")} and no writer has said it started: {"; ".join(w.get("reasons", []))}')
             print('  Read the answers, then riffle started (or wait again).')
         order = load_order(pack)
+        me = writer_key()
+        for key, entry in sorted((order.get('work') or {}).items(), key=lambda kv: str(kv[1].get('at'))):
+            print(f'  {"You" if key == me else "A writer"}: {work_words(entry)}')
+        if SENDS.get(pack):
+            print(f'  They pressed Send on the whole pack at {str(SENDS[pack].get("at"))[:16]}.')
         for deck_id, deck in decks_of(pack).items():
             d = decks.get((pack, deck_id), {'answers': {}, 'verdict': None})
             cards = deck.get('cards', [])
@@ -1969,7 +2095,7 @@ def cmd_tidy(a):
         if again:
             lines += ['  Marked done, with a card owed again since (look before archiving):', *again]
         if untouched:
-            lines += [f'  Never touched, {a.days:g} days or more (yours to ask about, or archive):', *[x for _, x in sorted(untouched, reverse=True)]]
+            lines += [f'  Never touched, {a.days:g} days or more (they want these kept: never archive them, they just have not got to them):', *[x for _, x in sorted(untouched, reverse=True)]]
         if waiting:
             lines += ['  Thoughts with no answer (riffle thought):', *[f'    {t["id"]} ({str(t.get("at", ""))[:10]}): "{readable(t.get("text", ""))[:120]}"' for t in waiting]]
         if unread_n:
@@ -2262,9 +2388,12 @@ def wait_status(events, pack, decks, topics, on, is_fresh, deck_files, now_s, qu
     mine = [e for e in events if e.get('pack') == pack and not e.get('demo')]
     fresh = [e for e in mine if is_fresh(e)]
     in_scope = lambda e: (not decks or e.get('deck') in decks) and (not topics or e.get('topic') in topics)
-    forced = [e for e in fresh if e.get('type') == 'wake' and in_scope(e) and 'deck' in on]
+    # Send, on a pack they've answered all of, has no deck: it wakes every writer waiting on the pack.
+    forced = [e for e in fresh if e.get('type') == 'wake' and (not e.get('deck') or (in_scope(e) and 'deck' in on))]
     if forced:
         e = forced[-1]
+        if not e.get('deck'):
+            return True, [f"Send: they answered everything in the pack and sent it ({e.get('answered', '?')} cards)"], [], 0
         return True, [f"deck {e.get('deck')}: dealt in now ({e.get('answered', '?')} of {e.get('total', '?')} answered)"], [], 0
     reasons, needed = [], []
     if 'deck' in on:
@@ -2285,13 +2414,12 @@ def wait_status(events, pack, decks, topics, on, is_fresh, deck_files, now_s, qu
 
 
 def mark_with(pack, decks, together):
-    """Tells the phone which decks a writer needs together, so a finished one can say what it still waits for."""
-    if len(decks) < 2:
-        return
+    """Tells the phone which decks a writer needs together, so a finished one can say what it still waits for.
+    A writer that waits has nothing left but to wait, so the pack also shows Done for it (see set_work)."""
     sync()
     o = load_order(pack)
-    changed = False
-    for d in decks:
+    changed = set_work(o, 'done') if together else False
+    for d in decks if len(decks) > 1 else []:
         entry = o['decks'].setdefault(d, {})
         want = sorted(x for x in decks if x != d) if together else None
         if entry.get('with') != want:
@@ -2304,7 +2432,7 @@ def mark_with(pack, decks, together):
             o['decks'].pop(d, None)
     if changed:
         save_json(order_path(pack), o)
-        publish(f'Waiting in {pack} on {", ".join(sorted(decks))} together', order_path(pack))
+        publish(f'Waiting in {pack}' + (f' on {", ".join(sorted(decks))}' + (' together' if len(decks) > 1 else '') if decks else ''), order_path(pack))
 
 
 def woke_path(pack):
@@ -2391,7 +2519,8 @@ def cmd_wait(a):
                 print(f'  - {r}')
             print(f'Read them with: riffle answers --pack {pack}' + (' and riffle mine' if extra else ''))
             flags = ''.join(f' --deck {d}' for d in sorted(decks))
-            print(f'If what they said settles your direction, run: riffle started{flags} --note "what you start on"  (it tells their phone).')
+            print(f'If what they said settles your direction, run: riffle started{flags} --note "what you start on"  (it tells their phone, and the pack shows Working).')
+            print('When you have nothing left but to wait for them, run riffle wait again (or riffle started --stop): the pack shows Done.')
             print('If a card that decides the direction is still open, wait again instead, and tell them why with riffle notify.')
             sys.exit(0)
         if time.time() >= give_up:
@@ -2410,24 +2539,26 @@ def cmd_started(a):
     for d in decks:
         need_deck(pack, d)
     sync()
-    if decks:
-        o = load_order(pack)
-        for d in decks:
-            entry = o['decks'].setdefault(d, {})
-            tags = [t for t in (entry.get('tags') or []) if t != 'waiting']
-            if a.stop:
-                tags = [t for t in tags if t != 'working']
-            elif 'working' not in tags:
-                tags.append('working')
-            if tags:
-                entry['tags'] = tags
-            else:
-                entry.pop('tags', None)
-            entry.pop('with', None)
-            if not entry:
-                o['decks'].pop(d, None)
-        save_json(order_path(pack), o)
-        publish(f'{"Finished" if a.stop else "Started"} in {pack}: {", ".join(decks)}', order_path(pack))
+    o = load_order(pack)
+    for d in decks:
+        entry = o['decks'].setdefault(d, {})
+        tags = [t for t in (entry.get('tags') or []) if t != 'waiting']
+        if a.stop:
+            tags = [t for t in tags if t != 'working']
+        elif 'working' not in tags:
+            tags.append('working')
+        if tags:
+            entry['tags'] = tags
+        else:
+            entry.pop('tags', None)
+        entry.pop('with', None)
+        if not entry:
+            o['decks'].pop(d, None)
+    # The pack on their phone says Working from now, or Done: see set_work.
+    set_work(o, 'done' if a.stop else 'working', note=a.note, decks=decks)
+    save_json(order_path(pack), o)
+    publish(f'{"Finished" if a.stop else "Started"} in {pack}' + (f': {", ".join(decks)}' if decks else ''), order_path(pack))
+    print(f'  their phone shows {pack} as {"Done" if a.stop else "Working"}')
     woke_path(pack).unlink(missing_ok=True)
     if a.quiet:
         return
